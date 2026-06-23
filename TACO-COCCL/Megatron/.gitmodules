@@ -1,0 +1,30 @@
+[submodule "backends/megatron/Megatron-LM-240126"]
+	path = backends/megatron/Megatron-LM-240126
+	url = https://github.com/NVIDIA/Megatron-LM.git
+[submodule "backends/megatron/Megatron-LM-240405"]
+	path = backends/megatron/Megatron-LM-240405
+	url = https://github.com/NVIDIA/Megatron-LM.git
+[submodule "backends/megatron/Megatron-LM-241113"]
+	path = backends/megatron/Megatron-LM-241113
+	url = https://github.com/NVIDIA/Megatron-LM.git
+[submodule "backends/megatron/Megatron-LM-250217"]
+	path = backends/megatron/Megatron-LM-250217
+	url = https://github.com/NVIDIA/Megatron-LM.git
+[submodule "backends/megatron/Megatron-LM-250328"]
+	path = backends/megatron/Megatron-LM-250328
+	url = https://github.com/NVIDIA/Megatron-LM.git
+[submodule "backends/megatron/PAI-Megatron-LM-240718"]
+	path = backends/megatron/PAI-Megatron-LM-240718
+	url = https://github.com/NVIDIA/Megatron-LM.git
+[submodule "backends/megatron/Megatron-LM-250624"]
+	path = backends/megatron/Megatron-LM-250624
+	url = https://github.com/NVIDIA/Megatron-LM.git
+[submodule "backends/rl/ChatLearn"]
+	path = backends/rl/ChatLearn
+	url = https://github.com/alibaba/ChatLearn.git
+[submodule "backends/rl/verl"]
+	path = backends/rl/verl
+	url = https://github.com/volcengine/verl.git
+[submodule "backends/megatron/Megatron-LM-250908"]
+	path = backends/megatron/Megatron-LM-250908
+	url = https://github.com/NVIDIA/Megatron-LM.git

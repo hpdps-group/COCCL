@@ -1,0 +1,2040 @@
+IAP-A800:64713:64713 [0] NCCL INFO Bootstrap : Using ens11f1:10.0.242.105<0>
+IAP-A800:64713:64713 [0] NCCL INFO NET/Plugin: No plugin found (libnccl-net.so)
+IAP-A800:64713:64713 [0] NCCL INFO NET/Plugin: Plugin load returned 2 : dlopen hook: 'libnccl-net.so': cannot open shared object file: No such file or directory : when loading libnccl-net.so
+IAP-A800:64713:64713 [0] NCCL INFO NET/Plugin: Using internal network plugin.
+IAP-A800:64713:64713 [0] NCCL INFO cudaDriverVersion 12070
+IAP-A800:64713:64713 [7] NCCL INFO NCCL version 2.21.5+cuda12.6
+IAP-A800:64713:64751 [5] NCCL INFO Failed to open libibverbs.so[.1]
+IAP-A800:64713:64751 [5] NCCL INFO NET/Socket : Using [0]ens11f1:10.0.242.105<0> [1]veth2e94d11:fe80::d4a1:1eff:fe42:e4c3%veth2e94d11<0> [2]vethf8b03a8:fe80::149a:c2ff:fe4a:36a7%vethf8b03a8<0> [3]veth0d0ceeb:fe80::148f:37ff:fec6:1eb1%veth0d0ceeb<0> [4]veth247537b:fe80::38b5:a3ff:fe79:3a2f%veth247537b<0> [5]veth71a4ec2:fe80::2446:cbff:fef3:9766%veth71a4ec2<0> [6]veth66497d1:fe80::64b1:5cff:fe32:9f2b%veth66497d1<0> [7]vethcbfeaa8:fe80::5cac:d4ff:fed3:9bb4%vethcbfeaa8<0> [8]veth0bf972f:fe80::10d6:ff:fe98:8928%veth0bf972f<0> [9]veth99e123c:fe80::52:36ff:fe3e:ca0d%veth99e123c<0>
+IAP-A800:64713:64751 [5] NCCL INFO Using non-device net plugin version 0
+IAP-A800:64713:64751 [5] NCCL INFO Using network Socket
+IAP-A800:64713:64750 [4] NCCL INFO Using non-device net plugin version 0
+IAP-A800:64713:64750 [4] NCCL INFO Using network Socket
+IAP-A800:64713:64746 [0] NCCL INFO Using non-device net plugin version 0
+IAP-A800:64713:64746 [0] NCCL INFO Using network Socket
+IAP-A800:64713:64753 [7] NCCL INFO Using non-device net plugin version 0
+IAP-A800:64713:64753 [7] NCCL INFO Using network Socket
+IAP-A800:64713:64748 [2] NCCL INFO Using non-device net plugin version 0
+IAP-A800:64713:64748 [2] NCCL INFO Using network Socket
+IAP-A800:64713:64752 [6] NCCL INFO Using non-device net plugin version 0
+IAP-A800:64713:64752 [6] NCCL INFO Using network Socket
+IAP-A800:64713:64749 [3] NCCL INFO Using non-device net plugin version 0
+IAP-A800:64713:64749 [3] NCCL INFO Using network Socket
+IAP-A800:64713:64747 [1] NCCL INFO Using non-device net plugin version 0
+IAP-A800:64713:64747 [1] NCCL INFO Using network Socket
+IAP-A800:64713:64751 [5] NCCL INFO ncclCommInitRank comm 0x5faa21326670 rank 5 nranks 8 cudaDev 5 nvmlDev 5 busId b1000 commId 0x84892302aee8fceb - Init START
+IAP-A800:64713:64747 [1] NCCL INFO ncclCommInitRank comm 0x5faa2130a280 rank 1 nranks 8 cudaDev 1 nvmlDev 1 busId 42000 commId 0x84892302aee8fceb - Init START
+IAP-A800:64713:64748 [2] NCCL INFO ncclCommInitRank comm 0x5faa213113d0 rank 2 nranks 8 cudaDev 2 nvmlDev 2 busId 61000 commId 0x84892302aee8fceb - Init START
+IAP-A800:64713:64753 [7] NCCL INFO ncclCommInitRank comm 0x5faa21334830 rank 7 nranks 8 cudaDev 7 nvmlDev 7 busId d3000 commId 0x84892302aee8fceb - Init START
+IAP-A800:64713:64749 [3] NCCL INFO ncclCommInitRank comm 0x5faa213184b0 rank 3 nranks 8 cudaDev 3 nvmlDev 3 busId 67000 commId 0x84892302aee8fceb - Init START
+IAP-A800:64713:64752 [6] NCCL INFO ncclCommInitRank comm 0x5faa2132d750 rank 6 nranks 8 cudaDev 6 nvmlDev 6 busId d0000 commId 0x84892302aee8fceb - Init START
+IAP-A800:64713:64750 [4] NCCL INFO ncclCommInitRank comm 0x5faa2131f590 rank 4 nranks 8 cudaDev 4 nvmlDev 4 busId ad000 commId 0x84892302aee8fceb - Init START
+IAP-A800:64713:64746 [0] NCCL INFO ncclCommInitRank comm 0x5faa212ff8b0 rank 0 nranks 8 cudaDev 0 nvmlDev 0 busId 3d000 commId 0x84892302aee8fceb - Init START
+IAP-A800:64713:64751 [5] NCCL INFO Setting affinity for GPU 5 to ffffffff,00000000,ffffffff,00000000
+IAP-A800:64713:64751 [5] NCCL INFO NVLS multicast support is not available on dev 5
+IAP-A800:64713:64753 [7] NCCL INFO Setting affinity for GPU 7 to ffffffff,00000000,ffffffff,00000000
+IAP-A800:64713:64753 [7] NCCL INFO NVLS multicast support is not available on dev 7
+IAP-A800:64713:64747 [1] NCCL INFO Setting affinity for GPU 1 to ffffffff,00000000,ffffffff
+IAP-A800:64713:64747 [1] NCCL INFO NVLS multicast support is not available on dev 1
+IAP-A800:64713:64748 [2] NCCL INFO Setting affinity for GPU 2 to ffffffff,00000000,ffffffff
+IAP-A800:64713:64748 [2] NCCL INFO NVLS multicast support is not available on dev 2
+IAP-A800:64713:64746 [0] NCCL INFO Setting affinity for GPU 0 to ffffffff,00000000,ffffffff
+IAP-A800:64713:64746 [0] NCCL INFO NVLS multicast support is not available on dev 0
+IAP-A800:64713:64750 [4] NCCL INFO Setting affinity for GPU 4 to ffffffff,00000000,ffffffff,00000000
+IAP-A800:64713:64750 [4] NCCL INFO NVLS multicast support is not available on dev 4
+IAP-A800:64713:64749 [3] NCCL INFO Setting affinity for GPU 3 to ffffffff,00000000,ffffffff
+IAP-A800:64713:64749 [3] NCCL INFO NVLS multicast support is not available on dev 3
+IAP-A800:64713:64752 [6] NCCL INFO Setting affinity for GPU 6 to ffffffff,00000000,ffffffff,00000000
+IAP-A800:64713:64752 [6] NCCL INFO NVLS multicast support is not available on dev 6
+IAP-A800:64713:64747 [1] NCCL INFO comm 0x5faa2130a280 rank 1 nRanks 8 nNodes 1 localRanks 8 localRank 1 MNNVL 0
+IAP-A800:64713:64751 [5] NCCL INFO comm 0x5faa21326670 rank 5 nRanks 8 nNodes 1 localRanks 8 localRank 5 MNNVL 0
+IAP-A800:64713:64753 [7] NCCL INFO comm 0x5faa21334830 rank 7 nRanks 8 nNodes 1 localRanks 8 localRank 7 MNNVL 0
+IAP-A800:64713:64748 [2] NCCL INFO comm 0x5faa213113d0 rank 2 nRanks 8 nNodes 1 localRanks 8 localRank 2 MNNVL 0
+IAP-A800:64713:64749 [3] NCCL INFO comm 0x5faa213184b0 rank 3 nRanks 8 nNodes 1 localRanks 8 localRank 3 MNNVL 0
+IAP-A800:64713:64746 [0] NCCL INFO comm 0x5faa212ff8b0 rank 0 nRanks 8 nNodes 1 localRanks 8 localRank 0 MNNVL 0
+IAP-A800:64713:64750 [4] NCCL INFO comm 0x5faa2131f590 rank 4 nRanks 8 nNodes 1 localRanks 8 localRank 4 MNNVL 0
+IAP-A800:64713:64751 [5] NCCL INFO Trees [0] 6/-1/-1->5->4 [1] 6/-1/-1->5->4 [2] 6/-1/-1->5->4 [3] 6/-1/-1->5->4 [4] 6/-1/-1->5->4 [5] 6/-1/-1->5->4 [6] 6/-1/-1->5->4 [7] 6/-1/-1->5->4 [8] 6/-1/-1->5->4 [9] 6/-1/-1->5->4 [10] 6/-1/-1->5->4 [11] 6/-1/-1->5->4 [12] 6/-1/-1->5->4 [13] 6/-1/-1->5->4 [14] 6/-1/-1->5->4 [15] 6/-1/-1->5->4
+IAP-A800:64713:64746 [0] NCCL INFO Channel 00/16 :    0   1   2   3   4   5   6   7
+IAP-A800:64713:64753 [7] NCCL INFO Trees [0] -1/-1/-1->7->6 [1] -1/-1/-1->7->6 [2] -1/-1/-1->7->6 [3] -1/-1/-1->7->6 [4] -1/-1/-1->7->6 [5] -1/-1/-1->7->6 [6] -1/-1/-1->7->6 [7] -1/-1/-1->7->6 [8] -1/-1/-1->7->6 [9] -1/-1/-1->7->6 [10] -1/-1/-1->7->6 [11] -1/-1/-1->7->6 [12] -1/-1/-1->7->6 [13] -1/-1/-1->7->6 [14] -1/-1/-1->7->6 [15] -1/-1/-1->7->6
+IAP-A800:64713:64749 [3] NCCL INFO Trees [0] 4/-1/-1->3->2 [1] 4/-1/-1->3->2 [2] 4/-1/-1->3->2 [3] 4/-1/-1->3->2 [4] 4/-1/-1->3->2 [5] 4/-1/-1->3->2 [6] 4/-1/-1->3->2 [7] 4/-1/-1->3->2 [8] 4/-1/-1->3->2 [9] 4/-1/-1->3->2 [10] 4/-1/-1->3->2 [11] 4/-1/-1->3->2 [12] 4/-1/-1->3->2 [13] 4/-1/-1->3->2 [14] 4/-1/-1->3->2 [15] 4/-1/-1->3->2
+IAP-A800:64713:64747 [1] NCCL INFO Trees [0] 2/-1/-1->1->0 [1] 2/-1/-1->1->0 [2] 2/-1/-1->1->0 [3] 2/-1/-1->1->0 [4] 2/-1/-1->1->0 [5] 2/-1/-1->1->0 [6] 2/-1/-1->1->0 [7] 2/-1/-1->1->0 [8] 2/-1/-1->1->0 [9] 2/-1/-1->1->0 [10] 2/-1/-1->1->0 [11] 2/-1/-1->1->0 [12] 2/-1/-1->1->0 [13] 2/-1/-1->1->0 [14] 2/-1/-1->1->0 [15] 2/-1/-1->1->0
+IAP-A800:64713:64752 [6] NCCL INFO comm 0x5faa2132d750 rank 6 nRanks 8 nNodes 1 localRanks 8 localRank 6 MNNVL 0
+IAP-A800:64713:64750 [4] NCCL INFO Trees [0] 5/-1/-1->4->3 [1] 5/-1/-1->4->3 [2] 5/-1/-1->4->3 [3] 5/-1/-1->4->3 [4] 5/-1/-1->4->3 [5] 5/-1/-1->4->3 [6] 5/-1/-1->4->3 [7] 5/-1/-1->4->3 [8] 5/-1/-1->4->3 [9] 5/-1/-1->4->3 [10] 5/-1/-1->4->3 [11] 5/-1/-1->4->3 [12] 5/-1/-1->4->3 [13] 5/-1/-1->4->3 [14] 5/-1/-1->4->3 [15] 5/-1/-1->4->3
+IAP-A800:64713:64746 [0] NCCL INFO Channel 01/16 :    0   1   2   3   4   5   6   7
+IAP-A800:64713:64751 [5] NCCL INFO NCCL_BUFFSIZE set by environment to 33554432.
+IAP-A800:64713:64746 [0] NCCL INFO Channel 02/16 :    0   1   2   3   4   5   6   7
+IAP-A800:64713:64751 [5] NCCL INFO P2P Chunksize set to 524288
+IAP-A800:64713:64753 [7] NCCL INFO P2P Chunksize set to 524288
+IAP-A800:64713:64746 [0] NCCL INFO Channel 03/16 :    0   1   2   3   4   5   6   7
+IAP-A800:64713:64748 [2] NCCL INFO Trees [0] 3/-1/-1->2->1 [1] 3/-1/-1->2->1 [2] 3/-1/-1->2->1 [3] 3/-1/-1->2->1 [4] 3/-1/-1->2->1 [5] 3/-1/-1->2->1 [6] 3/-1/-1->2->1 [7] 3/-1/-1->2->1 [8] 3/-1/-1->2->1 [9] 3/-1/-1->2->1 [10] 3/-1/-1->2->1 [11] 3/-1/-1->2->1 [12] 3/-1/-1->2->1 [13] 3/-1/-1->2->1 [14] 3/-1/-1->2->1 [15] 3/-1/-1->2->1
+IAP-A800:64713:64752 [6] NCCL INFO Trees [0] 7/-1/-1->6->5 [1] 7/-1/-1->6->5 [2] 7/-1/-1->6->5 [3] 7/-1/-1->6->5 [4] 7/-1/-1->6->5 [5] 7/-1/-1->6->5 [6] 7/-1/-1->6->5 [7] 7/-1/-1->6->5 [8] 7/-1/-1->6->5 [9] 7/-1/-1->6->5 [10] 7/-1/-1->6->5 [11] 7/-1/-1->6->5 [12] 7/-1/-1->6->5 [13] 7/-1/-1->6->5 [14] 7/-1/-1->6->5 [15] 7/-1/-1->6->5
+IAP-A800:64713:64746 [0] NCCL INFO Channel 04/16 :    0   1   2   3   4   5   6   7
+IAP-A800:64713:64750 [4] NCCL INFO P2P Chunksize set to 524288
+IAP-A800:64713:64746 [0] NCCL INFO Channel 05/16 :    0   1   2   3   4   5   6   7
+IAP-A800:64713:64749 [3] NCCL INFO P2P Chunksize set to 524288
+IAP-A800:64713:64752 [6] NCCL INFO P2P Chunksize set to 524288
+IAP-A800:64713:64748 [2] NCCL INFO P2P Chunksize set to 524288
+IAP-A800:64713:64746 [0] NCCL INFO Channel 06/16 :    0   1   2   3   4   5   6   7
+IAP-A800:64713:64747 [1] NCCL INFO P2P Chunksize set to 524288
+IAP-A800:64713:64746 [0] NCCL INFO Channel 07/16 :    0   1   2   3   4   5   6   7
+IAP-A800:64713:64746 [0] NCCL INFO Channel 08/16 :    0   1   2   3   4   5   6   7
+IAP-A800:64713:64746 [0] NCCL INFO Channel 09/16 :    0   1   2   3   4   5   6   7
+IAP-A800:64713:64746 [0] NCCL INFO Channel 10/16 :    0   1   2   3   4   5   6   7
+IAP-A800:64713:64746 [0] NCCL INFO Channel 11/16 :    0   1   2   3   4   5   6   7
+IAP-A800:64713:64746 [0] NCCL INFO Channel 12/16 :    0   1   2   3   4   5   6   7
+IAP-A800:64713:64746 [0] NCCL INFO Channel 13/16 :    0   1   2   3   4   5   6   7
+IAP-A800:64713:64746 [0] NCCL INFO Channel 14/16 :    0   1   2   3   4   5   6   7
+IAP-A800:64713:64746 [0] NCCL INFO Channel 15/16 :    0   1   2   3   4   5   6   7
+IAP-A800:64713:64746 [0] NCCL INFO Trees [0] 1/-1/-1->0->-1 [1] 1/-1/-1->0->-1 [2] 1/-1/-1->0->-1 [3] 1/-1/-1->0->-1 [4] 1/-1/-1->0->-1 [5] 1/-1/-1->0->-1 [6] 1/-1/-1->0->-1 [7] 1/-1/-1->0->-1 [8] 1/-1/-1->0->-1 [9] 1/-1/-1->0->-1 [10] 1/-1/-1->0->-1 [11] 1/-1/-1->0->-1 [12] 1/-1/-1->0->-1 [13] 1/-1/-1->0->-1 [14] 1/-1/-1->0->-1 [15] 1/-1/-1->0->-1
+IAP-A800:64713:64746 [0] NCCL INFO P2P Chunksize set to 524288
+IAP-A800:64713:64753 [7] NCCL INFO Channel 00/0 : 7[7] -> 0[0] via P2P/direct pointer/read
+IAP-A800:64713:64751 [5] NCCL INFO Channel 00/0 : 5[5] -> 6[6] via P2P/direct pointer/read
+IAP-A800:64713:64751 [5] NCCL INFO Channel 01/0 : 5[5] -> 6[6] via P2P/direct pointer/read
+IAP-A800:64713:64753 [7] NCCL INFO Channel 01/0 : 7[7] -> 0[0] via P2P/direct pointer/read
+IAP-A800:64713:64751 [5] NCCL INFO Channel 02/0 : 5[5] -> 6[6] via P2P/direct pointer/read
+IAP-A800:64713:64753 [7] NCCL INFO Channel 02/0 : 7[7] -> 0[0] via P2P/direct pointer/read
+IAP-A800:64713:64751 [5] NCCL INFO Channel 03/0 : 5[5] -> 6[6] via P2P/direct pointer/read
+IAP-A800:64713:64747 [1] NCCL INFO Channel 00/0 : 1[1] -> 2[2] via P2P/direct pointer/read
+IAP-A800:64713:64753 [7] NCCL INFO Channel 03/0 : 7[7] -> 0[0] via P2P/direct pointer/read
+IAP-A800:64713:64747 [1] NCCL INFO Channel 01/0 : 1[1] -> 2[2] via P2P/direct pointer/read
+IAP-A800:64713:64751 [5] NCCL INFO Channel 04/0 : 5[5] -> 6[6] via P2P/direct pointer/read
+IAP-A800:64713:64747 [1] NCCL INFO Channel 02/0 : 1[1] -> 2[2] via P2P/direct pointer/read
+IAP-A800:64713:64753 [7] NCCL INFO Channel 04/0 : 7[7] -> 0[0] via P2P/direct pointer/read
+IAP-A800:64713:64753 [7] NCCL INFO Channel 05/0 : 7[7] -> 0[0] via P2P/direct pointer/read
+IAP-A800:64713:64747 [1] NCCL INFO Channel 03/0 : 1[1] -> 2[2] via P2P/direct pointer/read
+IAP-A800:64713:64753 [7] NCCL INFO Channel 06/0 : 7[7] -> 0[0] via P2P/direct pointer/read
+IAP-A800:64713:64753 [7] NCCL INFO Channel 07/0 : 7[7] -> 0[0] via P2P/direct pointer/read
+IAP-A800:64713:64747 [1] NCCL INFO Channel 04/0 : 1[1] -> 2[2] via P2P/direct pointer/read
+IAP-A800:64713:64751 [5] NCCL INFO Channel 05/0 : 5[5] -> 6[6] via P2P/direct pointer/read
+IAP-A800:64713:64753 [7] NCCL INFO Channel 08/0 : 7[7] -> 0[0] via P2P/direct pointer/read
+IAP-A800:64713:64751 [5] NCCL INFO Channel 06/0 : 5[5] -> 6[6] via P2P/direct pointer/read
+IAP-A800:64713:64747 [1] NCCL INFO Channel 05/0 : 1[1] -> 2[2] via P2P/direct pointer/read
+IAP-A800:64713:64753 [7] NCCL INFO Channel 09/0 : 7[7] -> 0[0] via P2P/direct pointer/read
+IAP-A800:64713:64751 [5] NCCL INFO Channel 07/0 : 5[5] -> 6[6] via P2P/direct pointer/read
+IAP-A800:64713:64747 [1] NCCL INFO Channel 06/0 : 1[1] -> 2[2] via P2P/direct pointer/read
+IAP-A800:64713:64751 [5] NCCL INFO Channel 08/0 : 5[5] -> 6[6] via P2P/direct pointer/read
+IAP-A800:64713:64753 [7] NCCL INFO Channel 10/0 : 7[7] -> 0[0] via P2P/direct pointer/read
+IAP-A800:64713:64747 [1] NCCL INFO Channel 07/0 : 1[1] -> 2[2] via P2P/direct pointer/read
+IAP-A800:64713:64751 [5] NCCL INFO Channel 09/0 : 5[5] -> 6[6] via P2P/direct pointer/read
+IAP-A800:64713:64753 [7] NCCL INFO Channel 11/0 : 7[7] -> 0[0] via P2P/direct pointer/read
+IAP-A800:64713:64751 [5] NCCL INFO Channel 10/0 : 5[5] -> 6[6] via P2P/direct pointer/read
+IAP-A800:64713:64747 [1] NCCL INFO Channel 08/0 : 1[1] -> 2[2] via P2P/direct pointer/read
+IAP-A800:64713:64753 [7] NCCL INFO Channel 12/0 : 7[7] -> 0[0] via P2P/direct pointer/read
+IAP-A800:64713:64747 [1] NCCL INFO Channel 09/0 : 1[1] -> 2[2] via P2P/direct pointer/read
+IAP-A800:64713:64751 [5] NCCL INFO Channel 11/0 : 5[5] -> 6[6] via P2P/direct pointer/read
+IAP-A800:64713:64753 [7] NCCL INFO Channel 13/0 : 7[7] -> 0[0] via P2P/direct pointer/read
+IAP-A800:64713:64751 [5] NCCL INFO Channel 12/0 : 5[5] -> 6[6] via P2P/direct pointer/read
+IAP-A800:64713:64753 [7] NCCL INFO Channel 14/0 : 7[7] -> 0[0] via P2P/direct pointer/read
+IAP-A800:64713:64747 [1] NCCL INFO Channel 10/0 : 1[1] -> 2[2] via P2P/direct pointer/read
+IAP-A800:64713:64753 [7] NCCL INFO Channel 15/0 : 7[7] -> 0[0] via P2P/direct pointer/read
+IAP-A800:64713:64751 [5] NCCL INFO Channel 13/0 : 5[5] -> 6[6] via P2P/direct pointer/read
+IAP-A800:64713:64747 [1] NCCL INFO Channel 11/0 : 1[1] -> 2[2] via P2P/direct pointer/read
+IAP-A800:64713:64751 [5] NCCL INFO Channel 14/0 : 5[5] -> 6[6] via P2P/direct pointer/read
+IAP-A800:64713:64751 [5] NCCL INFO Channel 15/0 : 5[5] -> 6[6] via P2P/direct pointer/read
+IAP-A800:64713:64747 [1] NCCL INFO Channel 12/0 : 1[1] -> 2[2] via P2P/direct pointer/read
+IAP-A800:64713:64750 [4] NCCL INFO Channel 00/0 : 4[4] -> 5[5] via P2P/direct pointer/read
+IAP-A800:64713:64747 [1] NCCL INFO Channel 13/0 : 1[1] -> 2[2] via P2P/direct pointer/read
+IAP-A800:64713:64747 [1] NCCL INFO Channel 14/0 : 1[1] -> 2[2] via P2P/direct pointer/read
+IAP-A800:64713:64750 [4] NCCL INFO Channel 01/0 : 4[4] -> 5[5] via P2P/direct pointer/read
+IAP-A800:64713:64746 [0] NCCL INFO Channel 00/0 : 0[0] -> 1[1] via P2P/direct pointer/read
+IAP-A800:64713:64747 [1] NCCL INFO Channel 15/0 : 1[1] -> 2[2] via P2P/direct pointer/read
+IAP-A800:64713:64750 [4] NCCL INFO Channel 02/0 : 4[4] -> 5[5] via P2P/direct pointer/read
+IAP-A800:64713:64749 [3] NCCL INFO Channel 00/0 : 3[3] -> 4[4] via P2P/direct pointer/read
+IAP-A800:64713:64748 [2] NCCL INFO Channel 00/0 : 2[2] -> 3[3] via P2P/direct pointer/read
+IAP-A800:64713:64750 [4] NCCL INFO Channel 03/0 : 4[4] -> 5[5] via P2P/direct pointer/read
+IAP-A800:64713:64749 [3] NCCL INFO Channel 01/0 : 3[3] -> 4[4] via P2P/direct pointer/read
+IAP-A800:64713:64746 [0] NCCL INFO Channel 01/0 : 0[0] -> 1[1] via P2P/direct pointer/read
+IAP-A800:64713:64750 [4] NCCL INFO Channel 04/0 : 4[4] -> 5[5] via P2P/direct pointer/read
+IAP-A800:64713:64748 [2] NCCL INFO Channel 01/0 : 2[2] -> 3[3] via P2P/direct pointer/read
+IAP-A800:64713:64749 [3] NCCL INFO Channel 02/0 : 3[3] -> 4[4] via P2P/direct pointer/read
+IAP-A800:64713:64746 [0] NCCL INFO Channel 02/0 : 0[0] -> 1[1] via P2P/direct pointer/read
+IAP-A800:64713:64750 [4] NCCL INFO Channel 05/0 : 4[4] -> 5[5] via P2P/direct pointer/read
+IAP-A800:64713:64749 [3] NCCL INFO Channel 03/0 : 3[3] -> 4[4] via P2P/direct pointer/read
+IAP-A800:64713:64748 [2] NCCL INFO Channel 02/0 : 2[2] -> 3[3] via P2P/direct pointer/read
+IAP-A800:64713:64752 [6] NCCL INFO Channel 00/0 : 6[6] -> 7[7] via P2P/direct pointer/read
+IAP-A800:64713:64746 [0] NCCL INFO Channel 03/0 : 0[0] -> 1[1] via P2P/direct pointer/read
+IAP-A800:64713:64750 [4] NCCL INFO Channel 06/0 : 4[4] -> 5[5] via P2P/direct pointer/read
+IAP-A800:64713:64749 [3] NCCL INFO Channel 04/0 : 3[3] -> 4[4] via P2P/direct pointer/read
+IAP-A800:64713:64748 [2] NCCL INFO Channel 03/0 : 2[2] -> 3[3] via P2P/direct pointer/read
+IAP-A800:64713:64746 [0] NCCL INFO Channel 04/0 : 0[0] -> 1[1] via P2P/direct pointer/read
+IAP-A800:64713:64750 [4] NCCL INFO Channel 07/0 : 4[4] -> 5[5] via P2P/direct pointer/read
+IAP-A800:64713:64752 [6] NCCL INFO Channel 01/0 : 6[6] -> 7[7] via P2P/direct pointer/read
+IAP-A800:64713:64748 [2] NCCL INFO Channel 04/0 : 2[2] -> 3[3] via P2P/direct pointer/read
+IAP-A800:64713:64749 [3] NCCL INFO Channel 05/0 : 3[3] -> 4[4] via P2P/direct pointer/read
+IAP-A800:64713:64746 [0] NCCL INFO Channel 05/0 : 0[0] -> 1[1] via P2P/direct pointer/read
+IAP-A800:64713:64750 [4] NCCL INFO Channel 08/0 : 4[4] -> 5[5] via P2P/direct pointer/read
+IAP-A800:64713:64748 [2] NCCL INFO Channel 05/0 : 2[2] -> 3[3] via P2P/direct pointer/read
+IAP-A800:64713:64749 [3] NCCL INFO Channel 06/0 : 3[3] -> 4[4] via P2P/direct pointer/read
+IAP-A800:64713:64746 [0] NCCL INFO Channel 06/0 : 0[0] -> 1[1] via P2P/direct pointer/read
+IAP-A800:64713:64752 [6] NCCL INFO Channel 02/0 : 6[6] -> 7[7] via P2P/direct pointer/read
+IAP-A800:64713:64750 [4] NCCL INFO Channel 09/0 : 4[4] -> 5[5] via P2P/direct pointer/read
+IAP-A800:64713:64749 [3] NCCL INFO Channel 07/0 : 3[3] -> 4[4] via P2P/direct pointer/read
+IAP-A800:64713:64746 [0] NCCL INFO Channel 07/0 : 0[0] -> 1[1] via P2P/direct pointer/read
+IAP-A800:64713:64748 [2] NCCL INFO Channel 06/0 : 2[2] -> 3[3] via P2P/direct pointer/read
+IAP-A800:64713:64752 [6] NCCL INFO Channel 03/0 : 6[6] -> 7[7] via P2P/direct pointer/read
+IAP-A800:64713:64750 [4] NCCL INFO Channel 10/0 : 4[4] -> 5[5] via P2P/direct pointer/read
+IAP-A800:64713:64746 [0] NCCL INFO Channel 08/0 : 0[0] -> 1[1] via P2P/direct pointer/read
+IAP-A800:64713:64749 [3] NCCL INFO Channel 08/0 : 3[3] -> 4[4] via P2P/direct pointer/read
+IAP-A800:64713:64752 [6] NCCL INFO Channel 04/0 : 6[6] -> 7[7] via P2P/direct pointer/read
+IAP-A800:64713:64748 [2] NCCL INFO Channel 07/0 : 2[2] -> 3[3] via P2P/direct pointer/read
+IAP-A800:64713:64750 [4] NCCL INFO Channel 11/0 : 4[4] -> 5[5] via P2P/direct pointer/read
+IAP-A800:64713:64749 [3] NCCL INFO Channel 09/0 : 3[3] -> 4[4] via P2P/direct pointer/read
+IAP-A800:64713:64746 [0] NCCL INFO Channel 09/0 : 0[0] -> 1[1] via P2P/direct pointer/read
+IAP-A800:64713:64748 [2] NCCL INFO Channel 08/0 : 2[2] -> 3[3] via P2P/direct pointer/read
+IAP-A800:64713:64750 [4] NCCL INFO Channel 12/0 : 4[4] -> 5[5] via P2P/direct pointer/read
+IAP-A800:64713:64752 [6] NCCL INFO Channel 05/0 : 6[6] -> 7[7] via P2P/direct pointer/read
+IAP-A800:64713:64749 [3] NCCL INFO Channel 10/0 : 3[3] -> 4[4] via P2P/direct pointer/read
+IAP-A800:64713:64748 [2] NCCL INFO Channel 09/0 : 2[2] -> 3[3] via P2P/direct pointer/read
+IAP-A800:64713:64746 [0] NCCL INFO Channel 10/0 : 0[0] -> 1[1] via P2P/direct pointer/read
+IAP-A800:64713:64749 [3] NCCL INFO Channel 11/0 : 3[3] -> 4[4] via P2P/direct pointer/read
+IAP-A800:64713:64752 [6] NCCL INFO Channel 06/0 : 6[6] -> 7[7] via P2P/direct pointer/read
+IAP-A800:64713:64750 [4] NCCL INFO Channel 13/0 : 4[4] -> 5[5] via P2P/direct pointer/read
+IAP-A800:64713:64748 [2] NCCL INFO Channel 10/0 : 2[2] -> 3[3] via P2P/direct pointer/read
+IAP-A800:64713:64746 [0] NCCL INFO Channel 11/0 : 0[0] -> 1[1] via P2P/direct pointer/read
+IAP-A800:64713:64750 [4] NCCL INFO Channel 14/0 : 4[4] -> 5[5] via P2P/direct pointer/read
+IAP-A800:64713:64752 [6] NCCL INFO Channel 07/0 : 6[6] -> 7[7] via P2P/direct pointer/read
+IAP-A800:64713:64749 [3] NCCL INFO Channel 12/0 : 3[3] -> 4[4] via P2P/direct pointer/read
+IAP-A800:64713:64750 [4] NCCL INFO Channel 15/0 : 4[4] -> 5[5] via P2P/direct pointer/read
+IAP-A800:64713:64752 [6] NCCL INFO Channel 08/0 : 6[6] -> 7[7] via P2P/direct pointer/read
+IAP-A800:64713:64748 [2] NCCL INFO Channel 11/0 : 2[2] -> 3[3] via P2P/direct pointer/read
+IAP-A800:64713:64746 [0] NCCL INFO Channel 12/0 : 0[0] -> 1[1] via P2P/direct pointer/read
+IAP-A800:64713:64749 [3] NCCL INFO Channel 13/0 : 3[3] -> 4[4] via P2P/direct pointer/read
+IAP-A800:64713:64748 [2] NCCL INFO Channel 12/0 : 2[2] -> 3[3] via P2P/direct pointer/read
+IAP-A800:64713:64752 [6] NCCL INFO Channel 09/0 : 6[6] -> 7[7] via P2P/direct pointer/read
+IAP-A800:64713:64746 [0] NCCL INFO Channel 13/0 : 0[0] -> 1[1] via P2P/direct pointer/read
+IAP-A800:64713:64749 [3] NCCL INFO Channel 14/0 : 3[3] -> 4[4] via P2P/direct pointer/read
+IAP-A800:64713:64748 [2] NCCL INFO Channel 13/0 : 2[2] -> 3[3] via P2P/direct pointer/read
+IAP-A800:64713:64746 [0] NCCL INFO Channel 14/0 : 0[0] -> 1[1] via P2P/direct pointer/read
+IAP-A800:64713:64752 [6] NCCL INFO Channel 10/0 : 6[6] -> 7[7] via P2P/direct pointer/read
+IAP-A800:64713:64749 [3] NCCL INFO Channel 15/0 : 3[3] -> 4[4] via P2P/direct pointer/read
+IAP-A800:64713:64748 [2] NCCL INFO Channel 14/0 : 2[2] -> 3[3] via P2P/direct pointer/read
+IAP-A800:64713:64746 [0] NCCL INFO Channel 15/0 : 0[0] -> 1[1] via P2P/direct pointer/read
+IAP-A800:64713:64752 [6] NCCL INFO Channel 11/0 : 6[6] -> 7[7] via P2P/direct pointer/read
+IAP-A800:64713:64748 [2] NCCL INFO Channel 15/0 : 2[2] -> 3[3] via P2P/direct pointer/read
+IAP-A800:64713:64752 [6] NCCL INFO Channel 12/0 : 6[6] -> 7[7] via P2P/direct pointer/read
+IAP-A800:64713:64752 [6] NCCL INFO Channel 13/0 : 6[6] -> 7[7] via P2P/direct pointer/read
+IAP-A800:64713:64752 [6] NCCL INFO Channel 14/0 : 6[6] -> 7[7] via P2P/direct pointer/read
+IAP-A800:64713:64752 [6] NCCL INFO Channel 15/0 : 6[6] -> 7[7] via P2P/direct pointer/read
+IAP-A800:64713:64752 [6] NCCL INFO Connected all rings
+IAP-A800:64713:64753 [7] NCCL INFO Connected all rings
+IAP-A800:64713:64753 [7] NCCL INFO Channel 00/0 : 7[7] -> 6[6] via P2P/direct pointer/read
+IAP-A800:64713:64746 [0] NCCL INFO Connected all rings
+IAP-A800:64713:64753 [7] NCCL INFO Channel 01/0 : 7[7] -> 6[6] via P2P/direct pointer/read
+IAP-A800:64713:64753 [7] NCCL INFO Channel 02/0 : 7[7] -> 6[6] via P2P/direct pointer/read
+IAP-A800:64713:64751 [5] NCCL INFO Connected all rings
+IAP-A800:64713:64747 [1] NCCL INFO Connected all rings
+IAP-A800:64713:64750 [4] NCCL INFO Connected all rings
+IAP-A800:64713:64748 [2] NCCL INFO Connected all rings
+IAP-A800:64713:64753 [7] NCCL INFO Channel 03/0 : 7[7] -> 6[6] via P2P/direct pointer/read
+IAP-A800:64713:64749 [3] NCCL INFO Connected all rings
+IAP-A800:64713:64753 [7] NCCL INFO Channel 04/0 : 7[7] -> 6[6] via P2P/direct pointer/read
+IAP-A800:64713:64753 [7] NCCL INFO Channel 05/0 : 7[7] -> 6[6] via P2P/direct pointer/read
+IAP-A800:64713:64753 [7] NCCL INFO Channel 06/0 : 7[7] -> 6[6] via P2P/direct pointer/read
+IAP-A800:64713:64753 [7] NCCL INFO Channel 07/0 : 7[7] -> 6[6] via P2P/direct pointer/read
+IAP-A800:64713:64753 [7] NCCL INFO Channel 08/0 : 7[7] -> 6[6] via P2P/direct pointer/read
+IAP-A800:64713:64753 [7] NCCL INFO Channel 09/0 : 7[7] -> 6[6] via P2P/direct pointer/read
+IAP-A800:64713:64753 [7] NCCL INFO Channel 10/0 : 7[7] -> 6[6] via P2P/direct pointer/read
+IAP-A800:64713:64753 [7] NCCL INFO Channel 11/0 : 7[7] -> 6[6] via P2P/direct pointer/read
+IAP-A800:64713:64753 [7] NCCL INFO Channel 12/0 : 7[7] -> 6[6] via P2P/direct pointer/read
+IAP-A800:64713:64753 [7] NCCL INFO Channel 13/0 : 7[7] -> 6[6] via P2P/direct pointer/read
+IAP-A800:64713:64752 [6] NCCL INFO Channel 00/0 : 6[6] -> 5[5] via P2P/direct pointer/read
+IAP-A800:64713:64753 [7] NCCL INFO Channel 14/0 : 7[7] -> 6[6] via P2P/direct pointer/read
+IAP-A800:64713:64752 [6] NCCL INFO Channel 01/0 : 6[6] -> 5[5] via P2P/direct pointer/read
+IAP-A800:64713:64753 [7] NCCL INFO Channel 15/0 : 7[7] -> 6[6] via P2P/direct pointer/read
+IAP-A800:64713:64751 [5] NCCL INFO Channel 00/0 : 5[5] -> 4[4] via P2P/direct pointer/read
+IAP-A800:64713:64752 [6] NCCL INFO Channel 02/0 : 6[6] -> 5[5] via P2P/direct pointer/read
+IAP-A800:64713:64751 [5] NCCL INFO Channel 01/0 : 5[5] -> 4[4] via P2P/direct pointer/read
+IAP-A800:64713:64752 [6] NCCL INFO Channel 03/0 : 6[6] -> 5[5] via P2P/direct pointer/read
+IAP-A800:64713:64748 [2] NCCL INFO Channel 00/0 : 2[2] -> 1[1] via P2P/direct pointer/read
+IAP-A800:64713:64751 [5] NCCL INFO Channel 02/0 : 5[5] -> 4[4] via P2P/direct pointer/read
+IAP-A800:64713:64747 [1] NCCL INFO Channel 00/0 : 1[1] -> 0[0] via P2P/direct pointer/read
+IAP-A800:64713:64752 [6] NCCL INFO Channel 04/0 : 6[6] -> 5[5] via P2P/direct pointer/read
+IAP-A800:64713:64750 [4] NCCL INFO Channel 00/0 : 4[4] -> 3[3] via P2P/direct pointer/read
+IAP-A800:64713:64748 [2] NCCL INFO Channel 01/0 : 2[2] -> 1[1] via P2P/direct pointer/read
+IAP-A800:64713:64751 [5] NCCL INFO Channel 03/0 : 5[5] -> 4[4] via P2P/direct pointer/read
+IAP-A800:64713:64750 [4] NCCL INFO Channel 01/0 : 4[4] -> 3[3] via P2P/direct pointer/read
+IAP-A800:64713:64752 [6] NCCL INFO Channel 05/0 : 6[6] -> 5[5] via P2P/direct pointer/read
+IAP-A800:64713:64747 [1] NCCL INFO Channel 01/0 : 1[1] -> 0[0] via P2P/direct pointer/read
+IAP-A800:64713:64748 [2] NCCL INFO Channel 02/0 : 2[2] -> 1[1] via P2P/direct pointer/read
+IAP-A800:64713:64751 [5] NCCL INFO Channel 04/0 : 5[5] -> 4[4] via P2P/direct pointer/read
+IAP-A800:64713:64747 [1] NCCL INFO Channel 02/0 : 1[1] -> 0[0] via P2P/direct pointer/read
+IAP-A800:64713:64752 [6] NCCL INFO Channel 06/0 : 6[6] -> 5[5] via P2P/direct pointer/read
+IAP-A800:64713:64750 [4] NCCL INFO Channel 02/0 : 4[4] -> 3[3] via P2P/direct pointer/read
+IAP-A800:64713:64748 [2] NCCL INFO Channel 03/0 : 2[2] -> 1[1] via P2P/direct pointer/read
+IAP-A800:64713:64747 [1] NCCL INFO Channel 03/0 : 1[1] -> 0[0] via P2P/direct pointer/read
+IAP-A800:64713:64749 [3] NCCL INFO Channel 00/0 : 3[3] -> 2[2] via P2P/direct pointer/read
+IAP-A800:64713:64752 [6] NCCL INFO Channel 07/0 : 6[6] -> 5[5] via P2P/direct pointer/read
+IAP-A800:64713:64751 [5] NCCL INFO Channel 05/0 : 5[5] -> 4[4] via P2P/direct pointer/read
+IAP-A800:64713:64749 [3] NCCL INFO Channel 01/0 : 3[3] -> 2[2] via P2P/direct pointer/read
+IAP-A800:64713:64748 [2] NCCL INFO Channel 04/0 : 2[2] -> 1[1] via P2P/direct pointer/read
+IAP-A800:64713:64747 [1] NCCL INFO Channel 04/0 : 1[1] -> 0[0] via P2P/direct pointer/read
+IAP-A800:64713:64750 [4] NCCL INFO Channel 03/0 : 4[4] -> 3[3] via P2P/direct pointer/read
+IAP-A800:64713:64752 [6] NCCL INFO Channel 08/0 : 6[6] -> 5[5] via P2P/direct pointer/read
+IAP-A800:64713:64749 [3] NCCL INFO Channel 02/0 : 3[3] -> 2[2] via P2P/direct pointer/read
+IAP-A800:64713:64750 [4] NCCL INFO Channel 04/0 : 4[4] -> 3[3] via P2P/direct pointer/read
+IAP-A800:64713:64748 [2] NCCL INFO Channel 05/0 : 2[2] -> 1[1] via P2P/direct pointer/read
+IAP-A800:64713:64751 [5] NCCL INFO Channel 06/0 : 5[5] -> 4[4] via P2P/direct pointer/read
+IAP-A800:64713:64750 [4] NCCL INFO Channel 05/0 : 4[4] -> 3[3] via P2P/direct pointer/read
+IAP-A800:64713:64747 [1] NCCL INFO Channel 05/0 : 1[1] -> 0[0] via P2P/direct pointer/read
+IAP-A800:64713:64752 [6] NCCL INFO Channel 09/0 : 6[6] -> 5[5] via P2P/direct pointer/read
+IAP-A800:64713:64749 [3] NCCL INFO Channel 03/0 : 3[3] -> 2[2] via P2P/direct pointer/read
+IAP-A800:64713:64751 [5] NCCL INFO Channel 07/0 : 5[5] -> 4[4] via P2P/direct pointer/read
+IAP-A800:64713:64748 [2] NCCL INFO Channel 06/0 : 2[2] -> 1[1] via P2P/direct pointer/read
+IAP-A800:64713:64747 [1] NCCL INFO Channel 06/0 : 1[1] -> 0[0] via P2P/direct pointer/read
+IAP-A800:64713:64750 [4] NCCL INFO Channel 06/0 : 4[4] -> 3[3] via P2P/direct pointer/read
+IAP-A800:64713:64749 [3] NCCL INFO Channel 04/0 : 3[3] -> 2[2] via P2P/direct pointer/read
+IAP-A800:64713:64752 [6] NCCL INFO Channel 10/0 : 6[6] -> 5[5] via P2P/direct pointer/read
+IAP-A800:64713:64751 [5] NCCL INFO Channel 08/0 : 5[5] -> 4[4] via P2P/direct pointer/read
+IAP-A800:64713:64748 [2] NCCL INFO Channel 07/0 : 2[2] -> 1[1] via P2P/direct pointer/read
+IAP-A800:64713:64747 [1] NCCL INFO Channel 07/0 : 1[1] -> 0[0] via P2P/direct pointer/read
+IAP-A800:64713:64750 [4] NCCL INFO Channel 07/0 : 4[4] -> 3[3] via P2P/direct pointer/read
+IAP-A800:64713:64749 [3] NCCL INFO Channel 05/0 : 3[3] -> 2[2] via P2P/direct pointer/read
+IAP-A800:64713:64748 [2] NCCL INFO Channel 08/0 : 2[2] -> 1[1] via P2P/direct pointer/read
+IAP-A800:64713:64751 [5] NCCL INFO Channel 09/0 : 5[5] -> 4[4] via P2P/direct pointer/read
+IAP-A800:64713:64752 [6] NCCL INFO Channel 11/0 : 6[6] -> 5[5] via P2P/direct pointer/read
+IAP-A800:64713:64747 [1] NCCL INFO Channel 08/0 : 1[1] -> 0[0] via P2P/direct pointer/read
+IAP-A800:64713:64750 [4] NCCL INFO Channel 08/0 : 4[4] -> 3[3] via P2P/direct pointer/read
+IAP-A800:64713:64751 [5] NCCL INFO Channel 10/0 : 5[5] -> 4[4] via P2P/direct pointer/read
+IAP-A800:64713:64752 [6] NCCL INFO Channel 12/0 : 6[6] -> 5[5] via P2P/direct pointer/read
+IAP-A800:64713:64749 [3] NCCL INFO Channel 06/0 : 3[3] -> 2[2] via P2P/direct pointer/read
+IAP-A800:64713:64748 [2] NCCL INFO Channel 09/0 : 2[2] -> 1[1] via P2P/direct pointer/read
+IAP-A800:64713:64750 [4] NCCL INFO Channel 09/0 : 4[4] -> 3[3] via P2P/direct pointer/read
+IAP-A800:64713:64751 [5] NCCL INFO Channel 11/0 : 5[5] -> 4[4] via P2P/direct pointer/read
+IAP-A800:64713:64749 [3] NCCL INFO Channel 07/0 : 3[3] -> 2[2] via P2P/direct pointer/read
+IAP-A800:64713:64747 [1] NCCL INFO Channel 09/0 : 1[1] -> 0[0] via P2P/direct pointer/read
+IAP-A800:64713:64752 [6] NCCL INFO Channel 13/0 : 6[6] -> 5[5] via P2P/direct pointer/read
+IAP-A800:64713:64748 [2] NCCL INFO Channel 10/0 : 2[2] -> 1[1] via P2P/direct pointer/read
+IAP-A800:64713:64747 [1] NCCL INFO Channel 10/0 : 1[1] -> 0[0] via P2P/direct pointer/read
+IAP-A800:64713:64750 [4] NCCL INFO Channel 10/0 : 4[4] -> 3[3] via P2P/direct pointer/read
+IAP-A800:64713:64751 [5] NCCL INFO Channel 12/0 : 5[5] -> 4[4] via P2P/direct pointer/read
+IAP-A800:64713:64748 [2] NCCL INFO Channel 11/0 : 2[2] -> 1[1] via P2P/direct pointer/read
+IAP-A800:64713:64747 [1] NCCL INFO Channel 11/0 : 1[1] -> 0[0] via P2P/direct pointer/read
+IAP-A800:64713:64752 [6] NCCL INFO Channel 14/0 : 6[6] -> 5[5] via P2P/direct pointer/read
+IAP-A800:64713:64749 [3] NCCL INFO Channel 08/0 : 3[3] -> 2[2] via P2P/direct pointer/read
+IAP-A800:64713:64748 [2] NCCL INFO Channel 12/0 : 2[2] -> 1[1] via P2P/direct pointer/read
+IAP-A800:64713:64751 [5] NCCL INFO Channel 13/0 : 5[5] -> 4[4] via P2P/direct pointer/read
+IAP-A800:64713:64750 [4] NCCL INFO Channel 11/0 : 4[4] -> 3[3] via P2P/direct pointer/read
+IAP-A800:64713:64752 [6] NCCL INFO Channel 15/0 : 6[6] -> 5[5] via P2P/direct pointer/read
+IAP-A800:64713:64747 [1] NCCL INFO Channel 12/0 : 1[1] -> 0[0] via P2P/direct pointer/read
+IAP-A800:64713:64750 [4] NCCL INFO Channel 12/0 : 4[4] -> 3[3] via P2P/direct pointer/read
+IAP-A800:64713:64748 [2] NCCL INFO Channel 13/0 : 2[2] -> 1[1] via P2P/direct pointer/read
+IAP-A800:64713:64749 [3] NCCL INFO Channel 09/0 : 3[3] -> 2[2] via P2P/direct pointer/read
+IAP-A800:64713:64751 [5] NCCL INFO Channel 14/0 : 5[5] -> 4[4] via P2P/direct pointer/read
+IAP-A800:64713:64747 [1] NCCL INFO Channel 13/0 : 1[1] -> 0[0] via P2P/direct pointer/read
+IAP-A800:64713:64750 [4] NCCL INFO Channel 13/0 : 4[4] -> 3[3] via P2P/direct pointer/read
+IAP-A800:64713:64749 [3] NCCL INFO Channel 10/0 : 3[3] -> 2[2] via P2P/direct pointer/read
+IAP-A800:64713:64747 [1] NCCL INFO Channel 14/0 : 1[1] -> 0[0] via P2P/direct pointer/read
+IAP-A800:64713:64748 [2] NCCL INFO Channel 14/0 : 2[2] -> 1[1] via P2P/direct pointer/read
+IAP-A800:64713:64751 [5] NCCL INFO Channel 15/0 : 5[5] -> 4[4] via P2P/direct pointer/read
+IAP-A800:64713:64747 [1] NCCL INFO Channel 15/0 : 1[1] -> 0[0] via P2P/direct pointer/read
+IAP-A800:64713:64750 [4] NCCL INFO Channel 14/0 : 4[4] -> 3[3] via P2P/direct pointer/read
+IAP-A800:64713:64749 [3] NCCL INFO Channel 11/0 : 3[3] -> 2[2] via P2P/direct pointer/read
+IAP-A800:64713:64748 [2] NCCL INFO Channel 15/0 : 2[2] -> 1[1] via P2P/direct pointer/read
+IAP-A800:64713:64750 [4] NCCL INFO Channel 15/0 : 4[4] -> 3[3] via P2P/direct pointer/read
+IAP-A800:64713:64749 [3] NCCL INFO Channel 12/0 : 3[3] -> 2[2] via P2P/direct pointer/read
+IAP-A800:64713:64749 [3] NCCL INFO Channel 13/0 : 3[3] -> 2[2] via P2P/direct pointer/read
+IAP-A800:64713:64749 [3] NCCL INFO Channel 14/0 : 3[3] -> 2[2] via P2P/direct pointer/read
+IAP-A800:64713:64749 [3] NCCL INFO Channel 15/0 : 3[3] -> 2[2] via P2P/direct pointer/read
+IAP-A800:64713:64746 [0] NCCL INFO Connected all trees
+IAP-A800:64713:64746 [0] NCCL INFO threadThresholds 8/8/64 | 64/8/64 | 512 | 512
+IAP-A800:64713:64746 [0] NCCL INFO 16 coll channels, 16 collnet channels, 0 nvls channels, 16 p2p channels, 16 p2p channels per peer
+IAP-A800:64713:64750 [4] NCCL INFO Connected all trees
+IAP-A800:64713:64750 [4] NCCL INFO threadThresholds 8/8/64 | 64/8/64 | 512 | 512
+IAP-A800:64713:64750 [4] NCCL INFO 16 coll channels, 16 collnet channels, 0 nvls channels, 16 p2p channels, 16 p2p channels per peer
+IAP-A800:64713:64751 [5] NCCL INFO Connected all trees
+IAP-A800:64713:64751 [5] NCCL INFO threadThresholds 8/8/64 | 64/8/64 | 512 | 512
+IAP-A800:64713:64751 [5] NCCL INFO 16 coll channels, 16 collnet channels, 0 nvls channels, 16 p2p channels, 16 p2p channels per peer
+IAP-A800:64713:64753 [7] NCCL INFO Connected all trees
+IAP-A800:64713:64753 [7] NCCL INFO threadThresholds 8/8/64 | 64/8/64 | 512 | 512
+IAP-A800:64713:64753 [7] NCCL INFO 16 coll channels, 16 collnet channels, 0 nvls channels, 16 p2p channels, 16 p2p channels per peer
+IAP-A800:64713:64747 [1] NCCL INFO Connected all trees
+IAP-A800:64713:64747 [1] NCCL INFO threadThresholds 8/8/64 | 64/8/64 | 512 | 512
+IAP-A800:64713:64747 [1] NCCL INFO 16 coll channels, 16 collnet channels, 0 nvls channels, 16 p2p channels, 16 p2p channels per peer
+IAP-A800:64713:64752 [6] NCCL INFO Connected all trees
+IAP-A800:64713:64752 [6] NCCL INFO threadThresholds 8/8/64 | 64/8/64 | 512 | 512
+IAP-A800:64713:64752 [6] NCCL INFO 16 coll channels, 16 collnet channels, 0 nvls channels, 16 p2p channels, 16 p2p channels per peer
+IAP-A800:64713:64749 [3] NCCL INFO Connected all trees
+IAP-A800:64713:64749 [3] NCCL INFO threadThresholds 8/8/64 | 64/8/64 | 512 | 512
+IAP-A800:64713:64749 [3] NCCL INFO 16 coll channels, 16 collnet channels, 0 nvls channels, 16 p2p channels, 16 p2p channels per peer
+IAP-A800:64713:64748 [2] NCCL INFO Connected all trees
+IAP-A800:64713:64748 [2] NCCL INFO threadThresholds 8/8/64 | 64/8/64 | 512 | 512
+IAP-A800:64713:64748 [2] NCCL INFO 16 coll channels, 16 collnet channels, 0 nvls channels, 16 p2p channels, 16 p2p channels per peer
+IAP-A800:64713:64752 [6] NCCL INFO TUNER/Plugin: No plugin found (libnccl-tuner.so)
+IAP-A800:64713:64752 [6] NCCL INFO TUNER/Plugin: No plugin found (libnccl-net.so)
+IAP-A800:64713:64752 [6] NCCL INFO TUNER/Plugin: Plugin load returned 2 : dlopen hook: 'libnccl-net.so': cannot open shared object file: No such file or directory : when loading libnccl-tuner.so
+IAP-A800:64713:64752 [6] NCCL INFO TUNER/Plugin: Using internal tuner plugin.
+IAP-A800:64713:64752 [6] NCCL INFO Init Compress Memory Pool
+IAP-A800:64713:64748 [2] NCCL INFO Init Compress Memory Pool
+IAP-A800:64713:64747 [1] NCCL INFO Init Compress Memory Pool
+IAP-A800:64713:64746 [0] NCCL INFO Init Compress Memory Pool
+IAP-A800:64713:64750 [4] NCCL INFO Init Compress Memory Pool
+IAP-A800:64713:64753 [7] NCCL INFO Init Compress Memory Pool
+IAP-A800:64713:64751 [5] NCCL INFO Init Compress Memory Pool
+IAP-A800:64713:64749 [3] NCCL INFO Init Compress Memory Pool
+IAP-A800:64713:64752 [6] NCCL INFO Load Compressors
+IAP-A800:64713:64752 [6] NCCL INFO ncclCommInitRank comm 0x5faa2132d750 rank 6 nranks 8 cudaDev 6 nvmlDev 6 busId d0000 commId 0x84892302aee8fceb - Init COMPLETE
+IAP-A800:64713:64747 [1] NCCL INFO ncclCommInitRank comm 0x5faa2130a280 rank 1 nranks 8 cudaDev 1 nvmlDev 1 busId 42000 commId 0x84892302aee8fceb - Init COMPLETE
+IAP-A800:64713:64746 [0] NCCL INFO ncclCommInitRank comm 0x5faa212ff8b0 rank 0 nranks 8 cudaDev 0 nvmlDev 0 busId 3d000 commId 0x84892302aee8fceb - Init COMPLETE
+IAP-A800:64713:64750 [4] NCCL INFO ncclCommInitRank comm 0x5faa2131f590 rank 4 nranks 8 cudaDev 4 nvmlDev 4 busId ad000 commId 0x84892302aee8fceb - Init COMPLETE
+IAP-A800:64713:64753 [7] NCCL INFO ncclCommInitRank comm 0x5faa21334830 rank 7 nranks 8 cudaDev 7 nvmlDev 7 busId d3000 commId 0x84892302aee8fceb - Init COMPLETE
+IAP-A800:64713:64751 [5] NCCL INFO ncclCommInitRank comm 0x5faa21326670 rank 5 nranks 8 cudaDev 5 nvmlDev 5 busId b1000 commId 0x84892302aee8fceb - Init COMPLETE
+IAP-A800:64713:64749 [3] NCCL INFO ncclCommInitRank comm 0x5faa213184b0 rank 3 nranks 8 cudaDev 3 nvmlDev 3 busId 67000 commId 0x84892302aee8fceb - Init COMPLETE
+IAP-A800:64713:64748 [2] NCCL INFO ncclCommInitRank comm 0x5faa213113d0 rank 2 nranks 8 cudaDev 2 nvmlDev 2 busId 61000 commId 0x84892302aee8fceb - Init COMPLETE
+IAP-A800:64713:64784 [7] NCCL INFO NCCL_PIPELINE_DEPTH set by environment to 4.
+IAP-A800:64713:64791 [7] NCCL INFO Using non-device net plugin version 0
+IAP-A800:64713:64791 [7] NCCL INFO Using network Socket
+IAP-A800:64713:64793 [6] NCCL INFO Using non-device net plugin version 0
+IAP-A800:64713:64793 [6] NCCL INFO Using network Socket
+IAP-A800:64713:64798 [5] NCCL INFO Using non-device net plugin version 0
+IAP-A800:64713:64798 [5] NCCL INFO Using network Socket
+IAP-A800:64713:64792 [1] NCCL INFO Using non-device net plugin version 0
+IAP-A800:64713:64792 [1] NCCL INFO Using network Socket
+IAP-A800:64713:64797 [3] NCCL INFO Using non-device net plugin version 0
+IAP-A800:64713:64797 [3] NCCL INFO Using network Socket
+IAP-A800:64713:64794 [2] NCCL INFO Using non-device net plugin version 0
+IAP-A800:64713:64794 [2] NCCL INFO Using network Socket
+IAP-A800:64713:64796 [4] NCCL INFO Using non-device net plugin version 0
+IAP-A800:64713:64795 [0] NCCL INFO Using non-device net plugin version 0
+IAP-A800:64713:64796 [4] NCCL INFO Using network Socket
+IAP-A800:64713:64795 [0] NCCL INFO Using network Socket
+IAP-A800:64713:64794 [2] NCCL INFO bootstrapSplit: comm 0x74e9cc0b8f10 parent 0x5faa213113d0 rank 2 nranks 8 color 0 key 2 prev 1 next 3 - DONE
+IAP-A800:64713:64794 [2] NCCL INFO ncclCommSplit comm 0x74e9cc0b8f10 rank 2 nranks 8 cudaDev 2 nvmlDev 2 busId 61000 parent 0x5faa213113d0 color 0 key 2 commId 0xcdf103514927715e - Init START
+IAP-A800:64713:64791 [7] NCCL INFO bootstrapSplit: comm 0x74f027809d80 parent 0x5faa21334830 rank 7 nranks 8 color 0 key 7 prev 6 next 0 - DONE
+IAP-A800:64713:64791 [7] NCCL INFO ncclCommSplit comm 0x74f027809d80 rank 7 nranks 8 cudaDev 7 nvmlDev 7 busId d3000 parent 0x5faa21334830 color 0 key 7 commId 0xcdf103514927715e - Init START
+IAP-A800:64713:64795 [0] NCCL INFO bootstrapSplit: comm 0x5faa2142b0a0 parent 0x5faa212ff8b0 rank 0 nranks 8 color 0 key 0 prev 7 next 1 - DONE
+IAP-A800:64713:64795 [0] NCCL INFO ncclCommSplit comm 0x5faa2142b0a0 rank 0 nranks 8 cudaDev 0 nvmlDev 0 busId 3d000 parent 0x5faa212ff8b0 color 0 key 0 commId 0xcdf103514927715e - Init START
+IAP-A800:64713:64793 [6] NCCL INFO bootstrapSplit: comm 0x74ebeb884190 parent 0x5faa2132d750 rank 6 nranks 8 color 0 key 6 prev 5 next 7 - DONE
+IAP-A800:64713:64793 [6] NCCL INFO ncclCommSplit comm 0x74ebeb884190 rank 6 nranks 8 cudaDev 6 nvmlDev 6 busId d0000 parent 0x5faa2132d750 color 0 key 6 commId 0xcdf103514927715e - Init START
+IAP-A800:64713:64797 [3] NCCL INFO bootstrapSplit: comm 0x74ee078841e0 parent 0x5faa213184b0 rank 3 nranks 8 color 0 key 3 prev 2 next 4 - DONE
+IAP-A800:64713:64797 [3] NCCL INFO ncclCommSplit comm 0x74ee078841e0 rank 3 nranks 8 cudaDev 3 nvmlDev 3 busId 67000 parent 0x5faa213184b0 color 0 key 3 commId 0xcdf103514927715e - Init START
+IAP-A800:64713:64796 [4] NCCL INFO bootstrapSplit: comm 0x74ebe7874be0 parent 0x5faa2131f590 rank 4 nranks 8 color 0 key 4 prev 3 next 5 - DONE
+IAP-A800:64713:64792 [1] NCCL INFO bootstrapSplit: comm 0x74ebf38d5db0 parent 0x5faa2130a280 rank 1 nranks 8 color 0 key 1 prev 0 next 2 - DONE
+IAP-A800:64713:64798 [5] NCCL INFO bootstrapSplit: comm 0x74e9db898710 parent 0x5faa21326670 rank 5 nranks 8 color 0 key 5 prev 4 next 6 - DONE
+IAP-A800:64713:64796 [4] NCCL INFO ncclCommSplit comm 0x74ebe7874be0 rank 4 nranks 8 cudaDev 4 nvmlDev 4 busId ad000 parent 0x5faa2131f590 color 0 key 4 commId 0xcdf103514927715e - Init START
+IAP-A800:64713:64792 [1] NCCL INFO ncclCommSplit comm 0x74ebf38d5db0 rank 1 nranks 8 cudaDev 1 nvmlDev 1 busId 42000 parent 0x5faa2130a280 color 0 key 1 commId 0xcdf103514927715e - Init START
+IAP-A800:64713:64798 [5] NCCL INFO ncclCommSplit comm 0x74e9db898710 rank 5 nranks 8 cudaDev 5 nvmlDev 5 busId b1000 parent 0x5faa21326670 color 0 key 5 commId 0xcdf103514927715e - Init START
+IAP-A800:64713:64791 [7] NCCL INFO Setting affinity for GPU 7 to ffffffff,00000000,ffffffff,00000000
+IAP-A800:64713:64791 [7] NCCL INFO NVLS multicast support is not available on dev 7
+IAP-A800:64713:64796 [4] NCCL INFO Setting affinity for GPU 4 to ffffffff,00000000,ffffffff,00000000
+IAP-A800:64713:64796 [4] NCCL INFO NVLS multicast support is not available on dev 4
+IAP-A800:64713:64798 [5] NCCL INFO Setting affinity for GPU 5 to ffffffff,00000000,ffffffff,00000000
+IAP-A800:64713:64798 [5] NCCL INFO NVLS multicast support is not available on dev 5
+IAP-A800:64713:64794 [2] NCCL INFO Setting affinity for GPU 2 to ffffffff,00000000,ffffffff
+IAP-A800:64713:64794 [2] NCCL INFO NVLS multicast support is not available on dev 2
+IAP-A800:64713:64792 [1] NCCL INFO Setting affinity for GPU 1 to ffffffff,00000000,ffffffff
+IAP-A800:64713:64792 [1] NCCL INFO NVLS multicast support is not available on dev 1
+IAP-A800:64713:64793 [6] NCCL INFO Setting affinity for GPU 6 to ffffffff,00000000,ffffffff,00000000
+IAP-A800:64713:64793 [6] NCCL INFO NVLS multicast support is not available on dev 6
+IAP-A800:64713:64795 [0] NCCL INFO Setting affinity for GPU 0 to ffffffff,00000000,ffffffff
+IAP-A800:64713:64795 [0] NCCL INFO NVLS multicast support is not available on dev 0
+IAP-A800:64713:64797 [3] NCCL INFO Setting affinity for GPU 3 to ffffffff,00000000,ffffffff
+IAP-A800:64713:64797 [3] NCCL INFO NVLS multicast support is not available on dev 3
+IAP-A800:64713:64791 [7] NCCL INFO comm 0x74f027809d80 rank 7 nRanks 8 nNodes 1 localRanks 8 localRank 7 MNNVL 0
+IAP-A800:64713:64792 [1] NCCL INFO comm 0x74ebf38d5db0 rank 1 nRanks 8 nNodes 1 localRanks 8 localRank 1 MNNVL 0
+IAP-A800:64713:64795 [0] NCCL INFO comm 0x5faa2142b0a0 rank 0 nRanks 8 nNodes 1 localRanks 8 localRank 0 MNNVL 0
+IAP-A800:64713:64798 [5] NCCL INFO comm 0x74e9db898710 rank 5 nRanks 8 nNodes 1 localRanks 8 localRank 5 MNNVL 0
+IAP-A800:64713:64791 [7] NCCL INFO Trees [0] -1/-1/-1->7->6 [1] -1/-1/-1->7->6 [2] -1/-1/-1->7->6 [3] -1/-1/-1->7->6 [4] -1/-1/-1->7->6 [5] -1/-1/-1->7->6 [6] -1/-1/-1->7->6 [7] -1/-1/-1->7->6 [8] -1/-1/-1->7->6 [9] -1/-1/-1->7->6 [10] -1/-1/-1->7->6 [11] -1/-1/-1->7->6 [12] -1/-1/-1->7->6 [13] -1/-1/-1->7->6 [14] -1/-1/-1->7->6 [15] -1/-1/-1->7->6
+IAP-A800:64713:64793 [6] NCCL INFO comm 0x74ebeb884190 rank 6 nRanks 8 nNodes 1 localRanks 8 localRank 6 MNNVL 0
+IAP-A800:64713:64795 [0] NCCL INFO Channel 00/16 :    0   1   2   3   4   5   6   7
+IAP-A800:64713:64796 [4] NCCL INFO comm 0x74ebe7874be0 rank 4 nRanks 8 nNodes 1 localRanks 8 localRank 4 MNNVL 0
+IAP-A800:64713:64795 [0] NCCL INFO Channel 01/16 :    0   1   2   3   4   5   6   7
+IAP-A800:64713:64791 [7] NCCL INFO P2P Chunksize set to 524288
+IAP-A800:64713:64797 [3] NCCL INFO comm 0x74ee078841e0 rank 3 nRanks 8 nNodes 1 localRanks 8 localRank 3 MNNVL 0
+IAP-A800:64713:64796 [4] NCCL INFO Trees [0] 5/-1/-1->4->3 [1] 5/-1/-1->4->3 [2] 5/-1/-1->4->3 [3] 5/-1/-1->4->3 [4] 5/-1/-1->4->3 [5] 5/-1/-1->4->3 [6] 5/-1/-1->4->3 [7] 5/-1/-1->4->3 [8] 5/-1/-1->4->3 [9] 5/-1/-1->4->3 [10] 5/-1/-1->4->3 [11] 5/-1/-1->4->3 [12] 5/-1/-1->4->3 [13] 5/-1/-1->4->3 [14] 5/-1/-1->4->3 [15] 5/-1/-1->4->3
+IAP-A800:64713:64796 [4] NCCL INFO P2P Chunksize set to 524288
+IAP-A800:64713:64792 [1] NCCL INFO Trees [0] 2/-1/-1->1->0 [1] 2/-1/-1->1->0 [2] 2/-1/-1->1->0 [3] 2/-1/-1->1->0 [4] 2/-1/-1->1->0 [5] 2/-1/-1->1->0 [6] 2/-1/-1->1->0 [7] 2/-1/-1->1->0 [8] 2/-1/-1->1->0 [9] 2/-1/-1->1->0 [10] 2/-1/-1->1->0 [11] 2/-1/-1->1->0 [12] 2/-1/-1->1->0 [13] 2/-1/-1->1->0 [14] 2/-1/-1->1->0 [15] 2/-1/-1->1->0
+IAP-A800:64713:64793 [6] NCCL INFO Trees [0] 7/-1/-1->6->5 [1] 7/-1/-1->6->5 [2] 7/-1/-1->6->5 [3] 7/-1/-1->6->5 [4] 7/-1/-1->6->5 [5] 7/-1/-1->6->5 [6] 7/-1/-1->6->5 [7] 7/-1/-1->6->5 [8] 7/-1/-1->6->5 [9] 7/-1/-1->6->5 [10] 7/-1/-1->6->5 [11] 7/-1/-1->6->5 [12] 7/-1/-1->6->5 [13] 7/-1/-1->6->5 [14] 7/-1/-1->6->5 [15] 7/-1/-1->6->5
+IAP-A800:64713:64792 [1] NCCL INFO P2P Chunksize set to 524288
+IAP-A800:64713:64797 [3] NCCL INFO Trees [0] 4/-1/-1->3->2 [1] 4/-1/-1->3->2 [2] 4/-1/-1->3->2 [3] 4/-1/-1->3->2 [4] 4/-1/-1->3->2 [5] 4/-1/-1->3->2 [6] 4/-1/-1->3->2 [7] 4/-1/-1->3->2 [8] 4/-1/-1->3->2 [9] 4/-1/-1->3->2 [10] 4/-1/-1->3->2 [11] 4/-1/-1->3->2 [12] 4/-1/-1->3->2 [13] 4/-1/-1->3->2 [14] 4/-1/-1->3->2 [15] 4/-1/-1->3->2
+IAP-A800:64713:64797 [3] NCCL INFO P2P Chunksize set to 524288
+IAP-A800:64713:64793 [6] NCCL INFO P2P Chunksize set to 524288
+IAP-A800:64713:64795 [0] NCCL INFO Channel 02/16 :    0   1   2   3   4   5   6   7
+IAP-A800:64713:64798 [5] NCCL INFO Trees [0] 6/-1/-1->5->4 [1] 6/-1/-1->5->4 [2] 6/-1/-1->5->4 [3] 6/-1/-1->5->4 [4] 6/-1/-1->5->4 [5] 6/-1/-1->5->4 [6] 6/-1/-1->5->4 [7] 6/-1/-1->5->4 [8] 6/-1/-1->5->4 [9] 6/-1/-1->5->4 [10] 6/-1/-1->5->4 [11] 6/-1/-1->5->4 [12] 6/-1/-1->5->4 [13] 6/-1/-1->5->4 [14] 6/-1/-1->5->4 [15] 6/-1/-1->5->4
+IAP-A800:64713:64794 [2] NCCL INFO comm 0x74e9cc0b8f10 rank 2 nRanks 8 nNodes 1 localRanks 8 localRank 2 MNNVL 0
+IAP-A800:64713:64795 [0] NCCL INFO Channel 03/16 :    0   1   2   3   4   5   6   7
+IAP-A800:64713:64795 [0] NCCL INFO Channel 04/16 :    0   1   2   3   4   5   6   7
+IAP-A800:64713:64795 [0] NCCL INFO Channel 05/16 :    0   1   2   3   4   5   6   7
+IAP-A800:64713:64795 [0] NCCL INFO Channel 06/16 :    0   1   2   3   4   5   6   7
+IAP-A800:64713:64798 [5] NCCL INFO P2P Chunksize set to 524288
+IAP-A800:64713:64795 [0] NCCL INFO Channel 07/16 :    0   1   2   3   4   5   6   7
+IAP-A800:64713:64794 [2] NCCL INFO Trees [0] 3/-1/-1->2->1 [1] 3/-1/-1->2->1 [2] 3/-1/-1->2->1 [3] 3/-1/-1->2->1 [4] 3/-1/-1->2->1 [5] 3/-1/-1->2->1 [6] 3/-1/-1->2->1 [7] 3/-1/-1->2->1 [8] 3/-1/-1->2->1 [9] 3/-1/-1->2->1 [10] 3/-1/-1->2->1 [11] 3/-1/-1->2->1 [12] 3/-1/-1->2->1 [13] 3/-1/-1->2->1 [14] 3/-1/-1->2->1 [15] 3/-1/-1->2->1
+IAP-A800:64713:64795 [0] NCCL INFO Channel 08/16 :    0   1   2   3   4   5   6   7
+IAP-A800:64713:64794 [2] NCCL INFO P2P Chunksize set to 524288
+IAP-A800:64713:64795 [0] NCCL INFO Channel 09/16 :    0   1   2   3   4   5   6   7
+IAP-A800:64713:64795 [0] NCCL INFO Channel 10/16 :    0   1   2   3   4   5   6   7
+IAP-A800:64713:64795 [0] NCCL INFO Channel 11/16 :    0   1   2   3   4   5   6   7
+IAP-A800:64713:64795 [0] NCCL INFO Channel 12/16 :    0   1   2   3   4   5   6   7
+IAP-A800:64713:64795 [0] NCCL INFO Channel 13/16 :    0   1   2   3   4   5   6   7
+IAP-A800:64713:64795 [0] NCCL INFO Channel 14/16 :    0   1   2   3   4   5   6   7
+IAP-A800:64713:64795 [0] NCCL INFO Channel 15/16 :    0   1   2   3   4   5   6   7
+IAP-A800:64713:64795 [0] NCCL INFO Trees [0] 1/-1/-1->0->-1 [1] 1/-1/-1->0->-1 [2] 1/-1/-1->0->-1 [3] 1/-1/-1->0->-1 [4] 1/-1/-1->0->-1 [5] 1/-1/-1->0->-1 [6] 1/-1/-1->0->-1 [7] 1/-1/-1->0->-1 [8] 1/-1/-1->0->-1 [9] 1/-1/-1->0->-1 [10] 1/-1/-1->0->-1 [11] 1/-1/-1->0->-1 [12] 1/-1/-1->0->-1 [13] 1/-1/-1->0->-1 [14] 1/-1/-1->0->-1 [15] 1/-1/-1->0->-1
+IAP-A800:64713:64795 [0] NCCL INFO P2P Chunksize set to 524288
+IAP-A800:64713:64791 [7] NCCL INFO Channel 00/0 : 7[7] -> 0[0] via P2P/direct pointer/read
+IAP-A800:64713:64791 [7] NCCL INFO Channel 01/0 : 7[7] -> 0[0] via P2P/direct pointer/read
+IAP-A800:64713:64791 [7] NCCL INFO Channel 02/0 : 7[7] -> 0[0] via P2P/direct pointer/read
+IAP-A800:64713:64791 [7] NCCL INFO Channel 03/0 : 7[7] -> 0[0] via P2P/direct pointer/read
+IAP-A800:64713:64791 [7] NCCL INFO Channel 04/0 : 7[7] -> 0[0] via P2P/direct pointer/read
+IAP-A800:64713:64791 [7] NCCL INFO Channel 05/0 : 7[7] -> 0[0] via P2P/direct pointer/read
+IAP-A800:64713:64791 [7] NCCL INFO Channel 06/0 : 7[7] -> 0[0] via P2P/direct pointer/read
+IAP-A800:64713:64791 [7] NCCL INFO Channel 07/0 : 7[7] -> 0[0] via P2P/direct pointer/read
+IAP-A800:64713:64791 [7] NCCL INFO Channel 08/0 : 7[7] -> 0[0] via P2P/direct pointer/read
+IAP-A800:64713:64791 [7] NCCL INFO Channel 09/0 : 7[7] -> 0[0] via P2P/direct pointer/read
+IAP-A800:64713:64791 [7] NCCL INFO Channel 10/0 : 7[7] -> 0[0] via P2P/direct pointer/read
+IAP-A800:64713:64796 [4] NCCL INFO Channel 00/0 : 4[4] -> 5[5] via P2P/direct pointer/read
+IAP-A800:64713:64791 [7] NCCL INFO Channel 11/0 : 7[7] -> 0[0] via P2P/direct pointer/read
+IAP-A800:64713:64791 [7] NCCL INFO Channel 12/0 : 7[7] -> 0[0] via P2P/direct pointer/read
+IAP-A800:64713:64796 [4] NCCL INFO Channel 01/0 : 4[4] -> 5[5] via P2P/direct pointer/read
+IAP-A800:64713:64791 [7] NCCL INFO Channel 13/0 : 7[7] -> 0[0] via P2P/direct pointer/read
+IAP-A800:64713:64796 [4] NCCL INFO Channel 02/0 : 4[4] -> 5[5] via P2P/direct pointer/read
+IAP-A800:64713:64791 [7] NCCL INFO Channel 14/0 : 7[7] -> 0[0] via P2P/direct pointer/read
+IAP-A800:64713:64796 [4] NCCL INFO Channel 03/0 : 4[4] -> 5[5] via P2P/direct pointer/read
+IAP-A800:64713:64791 [7] NCCL INFO Channel 15/0 : 7[7] -> 0[0] via P2P/direct pointer/read
+IAP-A800:64713:64796 [4] NCCL INFO Channel 04/0 : 4[4] -> 5[5] via P2P/direct pointer/read
+IAP-A800:64713:64793 [6] NCCL INFO Channel 00/0 : 6[6] -> 7[7] via P2P/direct pointer/read
+IAP-A800:64713:64796 [4] NCCL INFO Channel 05/0 : 4[4] -> 5[5] via P2P/direct pointer/read
+IAP-A800:64713:64793 [6] NCCL INFO Channel 01/0 : 6[6] -> 7[7] via P2P/direct pointer/read
+IAP-A800:64713:64796 [4] NCCL INFO Channel 06/0 : 4[4] -> 5[5] via P2P/direct pointer/read
+IAP-A800:64713:64793 [6] NCCL INFO Channel 02/0 : 6[6] -> 7[7] via P2P/direct pointer/read
+IAP-A800:64713:64796 [4] NCCL INFO Channel 07/0 : 4[4] -> 5[5] via P2P/direct pointer/read
+IAP-A800:64713:64795 [0] NCCL INFO Channel 00/0 : 0[0] -> 1[1] via P2P/direct pointer/read
+IAP-A800:64713:64798 [5] NCCL INFO Channel 00/0 : 5[5] -> 6[6] via P2P/direct pointer/read
+IAP-A800:64713:64793 [6] NCCL INFO Channel 03/0 : 6[6] -> 7[7] via P2P/direct pointer/read
+IAP-A800:64713:64796 [4] NCCL INFO Channel 08/0 : 4[4] -> 5[5] via P2P/direct pointer/read
+IAP-A800:64713:64795 [0] NCCL INFO Channel 01/0 : 0[0] -> 1[1] via P2P/direct pointer/read
+IAP-A800:64713:64798 [5] NCCL INFO Channel 01/0 : 5[5] -> 6[6] via P2P/direct pointer/read
+IAP-A800:64713:64796 [4] NCCL INFO Channel 09/0 : 4[4] -> 5[5] via P2P/direct pointer/read
+IAP-A800:64713:64793 [6] NCCL INFO Channel 04/0 : 6[6] -> 7[7] via P2P/direct pointer/read
+IAP-A800:64713:64795 [0] NCCL INFO Channel 02/0 : 0[0] -> 1[1] via P2P/direct pointer/read
+IAP-A800:64713:64798 [5] NCCL INFO Channel 02/0 : 5[5] -> 6[6] via P2P/direct pointer/read
+IAP-A800:64713:64796 [4] NCCL INFO Channel 10/0 : 4[4] -> 5[5] via P2P/direct pointer/read
+IAP-A800:64713:64795 [0] NCCL INFO Channel 03/0 : 0[0] -> 1[1] via P2P/direct pointer/read
+IAP-A800:64713:64798 [5] NCCL INFO Channel 03/0 : 5[5] -> 6[6] via P2P/direct pointer/read
+IAP-A800:64713:64796 [4] NCCL INFO Channel 11/0 : 4[4] -> 5[5] via P2P/direct pointer/read
+IAP-A800:64713:64795 [0] NCCL INFO Channel 04/0 : 0[0] -> 1[1] via P2P/direct pointer/read
+IAP-A800:64713:64793 [6] NCCL INFO Channel 05/0 : 6[6] -> 7[7] via P2P/direct pointer/read
+IAP-A800:64713:64798 [5] NCCL INFO Channel 04/0 : 5[5] -> 6[6] via P2P/direct pointer/read
+IAP-A800:64713:64793 [6] NCCL INFO Channel 06/0 : 6[6] -> 7[7] via P2P/direct pointer/read
+IAP-A800:64713:64792 [1] NCCL INFO Channel 00/0 : 1[1] -> 2[2] via P2P/direct pointer/read
+IAP-A800:64713:64795 [0] NCCL INFO Channel 05/0 : 0[0] -> 1[1] via P2P/direct pointer/read
+IAP-A800:64713:64796 [4] NCCL INFO Channel 12/0 : 4[4] -> 5[5] via P2P/direct pointer/read
+IAP-A800:64713:64793 [6] NCCL INFO Channel 07/0 : 6[6] -> 7[7] via P2P/direct pointer/read
+IAP-A800:64713:64798 [5] NCCL INFO Channel 05/0 : 5[5] -> 6[6] via P2P/direct pointer/read
+IAP-A800:64713:64795 [0] NCCL INFO Channel 06/0 : 0[0] -> 1[1] via P2P/direct pointer/read
+IAP-A800:64713:64792 [1] NCCL INFO Channel 01/0 : 1[1] -> 2[2] via P2P/direct pointer/read
+IAP-A800:64713:64794 [2] NCCL INFO Channel 00/0 : 2[2] -> 3[3] via P2P/direct pointer/read
+IAP-A800:64713:64793 [6] NCCL INFO Channel 08/0 : 6[6] -> 7[7] via P2P/direct pointer/read
+IAP-A800:64713:64795 [0] NCCL INFO Channel 07/0 : 0[0] -> 1[1] via P2P/direct pointer/read
+IAP-A800:64713:64792 [1] NCCL INFO Channel 02/0 : 1[1] -> 2[2] via P2P/direct pointer/read
+IAP-A800:64713:64796 [4] NCCL INFO Channel 13/0 : 4[4] -> 5[5] via P2P/direct pointer/read
+IAP-A800:64713:64794 [2] NCCL INFO Channel 01/0 : 2[2] -> 3[3] via P2P/direct pointer/read
+IAP-A800:64713:64797 [3] NCCL INFO Channel 00/0 : 3[3] -> 4[4] via P2P/direct pointer/read
+IAP-A800:64713:64798 [5] NCCL INFO Channel 06/0 : 5[5] -> 6[6] via P2P/direct pointer/read
+IAP-A800:64713:64793 [6] NCCL INFO Channel 09/0 : 6[6] -> 7[7] via P2P/direct pointer/read
+IAP-A800:64713:64796 [4] NCCL INFO Channel 14/0 : 4[4] -> 5[5] via P2P/direct pointer/read
+IAP-A800:64713:64795 [0] NCCL INFO Channel 08/0 : 0[0] -> 1[1] via P2P/direct pointer/read
+IAP-A800:64713:64792 [1] NCCL INFO Channel 03/0 : 1[1] -> 2[2] via P2P/direct pointer/read
+IAP-A800:64713:64797 [3] NCCL INFO Channel 01/0 : 3[3] -> 4[4] via P2P/direct pointer/read
+IAP-A800:64713:64793 [6] NCCL INFO Channel 10/0 : 6[6] -> 7[7] via P2P/direct pointer/read
+IAP-A800:64713:64794 [2] NCCL INFO Channel 02/0 : 2[2] -> 3[3] via P2P/direct pointer/read
+IAP-A800:64713:64798 [5] NCCL INFO Channel 07/0 : 5[5] -> 6[6] via P2P/direct pointer/read
+IAP-A800:64713:64796 [4] NCCL INFO Channel 15/0 : 4[4] -> 5[5] via P2P/direct pointer/read
+IAP-A800:64713:64795 [0] NCCL INFO Channel 09/0 : 0[0] -> 1[1] via P2P/direct pointer/read
+IAP-A800:64713:64792 [1] NCCL INFO Channel 04/0 : 1[1] -> 2[2] via P2P/direct pointer/read
+IAP-A800:64713:64797 [3] NCCL INFO Channel 02/0 : 3[3] -> 4[4] via P2P/direct pointer/read
+IAP-A800:64713:64798 [5] NCCL INFO Channel 08/0 : 5[5] -> 6[6] via P2P/direct pointer/read
+IAP-A800:64713:64793 [6] NCCL INFO Channel 11/0 : 6[6] -> 7[7] via P2P/direct pointer/read
+IAP-A800:64713:64795 [0] NCCL INFO Channel 10/0 : 0[0] -> 1[1] via P2P/direct pointer/read
+IAP-A800:64713:64794 [2] NCCL INFO Channel 03/0 : 2[2] -> 3[3] via P2P/direct pointer/read
+IAP-A800:64713:64792 [1] NCCL INFO Channel 05/0 : 1[1] -> 2[2] via P2P/direct pointer/read
+IAP-A800:64713:64795 [0] NCCL INFO Channel 11/0 : 0[0] -> 1[1] via P2P/direct pointer/read
+IAP-A800:64713:64793 [6] NCCL INFO Channel 12/0 : 6[6] -> 7[7] via P2P/direct pointer/read
+IAP-A800:64713:64798 [5] NCCL INFO Channel 09/0 : 5[5] -> 6[6] via P2P/direct pointer/read
+IAP-A800:64713:64797 [3] NCCL INFO Channel 03/0 : 3[3] -> 4[4] via P2P/direct pointer/read
+IAP-A800:64713:64792 [1] NCCL INFO Channel 06/0 : 1[1] -> 2[2] via P2P/direct pointer/read
+IAP-A800:64713:64794 [2] NCCL INFO Channel 04/0 : 2[2] -> 3[3] via P2P/direct pointer/read
+IAP-A800:64713:64795 [0] NCCL INFO Channel 12/0 : 0[0] -> 1[1] via P2P/direct pointer/read
+IAP-A800:64713:64793 [6] NCCL INFO Channel 13/0 : 6[6] -> 7[7] via P2P/direct pointer/read
+IAP-A800:64713:64797 [3] NCCL INFO Channel 04/0 : 3[3] -> 4[4] via P2P/direct pointer/read
+IAP-A800:64713:64798 [5] NCCL INFO Channel 10/0 : 5[5] -> 6[6] via P2P/direct pointer/read
+IAP-A800:64713:64794 [2] NCCL INFO Channel 05/0 : 2[2] -> 3[3] via P2P/direct pointer/read
+IAP-A800:64713:64792 [1] NCCL INFO Channel 07/0 : 1[1] -> 2[2] via P2P/direct pointer/read
+IAP-A800:64713:64793 [6] NCCL INFO Channel 14/0 : 6[6] -> 7[7] via P2P/direct pointer/read
+IAP-A800:64713:64797 [3] NCCL INFO Channel 05/0 : 3[3] -> 4[4] via P2P/direct pointer/read
+IAP-A800:64713:64798 [5] NCCL INFO Channel 11/0 : 5[5] -> 6[6] via P2P/direct pointer/read
+IAP-A800:64713:64795 [0] NCCL INFO Channel 13/0 : 0[0] -> 1[1] via P2P/direct pointer/read
+IAP-A800:64713:64793 [6] NCCL INFO Channel 15/0 : 6[6] -> 7[7] via P2P/direct pointer/read
+IAP-A800:64713:64797 [3] NCCL INFO Channel 06/0 : 3[3] -> 4[4] via P2P/direct pointer/read
+IAP-A800:64713:64792 [1] NCCL INFO Channel 08/0 : 1[1] -> 2[2] via P2P/direct pointer/read
+IAP-A800:64713:64794 [2] NCCL INFO Channel 06/0 : 2[2] -> 3[3] via P2P/direct pointer/read
+IAP-A800:64713:64798 [5] NCCL INFO Channel 12/0 : 5[5] -> 6[6] via P2P/direct pointer/read
+IAP-A800:64713:64795 [0] NCCL INFO Channel 14/0 : 0[0] -> 1[1] via P2P/direct pointer/read
+IAP-A800:64713:64797 [3] NCCL INFO Channel 07/0 : 3[3] -> 4[4] via P2P/direct pointer/read
+IAP-A800:64713:64792 [1] NCCL INFO Channel 09/0 : 1[1] -> 2[2] via P2P/direct pointer/read
+IAP-A800:64713:64795 [0] NCCL INFO Channel 15/0 : 0[0] -> 1[1] via P2P/direct pointer/read
+IAP-A800:64713:64794 [2] NCCL INFO Channel 07/0 : 2[2] -> 3[3] via P2P/direct pointer/read
+IAP-A800:64713:64798 [5] NCCL INFO Channel 13/0 : 5[5] -> 6[6] via P2P/direct pointer/read
+IAP-A800:64713:64797 [3] NCCL INFO Channel 08/0 : 3[3] -> 4[4] via P2P/direct pointer/read
+IAP-A800:64713:64792 [1] NCCL INFO Channel 10/0 : 1[1] -> 2[2] via P2P/direct pointer/read
+IAP-A800:64713:64794 [2] NCCL INFO Channel 08/0 : 2[2] -> 3[3] via P2P/direct pointer/read
+IAP-A800:64713:64797 [3] NCCL INFO Channel 09/0 : 3[3] -> 4[4] via P2P/direct pointer/read
+IAP-A800:64713:64792 [1] NCCL INFO Channel 11/0 : 1[1] -> 2[2] via P2P/direct pointer/read
+IAP-A800:64713:64798 [5] NCCL INFO Channel 14/0 : 5[5] -> 6[6] via P2P/direct pointer/read
+IAP-A800:64713:64794 [2] NCCL INFO Channel 09/0 : 2[2] -> 3[3] via P2P/direct pointer/read
+IAP-A800:64713:64797 [3] NCCL INFO Channel 10/0 : 3[3] -> 4[4] via P2P/direct pointer/read
+IAP-A800:64713:64798 [5] NCCL INFO Channel 15/0 : 5[5] -> 6[6] via P2P/direct pointer/read
+IAP-A800:64713:64792 [1] NCCL INFO Channel 12/0 : 1[1] -> 2[2] via P2P/direct pointer/read
+IAP-A800:64713:64797 [3] NCCL INFO Channel 11/0 : 3[3] -> 4[4] via P2P/direct pointer/read
+IAP-A800:64713:64794 [2] NCCL INFO Channel 10/0 : 2[2] -> 3[3] via P2P/direct pointer/read
+IAP-A800:64713:64792 [1] NCCL INFO Channel 13/0 : 1[1] -> 2[2] via P2P/direct pointer/read
+IAP-A800:64713:64794 [2] NCCL INFO Channel 11/0 : 2[2] -> 3[3] via P2P/direct pointer/read
+IAP-A800:64713:64797 [3] NCCL INFO Channel 12/0 : 3[3] -> 4[4] via P2P/direct pointer/read
+IAP-A800:64713:64792 [1] NCCL INFO Channel 14/0 : 1[1] -> 2[2] via P2P/direct pointer/read
+IAP-A800:64713:64797 [3] NCCL INFO Channel 13/0 : 3[3] -> 4[4] via P2P/direct pointer/read
+IAP-A800:64713:64794 [2] NCCL INFO Channel 12/0 : 2[2] -> 3[3] via P2P/direct pointer/read
+IAP-A800:64713:64792 [1] NCCL INFO Channel 15/0 : 1[1] -> 2[2] via P2P/direct pointer/read
+IAP-A800:64713:64797 [3] NCCL INFO Channel 14/0 : 3[3] -> 4[4] via P2P/direct pointer/read
+IAP-A800:64713:64794 [2] NCCL INFO Channel 13/0 : 2[2] -> 3[3] via P2P/direct pointer/read
+IAP-A800:64713:64797 [3] NCCL INFO Channel 15/0 : 3[3] -> 4[4] via P2P/direct pointer/read
+IAP-A800:64713:64794 [2] NCCL INFO Channel 14/0 : 2[2] -> 3[3] via P2P/direct pointer/read
+IAP-A800:64713:64794 [2] NCCL INFO Channel 15/0 : 2[2] -> 3[3] via P2P/direct pointer/read
+IAP-A800:64713:64793 [6] NCCL INFO Connected all rings
+IAP-A800:64713:64791 [7] NCCL INFO Connected all rings
+IAP-A800:64713:64791 [7] NCCL INFO Channel 00/0 : 7[7] -> 6[6] via P2P/direct pointer/read
+IAP-A800:64713:64791 [7] NCCL INFO Channel 01/0 : 7[7] -> 6[6] via P2P/direct pointer/read
+IAP-A800:64713:64791 [7] NCCL INFO Channel 02/0 : 7[7] -> 6[6] via P2P/direct pointer/read
+IAP-A800:64713:64791 [7] NCCL INFO Channel 03/0 : 7[7] -> 6[6] via P2P/direct pointer/read
+IAP-A800:64713:64791 [7] NCCL INFO Channel 04/0 : 7[7] -> 6[6] via P2P/direct pointer/read
+IAP-A800:64713:64791 [7] NCCL INFO Channel 05/0 : 7[7] -> 6[6] via P2P/direct pointer/read
+IAP-A800:64713:64798 [5] NCCL INFO Connected all rings
+IAP-A800:64713:64791 [7] NCCL INFO Channel 06/0 : 7[7] -> 6[6] via P2P/direct pointer/read
+IAP-A800:64713:64795 [0] NCCL INFO Connected all rings
+IAP-A800:64713:64792 [1] NCCL INFO Connected all rings
+IAP-A800:64713:64791 [7] NCCL INFO Channel 07/0 : 7[7] -> 6[6] via P2P/direct pointer/read
+IAP-A800:64713:64791 [7] NCCL INFO Channel 08/0 : 7[7] -> 6[6] via P2P/direct pointer/read
+IAP-A800:64713:64791 [7] NCCL INFO Channel 09/0 : 7[7] -> 6[6] via P2P/direct pointer/read
+IAP-A800:64713:64791 [7] NCCL INFO Channel 10/0 : 7[7] -> 6[6] via P2P/direct pointer/read
+IAP-A800:64713:64791 [7] NCCL INFO Channel 11/0 : 7[7] -> 6[6] via P2P/direct pointer/read
+IAP-A800:64713:64791 [7] NCCL INFO Channel 12/0 : 7[7] -> 6[6] via P2P/direct pointer/read
+IAP-A800:64713:64791 [7] NCCL INFO Channel 13/0 : 7[7] -> 6[6] via P2P/direct pointer/read
+IAP-A800:64713:64796 [4] NCCL INFO Connected all rings
+IAP-A800:64713:64794 [2] NCCL INFO Connected all rings
+IAP-A800:64713:64797 [3] NCCL INFO Connected all rings
+IAP-A800:64713:64791 [7] NCCL INFO Channel 14/0 : 7[7] -> 6[6] via P2P/direct pointer/read
+IAP-A800:64713:64793 [6] NCCL INFO Channel 00/0 : 6[6] -> 5[5] via P2P/direct pointer/read
+IAP-A800:64713:64791 [7] NCCL INFO Channel 15/0 : 7[7] -> 6[6] via P2P/direct pointer/read
+IAP-A800:64713:64793 [6] NCCL INFO Channel 01/0 : 6[6] -> 5[5] via P2P/direct pointer/read
+IAP-A800:64713:64793 [6] NCCL INFO Channel 02/0 : 6[6] -> 5[5] via P2P/direct pointer/read
+IAP-A800:64713:64793 [6] NCCL INFO Channel 03/0 : 6[6] -> 5[5] via P2P/direct pointer/read
+IAP-A800:64713:64793 [6] NCCL INFO Channel 04/0 : 6[6] -> 5[5] via P2P/direct pointer/read
+IAP-A800:64713:64793 [6] NCCL INFO Channel 05/0 : 6[6] -> 5[5] via P2P/direct pointer/read
+IAP-A800:64713:64793 [6] NCCL INFO Channel 06/0 : 6[6] -> 5[5] via P2P/direct pointer/read
+IAP-A800:64713:64793 [6] NCCL INFO Channel 07/0 : 6[6] -> 5[5] via P2P/direct pointer/read
+IAP-A800:64713:64793 [6] NCCL INFO Channel 08/0 : 6[6] -> 5[5] via P2P/direct pointer/read
+IAP-A800:64713:64793 [6] NCCL INFO Channel 09/0 : 6[6] -> 5[5] via P2P/direct pointer/read
+IAP-A800:64713:64793 [6] NCCL INFO Channel 10/0 : 6[6] -> 5[5] via P2P/direct pointer/read
+IAP-A800:64713:64792 [1] NCCL INFO Channel 00/0 : 1[1] -> 0[0] via P2P/direct pointer/read
+IAP-A800:64713:64798 [5] NCCL INFO Channel 00/0 : 5[5] -> 4[4] via P2P/direct pointer/read
+IAP-A800:64713:64793 [6] NCCL INFO Channel 11/0 : 6[6] -> 5[5] via P2P/direct pointer/read
+IAP-A800:64713:64798 [5] NCCL INFO Channel 01/0 : 5[5] -> 4[4] via P2P/direct pointer/read
+IAP-A800:64713:64792 [1] NCCL INFO Channel 01/0 : 1[1] -> 0[0] via P2P/direct pointer/read
+IAP-A800:64713:64793 [6] NCCL INFO Channel 12/0 : 6[6] -> 5[5] via P2P/direct pointer/read
+IAP-A800:64713:64798 [5] NCCL INFO Channel 02/0 : 5[5] -> 4[4] via P2P/direct pointer/read
+IAP-A800:64713:64793 [6] NCCL INFO Channel 13/0 : 6[6] -> 5[5] via P2P/direct pointer/read
+IAP-A800:64713:64792 [1] NCCL INFO Channel 02/0 : 1[1] -> 0[0] via P2P/direct pointer/read
+IAP-A800:64713:64798 [5] NCCL INFO Channel 03/0 : 5[5] -> 4[4] via P2P/direct pointer/read
+IAP-A800:64713:64792 [1] NCCL INFO Channel 03/0 : 1[1] -> 0[0] via P2P/direct pointer/read
+IAP-A800:64713:64793 [6] NCCL INFO Channel 14/0 : 6[6] -> 5[5] via P2P/direct pointer/read
+IAP-A800:64713:64798 [5] NCCL INFO Channel 04/0 : 5[5] -> 4[4] via P2P/direct pointer/read
+IAP-A800:64713:64792 [1] NCCL INFO Channel 04/0 : 1[1] -> 0[0] via P2P/direct pointer/read
+IAP-A800:64713:64793 [6] NCCL INFO Channel 15/0 : 6[6] -> 5[5] via P2P/direct pointer/read
+IAP-A800:64713:64798 [5] NCCL INFO Channel 05/0 : 5[5] -> 4[4] via P2P/direct pointer/read
+IAP-A800:64713:64792 [1] NCCL INFO Channel 05/0 : 1[1] -> 0[0] via P2P/direct pointer/read
+IAP-A800:64713:64798 [5] NCCL INFO Channel 06/0 : 5[5] -> 4[4] via P2P/direct pointer/read
+IAP-A800:64713:64794 [2] NCCL INFO Channel 00/0 : 2[2] -> 1[1] via P2P/direct pointer/read
+IAP-A800:64713:64798 [5] NCCL INFO Channel 07/0 : 5[5] -> 4[4] via P2P/direct pointer/read
+IAP-A800:64713:64796 [4] NCCL INFO Channel 00/0 : 4[4] -> 3[3] via P2P/direct pointer/read
+IAP-A800:64713:64797 [3] NCCL INFO Channel 00/0 : 3[3] -> 2[2] via P2P/direct pointer/read
+IAP-A800:64713:64792 [1] NCCL INFO Channel 06/0 : 1[1] -> 0[0] via P2P/direct pointer/read
+IAP-A800:64713:64798 [5] NCCL INFO Channel 08/0 : 5[5] -> 4[4] via P2P/direct pointer/read
+IAP-A800:64713:64796 [4] NCCL INFO Channel 01/0 : 4[4] -> 3[3] via P2P/direct pointer/read
+IAP-A800:64713:64792 [1] NCCL INFO Channel 07/0 : 1[1] -> 0[0] via P2P/direct pointer/read
+IAP-A800:64713:64797 [3] NCCL INFO Channel 01/0 : 3[3] -> 2[2] via P2P/direct pointer/read
+IAP-A800:64713:64798 [5] NCCL INFO Channel 09/0 : 5[5] -> 4[4] via P2P/direct pointer/read
+IAP-A800:64713:64794 [2] NCCL INFO Channel 01/0 : 2[2] -> 1[1] via P2P/direct pointer/read
+IAP-A800:64713:64792 [1] NCCL INFO Channel 08/0 : 1[1] -> 0[0] via P2P/direct pointer/read
+IAP-A800:64713:64797 [3] NCCL INFO Channel 02/0 : 3[3] -> 2[2] via P2P/direct pointer/read
+IAP-A800:64713:64796 [4] NCCL INFO Channel 02/0 : 4[4] -> 3[3] via P2P/direct pointer/read
+IAP-A800:64713:64798 [5] NCCL INFO Channel 10/0 : 5[5] -> 4[4] via P2P/direct pointer/read
+IAP-A800:64713:64794 [2] NCCL INFO Channel 02/0 : 2[2] -> 1[1] via P2P/direct pointer/read
+IAP-A800:64713:64792 [1] NCCL INFO Channel 09/0 : 1[1] -> 0[0] via P2P/direct pointer/read
+IAP-A800:64713:64796 [4] NCCL INFO Channel 03/0 : 4[4] -> 3[3] via P2P/direct pointer/read
+IAP-A800:64713:64794 [2] NCCL INFO Channel 03/0 : 2[2] -> 1[1] via P2P/direct pointer/read
+IAP-A800:64713:64797 [3] NCCL INFO Channel 03/0 : 3[3] -> 2[2] via P2P/direct pointer/read
+IAP-A800:64713:64798 [5] NCCL INFO Channel 11/0 : 5[5] -> 4[4] via P2P/direct pointer/read
+IAP-A800:64713:64792 [1] NCCL INFO Channel 10/0 : 1[1] -> 0[0] via P2P/direct pointer/read
+IAP-A800:64713:64796 [4] NCCL INFO Channel 04/0 : 4[4] -> 3[3] via P2P/direct pointer/read
+IAP-A800:64713:64794 [2] NCCL INFO Channel 04/0 : 2[2] -> 1[1] via P2P/direct pointer/read
+IAP-A800:64713:64797 [3] NCCL INFO Channel 04/0 : 3[3] -> 2[2] via P2P/direct pointer/read
+IAP-A800:64713:64792 [1] NCCL INFO Channel 11/0 : 1[1] -> 0[0] via P2P/direct pointer/read
+IAP-A800:64713:64798 [5] NCCL INFO Channel 12/0 : 5[5] -> 4[4] via P2P/direct pointer/read
+IAP-A800:64713:64796 [4] NCCL INFO Channel 05/0 : 4[4] -> 3[3] via P2P/direct pointer/read
+IAP-A800:64713:64794 [2] NCCL INFO Channel 05/0 : 2[2] -> 1[1] via P2P/direct pointer/read
+IAP-A800:64713:64797 [3] NCCL INFO Channel 05/0 : 3[3] -> 2[2] via P2P/direct pointer/read
+IAP-A800:64713:64792 [1] NCCL INFO Channel 12/0 : 1[1] -> 0[0] via P2P/direct pointer/read
+IAP-A800:64713:64798 [5] NCCL INFO Channel 13/0 : 5[5] -> 4[4] via P2P/direct pointer/read
+IAP-A800:64713:64794 [2] NCCL INFO Channel 06/0 : 2[2] -> 1[1] via P2P/direct pointer/read
+IAP-A800:64713:64796 [4] NCCL INFO Channel 06/0 : 4[4] -> 3[3] via P2P/direct pointer/read
+IAP-A800:64713:64797 [3] NCCL INFO Channel 06/0 : 3[3] -> 2[2] via P2P/direct pointer/read
+IAP-A800:64713:64792 [1] NCCL INFO Channel 13/0 : 1[1] -> 0[0] via P2P/direct pointer/read
+IAP-A800:64713:64798 [5] NCCL INFO Channel 14/0 : 5[5] -> 4[4] via P2P/direct pointer/read
+IAP-A800:64713:64794 [2] NCCL INFO Channel 07/0 : 2[2] -> 1[1] via P2P/direct pointer/read
+IAP-A800:64713:64797 [3] NCCL INFO Channel 07/0 : 3[3] -> 2[2] via P2P/direct pointer/read
+IAP-A800:64713:64796 [4] NCCL INFO Channel 07/0 : 4[4] -> 3[3] via P2P/direct pointer/read
+IAP-A800:64713:64792 [1] NCCL INFO Channel 14/0 : 1[1] -> 0[0] via P2P/direct pointer/read
+IAP-A800:64713:64798 [5] NCCL INFO Channel 15/0 : 5[5] -> 4[4] via P2P/direct pointer/read
+IAP-A800:64713:64794 [2] NCCL INFO Channel 08/0 : 2[2] -> 1[1] via P2P/direct pointer/read
+IAP-A800:64713:64797 [3] NCCL INFO Channel 08/0 : 3[3] -> 2[2] via P2P/direct pointer/read
+IAP-A800:64713:64796 [4] NCCL INFO Channel 08/0 : 4[4] -> 3[3] via P2P/direct pointer/read
+IAP-A800:64713:64792 [1] NCCL INFO Channel 15/0 : 1[1] -> 0[0] via P2P/direct pointer/read
+IAP-A800:64713:64794 [2] NCCL INFO Channel 09/0 : 2[2] -> 1[1] via P2P/direct pointer/read
+IAP-A800:64713:64796 [4] NCCL INFO Channel 09/0 : 4[4] -> 3[3] via P2P/direct pointer/read
+IAP-A800:64713:64797 [3] NCCL INFO Channel 09/0 : 3[3] -> 2[2] via P2P/direct pointer/read
+IAP-A800:64713:64794 [2] NCCL INFO Channel 10/0 : 2[2] -> 1[1] via P2P/direct pointer/read
+IAP-A800:64713:64796 [4] NCCL INFO Channel 10/0 : 4[4] -> 3[3] via P2P/direct pointer/read
+IAP-A800:64713:64797 [3] NCCL INFO Channel 10/0 : 3[3] -> 2[2] via P2P/direct pointer/read
+IAP-A800:64713:64794 [2] NCCL INFO Channel 11/0 : 2[2] -> 1[1] via P2P/direct pointer/read
+IAP-A800:64713:64796 [4] NCCL INFO Channel 11/0 : 4[4] -> 3[3] via P2P/direct pointer/read
+IAP-A800:64713:64797 [3] NCCL INFO Channel 11/0 : 3[3] -> 2[2] via P2P/direct pointer/read
+IAP-A800:64713:64794 [2] NCCL INFO Channel 12/0 : 2[2] -> 1[1] via P2P/direct pointer/read
+IAP-A800:64713:64796 [4] NCCL INFO Channel 12/0 : 4[4] -> 3[3] via P2P/direct pointer/read
+IAP-A800:64713:64797 [3] NCCL INFO Channel 12/0 : 3[3] -> 2[2] via P2P/direct pointer/read
+IAP-A800:64713:64794 [2] NCCL INFO Channel 13/0 : 2[2] -> 1[1] via P2P/direct pointer/read
+IAP-A800:64713:64797 [3] NCCL INFO Channel 13/0 : 3[3] -> 2[2] via P2P/direct pointer/read
+IAP-A800:64713:64796 [4] NCCL INFO Channel 13/0 : 4[4] -> 3[3] via P2P/direct pointer/read
+IAP-A800:64713:64794 [2] NCCL INFO Channel 14/0 : 2[2] -> 1[1] via P2P/direct pointer/read
+IAP-A800:64713:64796 [4] NCCL INFO Channel 14/0 : 4[4] -> 3[3] via P2P/direct pointer/read
+IAP-A800:64713:64797 [3] NCCL INFO Channel 14/0 : 3[3] -> 2[2] via P2P/direct pointer/read
+IAP-A800:64713:64794 [2] NCCL INFO Channel 15/0 : 2[2] -> 1[1] via P2P/direct pointer/read
+IAP-A800:64713:64796 [4] NCCL INFO Channel 15/0 : 4[4] -> 3[3] via P2P/direct pointer/read
+IAP-A800:64713:64797 [3] NCCL INFO Channel 15/0 : 3[3] -> 2[2] via P2P/direct pointer/read
+IAP-A800:64713:64791 [7] NCCL INFO Connected all trees
+IAP-A800:64713:64791 [7] NCCL INFO threadThresholds 8/8/64 | 64/8/64 | 512 | 512
+IAP-A800:64713:64791 [7] NCCL INFO 16 coll channels, 16 collnet channels, 0 nvls channels, 16 p2p channels, 16 p2p channels per peer
+IAP-A800:64713:64793 [6] NCCL INFO Connected all trees
+IAP-A800:64713:64793 [6] NCCL INFO threadThresholds 8/8/64 | 64/8/64 | 512 | 512
+IAP-A800:64713:64793 [6] NCCL INFO 16 coll channels, 16 collnet channels, 0 nvls channels, 16 p2p channels, 16 p2p channels per peer
+IAP-A800:64713:64798 [5] NCCL INFO Connected all trees
+IAP-A800:64713:64798 [5] NCCL INFO threadThresholds 8/8/64 | 64/8/64 | 512 | 512
+IAP-A800:64713:64798 [5] NCCL INFO 16 coll channels, 16 collnet channels, 0 nvls channels, 16 p2p channels, 16 p2p channels per peer
+IAP-A800:64713:64795 [0] NCCL INFO Connected all trees
+IAP-A800:64713:64795 [0] NCCL INFO threadThresholds 8/8/64 | 64/8/64 | 512 | 512
+IAP-A800:64713:64795 [0] NCCL INFO 16 coll channels, 16 collnet channels, 0 nvls channels, 16 p2p channels, 16 p2p channels per peer
+IAP-A800:64713:64792 [1] NCCL INFO Connected all trees
+IAP-A800:64713:64792 [1] NCCL INFO threadThresholds 8/8/64 | 64/8/64 | 512 | 512
+IAP-A800:64713:64792 [1] NCCL INFO 16 coll channels, 16 collnet channels, 0 nvls channels, 16 p2p channels, 16 p2p channels per peer
+IAP-A800:64713:64794 [2] NCCL INFO Connected all trees
+IAP-A800:64713:64794 [2] NCCL INFO threadThresholds 8/8/64 | 64/8/64 | 512 | 512
+IAP-A800:64713:64794 [2] NCCL INFO 16 coll channels, 16 collnet channels, 0 nvls channels, 16 p2p channels, 16 p2p channels per peer
+IAP-A800:64713:64796 [4] NCCL INFO Connected all trees
+IAP-A800:64713:64796 [4] NCCL INFO threadThresholds 8/8/64 | 64/8/64 | 512 | 512
+IAP-A800:64713:64796 [4] NCCL INFO 16 coll channels, 16 collnet channels, 0 nvls channels, 16 p2p channels, 16 p2p channels per peer
+IAP-A800:64713:64797 [3] NCCL INFO Connected all trees
+IAP-A800:64713:64797 [3] NCCL INFO threadThresholds 8/8/64 | 64/8/64 | 512 | 512
+IAP-A800:64713:64797 [3] NCCL INFO 16 coll channels, 16 collnet channels, 0 nvls channels, 16 p2p channels, 16 p2p channels per peer
+IAP-A800:64713:64796 [4] NCCL INFO Init Compress Memory Pool
+IAP-A800:64713:64796 [4] NCCL INFO ncclCommSplit comm 0x74ebe7874be0 rank 4 nranks 8 cudaDev 4 nvmlDev 4 busId ad000 parent 0x5faa2131f590 color 0 key 4 commId 0xcdf103514927715e - Init COMPLETE
+IAP-A800:64713:64795 [0] NCCL INFO Init Compress Memory Pool
+IAP-A800:64713:64795 [0] NCCL INFO ncclCommSplit comm 0x5faa2142b0a0 rank 0 nranks 8 cudaDev 0 nvmlDev 0 busId 3d000 parent 0x5faa212ff8b0 color 0 key 0 commId 0xcdf103514927715e - Init COMPLETE
+IAP-A800:64713:64794 [2] NCCL INFO Init Compress Memory Pool
+IAP-A800:64713:64794 [2] NCCL INFO ncclCommSplit comm 0x74e9cc0b8f10 rank 2 nranks 8 cudaDev 2 nvmlDev 2 busId 61000 parent 0x5faa213113d0 color 0 key 2 commId 0xcdf103514927715e - Init COMPLETE
+IAP-A800:64713:64793 [6] NCCL INFO Init Compress Memory Pool
+IAP-A800:64713:64793 [6] NCCL INFO ncclCommSplit comm 0x74ebeb884190 rank 6 nranks 8 cudaDev 6 nvmlDev 6 busId d0000 parent 0x5faa2132d750 color 0 key 6 commId 0xcdf103514927715e - Init COMPLETE
+IAP-A800:64713:64792 [1] NCCL INFO Init Compress Memory Pool
+IAP-A800:64713:64798 [5] NCCL INFO Init Compress Memory Pool
+IAP-A800:64713:64791 [7] NCCL INFO Init Compress Memory Pool
+IAP-A800:64713:64791 [7] NCCL INFO ncclCommSplit comm 0x74f027809d80 rank 7 nranks 8 cudaDev 7 nvmlDev 7 busId d3000 parent 0x5faa21334830 color 0 key 7 commId 0xcdf103514927715e - Init COMPLETE
+IAP-A800:64713:64798 [5] NCCL INFO ncclCommSplit comm 0x74e9db898710 rank 5 nranks 8 cudaDev 5 nvmlDev 5 busId b1000 parent 0x5faa21326670 color 0 key 5 commId 0xcdf103514927715e - Init COMPLETE
+IAP-A800:64713:64792 [1] NCCL INFO ncclCommSplit comm 0x74ebf38d5db0 rank 1 nranks 8 cudaDev 1 nvmlDev 1 busId 42000 parent 0x5faa2130a280 color 0 key 1 commId 0xcdf103514927715e - Init COMPLETE
+IAP-A800:64713:64797 [3] NCCL INFO Init Compress Memory Pool
+IAP-A800:64713:64797 [3] NCCL INFO ncclCommSplit comm 0x74ee078841e0 rank 3 nranks 8 cudaDev 3 nvmlDev 3 busId 67000 parent 0x5faa213184b0 color 0 key 3 commId 0xcdf103514927715e - Init COMPLETE
+IAP-A800:64713:64830 [1] NCCL INFO Using non-device net plugin version 0
+IAP-A800:64713:64823 [4] NCCL INFO Using non-device net plugin version 0
+IAP-A800:64713:64826 [3] NCCL INFO Using non-device net plugin version 0
+IAP-A800:64713:64826 [3] NCCL INFO Using network Socket
+IAP-A800:64713:64825 [0] NCCL INFO Using non-device net plugin version 0
+IAP-A800:64713:64829 [5] NCCL INFO Using non-device net plugin version 0
+IAP-A800:64713:64827 [6] NCCL INFO Using non-device net plugin version 0
+IAP-A800:64713:64830 [1] NCCL INFO Using network Socket
+IAP-A800:64713:64827 [6] NCCL INFO Using network Socket
+IAP-A800:64713:64828 [7] NCCL INFO Using non-device net plugin version 0
+IAP-A800:64713:64823 [4] NCCL INFO Using network Socket
+IAP-A800:64713:64828 [7] NCCL INFO Using network Socket
+IAP-A800:64713:64825 [0] NCCL INFO Using network Socket
+IAP-A800:64713:64829 [5] NCCL INFO Using network Socket
+IAP-A800:64713:64824 [2] NCCL INFO Using non-device net plugin version 0
+IAP-A800:64713:64824 [2] NCCL INFO Using network Socket
+IAP-A800:64713:64826 [3] NCCL INFO bootstrapSplit: comm 0x74ee0788b4e0 parent 0x5faa213184b0 rank 0 nranks 1 color 3 key 3 prev 3 next 3 - DONE
+IAP-A800:64713:64826 [3] NCCL INFO ncclCommSplit comm 0x74ee0788b4e0 rank 0 nranks 1 cudaDev 3 nvmlDev 3 busId 67000 parent 0x5faa213184b0 color 3 key 3 commId 0x9e0c33fbd002bbe7 - Init START
+IAP-A800:64713:64830 [1] NCCL INFO bootstrapSplit: comm 0x74ebf38dd0b0 parent 0x5faa2130a280 rank 0 nranks 1 color 1 key 1 prev 1 next 1 - DONE
+IAP-A800:64713:64830 [1] NCCL INFO ncclCommSplit comm 0x74ebf38dd0b0 rank 0 nranks 1 cudaDev 1 nvmlDev 1 busId 42000 parent 0x5faa2130a280 color 1 key 1 commId 0xaaa2a42489116910 - Init START
+IAP-A800:64713:64825 [0] NCCL INFO bootstrapSplit: comm 0x5faa21433490 parent 0x5faa212ff8b0 rank 0 nranks 1 color 0 key 0 prev 0 next 0 - DONE
+IAP-A800:64713:64825 [0] NCCL INFO ncclCommSplit comm 0x5faa21433490 rank 0 nranks 1 cudaDev 0 nvmlDev 0 busId 3d000 parent 0x5faa212ff8b0 color 0 key 0 commId 0xcdf103514927715e - Init START
+IAP-A800:64713:64827 [6] NCCL INFO bootstrapSplit: comm 0x74ebeb88b490 parent 0x5faa2132d750 rank 0 nranks 1 color 6 key 6 prev 6 next 6 - DONE
+IAP-A800:64713:64827 [6] NCCL INFO ncclCommSplit comm 0x74ebeb88b490 rank 0 nranks 1 cudaDev 6 nvmlDev 6 busId d0000 parent 0x5faa2132d750 color 6 key 6 commId 0x8d16cd11b660a854 - Init START
+IAP-A800:64713:64828 [7] NCCL INFO bootstrapSplit: comm 0x74f02780dd30 parent 0x5faa21334830 rank 0 nranks 1 color 7 key 7 prev 7 next 7 - DONE
+IAP-A800:64713:64828 [7] NCCL INFO ncclCommSplit comm 0x74f02780dd30 rank 0 nranks 1 cudaDev 7 nvmlDev 7 busId d3000 parent 0x5faa21334830 color 7 key 7 commId 0xca08927479a59f9d - Init START
+IAP-A800:64713:64823 [4] NCCL INFO bootstrapSplit: comm 0x74ebe787bee0 parent 0x5faa2131f590 rank 0 nranks 1 color 4 key 4 prev 4 next 4 - DONE
+IAP-A800:64713:64823 [4] NCCL INFO ncclCommSplit comm 0x74ebe787bee0 rank 0 nranks 1 cudaDev 4 nvmlDev 4 busId ad000 parent 0x5faa2131f590 color 4 key 4 commId 0x999290e408559d06 - Init START
+IAP-A800:64713:64829 [5] NCCL INFO bootstrapSplit: comm 0x74e9db89fa10 parent 0x5faa21326670 rank 0 nranks 1 color 5 key 5 prev 5 next 5 - DONE
+IAP-A800:64713:64829 [5] NCCL INFO ncclCommSplit comm 0x74e9db89fa10 rank 0 nranks 1 cudaDev 5 nvmlDev 5 busId b1000 parent 0x5faa21326670 color 5 key 5 commId 0x6a78b785e97e492b - Init START
+IAP-A800:64713:64824 [2] NCCL INFO bootstrapSplit: comm 0x74e9cc0c01a0 parent 0x5faa213113d0 rank 0 nranks 1 color 2 key 2 prev 2 next 2 - DONE
+IAP-A800:64713:64824 [2] NCCL INFO ncclCommSplit comm 0x74e9cc0c01a0 rank 0 nranks 1 cudaDev 2 nvmlDev 2 busId 61000 parent 0x5faa213113d0 color 2 key 2 commId 0x5db28483ca96fdbc - Init START
+IAP-A800:64713:64830 [1] NCCL INFO Setting affinity for GPU 1 to ffffffff,00000000,ffffffff
+IAP-A800:64713:64830 [1] NCCL INFO comm 0x74ebf38dd0b0 rank 0 nRanks 1 nNodes 1 localRanks 1 localRank 0 MNNVL 0
+IAP-A800:64713:64830 [1] NCCL INFO Channel 00/32 :    0
+IAP-A800:64713:64830 [1] NCCL INFO Channel 01/32 :    0
+IAP-A800:64713:64830 [1] NCCL INFO Channel 02/32 :    0
+IAP-A800:64713:64830 [1] NCCL INFO Channel 03/32 :    0
+IAP-A800:64713:64830 [1] NCCL INFO Channel 04/32 :    0
+IAP-A800:64713:64830 [1] NCCL INFO Channel 05/32 :    0
+IAP-A800:64713:64830 [1] NCCL INFO Channel 06/32 :    0
+IAP-A800:64713:64830 [1] NCCL INFO Channel 07/32 :    0
+IAP-A800:64713:64830 [1] NCCL INFO Channel 08/32 :    0
+IAP-A800:64713:64830 [1] NCCL INFO Channel 09/32 :    0
+IAP-A800:64713:64830 [1] NCCL INFO Channel 10/32 :    0
+IAP-A800:64713:64830 [1] NCCL INFO Channel 11/32 :    0
+IAP-A800:64713:64830 [1] NCCL INFO Channel 12/32 :    0
+IAP-A800:64713:64830 [1] NCCL INFO Channel 13/32 :    0
+IAP-A800:64713:64830 [1] NCCL INFO Channel 14/32 :    0
+IAP-A800:64713:64830 [1] NCCL INFO Channel 15/32 :    0
+IAP-A800:64713:64830 [1] NCCL INFO Channel 16/32 :    0
+IAP-A800:64713:64830 [1] NCCL INFO Channel 17/32 :    0
+IAP-A800:64713:64830 [1] NCCL INFO Channel 18/32 :    0
+IAP-A800:64713:64830 [1] NCCL INFO Channel 19/32 :    0
+IAP-A800:64713:64830 [1] NCCL INFO Channel 20/32 :    0
+IAP-A800:64713:64830 [1] NCCL INFO Channel 21/32 :    0
+IAP-A800:64713:64830 [1] NCCL INFO Channel 22/32 :    0
+IAP-A800:64713:64830 [1] NCCL INFO Channel 23/32 :    0
+IAP-A800:64713:64830 [1] NCCL INFO Channel 24/32 :    0
+IAP-A800:64713:64830 [1] NCCL INFO Channel 25/32 :    0
+IAP-A800:64713:64830 [1] NCCL INFO Channel 26/32 :    0
+IAP-A800:64713:64830 [1] NCCL INFO Channel 27/32 :    0
+IAP-A800:64713:64830 [1] NCCL INFO Channel 28/32 :    0
+IAP-A800:64713:64830 [1] NCCL INFO Channel 29/32 :    0
+IAP-A800:64713:64830 [1] NCCL INFO Channel 30/32 :    0
+IAP-A800:64713:64830 [1] NCCL INFO Channel 31/32 :    0
+IAP-A800:64713:64830 [1] NCCL INFO Trees [0] -1/-1/-1->0->-1 [1] -1/-1/-1->0->-1 [2] -1/-1/-1->0->-1 [3] -1/-1/-1->0->-1 [4] -1/-1/-1->0->-1 [5] -1/-1/-1->0->-1 [6] -1/-1/-1->0->-1 [7] -1/-1/-1->0->-1 [8] -1/-1/-1->0->-1 [9] -1/-1/-1->0->-1 [10] -1/-1/-1->0->-1 [11] -1/-1/-1->0->-1 [12] -1/-1/-1->0->-1 [13] -1/-1/-1->0->-1 [14] -1/-1/-1->0->-1 [15] -1/-1/-1->0->-1 [16] -1/-1/-1->0->-1 [17] -1/-1/-1->0->-1 [18] -1/-1/-1->0->-1 [19] -1/-1/-1->0->-1 [20] -1/-1/-1->0->-1 [21] -1/-1/-1->0->-1 [22] -1/-1/-1->0->-1 [23] -1/-1/-1->0->-1 [24] -1/-1/-1->0->-1 [25] -1/-1/-1->0->-1 [26] -1/-1/-1->0->-1 [27] -1/-1/-1->0->-1 [28] -1/-1/-1->0->-1 [29] -1/-1/-1->0->-1 [30] -1/-1/-1->0->-1 [31] -1/-1/-1->0->-1
+IAP-A800:64713:64830 [1] NCCL INFO P2P Chunksize set to 131072
+IAP-A800:64713:64826 [3] NCCL INFO Setting affinity for GPU 3 to ffffffff,00000000,ffffffff
+IAP-A800:64713:64826 [3] NCCL INFO comm 0x74ee0788b4e0 rank 0 nRanks 1 nNodes 1 localRanks 1 localRank 0 MNNVL 0
+IAP-A800:64713:64826 [3] NCCL INFO Channel 00/32 :    0
+IAP-A800:64713:64826 [3] NCCL INFO Channel 01/32 :    0
+IAP-A800:64713:64826 [3] NCCL INFO Channel 02/32 :    0
+IAP-A800:64713:64826 [3] NCCL INFO Channel 03/32 :    0
+IAP-A800:64713:64826 [3] NCCL INFO Channel 04/32 :    0
+IAP-A800:64713:64826 [3] NCCL INFO Channel 05/32 :    0
+IAP-A800:64713:64826 [3] NCCL INFO Channel 06/32 :    0
+IAP-A800:64713:64826 [3] NCCL INFO Channel 07/32 :    0
+IAP-A800:64713:64826 [3] NCCL INFO Channel 08/32 :    0
+IAP-A800:64713:64826 [3] NCCL INFO Channel 09/32 :    0
+IAP-A800:64713:64826 [3] NCCL INFO Channel 10/32 :    0
+IAP-A800:64713:64826 [3] NCCL INFO Channel 11/32 :    0
+IAP-A800:64713:64826 [3] NCCL INFO Channel 12/32 :    0
+IAP-A800:64713:64826 [3] NCCL INFO Channel 13/32 :    0
+IAP-A800:64713:64826 [3] NCCL INFO Channel 14/32 :    0
+IAP-A800:64713:64826 [3] NCCL INFO Channel 15/32 :    0
+IAP-A800:64713:64826 [3] NCCL INFO Channel 16/32 :    0
+IAP-A800:64713:64826 [3] NCCL INFO Channel 17/32 :    0
+IAP-A800:64713:64826 [3] NCCL INFO Channel 18/32 :    0
+IAP-A800:64713:64826 [3] NCCL INFO Channel 19/32 :    0
+IAP-A800:64713:64826 [3] NCCL INFO Channel 20/32 :    0
+IAP-A800:64713:64826 [3] NCCL INFO Channel 21/32 :    0
+IAP-A800:64713:64826 [3] NCCL INFO Channel 22/32 :    0
+IAP-A800:64713:64826 [3] NCCL INFO Channel 23/32 :    0
+IAP-A800:64713:64826 [3] NCCL INFO Channel 24/32 :    0
+IAP-A800:64713:64826 [3] NCCL INFO Channel 25/32 :    0
+IAP-A800:64713:64826 [3] NCCL INFO Channel 26/32 :    0
+IAP-A800:64713:64826 [3] NCCL INFO Channel 27/32 :    0
+IAP-A800:64713:64826 [3] NCCL INFO Channel 28/32 :    0
+IAP-A800:64713:64826 [3] NCCL INFO Channel 29/32 :    0
+IAP-A800:64713:64826 [3] NCCL INFO Channel 30/32 :    0
+IAP-A800:64713:64826 [3] NCCL INFO Channel 31/32 :    0
+IAP-A800:64713:64826 [3] NCCL INFO Trees [0] -1/-1/-1->0->-1 [1] -1/-1/-1->0->-1 [2] -1/-1/-1->0->-1 [3] -1/-1/-1->0->-1 [4] -1/-1/-1->0->-1 [5] -1/-1/-1->0->-1 [6] -1/-1/-1->0->-1 [7] -1/-1/-1->0->-1 [8] -1/-1/-1->0->-1 [9] -1/-1/-1->0->-1 [10] -1/-1/-1->0->-1 [11] -1/-1/-1->0->-1 [12] -1/-1/-1->0->-1 [13] -1/-1/-1->0->-1 [14] -1/-1/-1->0->-1 [15] -1/-1/-1->0->-1 [16] -1/-1/-1->0->-1 [17] -1/-1/-1->0->-1 [18] -1/-1/-1->0->-1 [19] -1/-1/-1->0->-1 [20] -1/-1/-1->0->-1 [21] -1/-1/-1->0->-1 [22] -1/-1/-1->0->-1 [23] -1/-1/-1->0->-1 [24] -1/-1/-1->0->-1 [25] -1/-1/-1->0->-1 [26] -1/-1/-1->0->-1 [27] -1/-1/-1->0->-1 [28] -1/-1/-1->0->-1 [29] -1/-1/-1->0->-1 [30] -1/-1/-1->0->-1 [31] -1/-1/-1->0->-1
+IAP-A800:64713:64826 [3] NCCL INFO P2P Chunksize set to 131072
+IAP-A800:64713:64829 [5] NCCL INFO Setting affinity for GPU 5 to ffffffff,00000000,ffffffff,00000000
+IAP-A800:64713:64829 [5] NCCL INFO comm 0x74e9db89fa10 rank 0 nRanks 1 nNodes 1 localRanks 1 localRank 0 MNNVL 0
+IAP-A800:64713:64829 [5] NCCL INFO Channel 00/32 :    0
+IAP-A800:64713:64829 [5] NCCL INFO Channel 01/32 :    0
+IAP-A800:64713:64829 [5] NCCL INFO Channel 02/32 :    0
+IAP-A800:64713:64829 [5] NCCL INFO Channel 03/32 :    0
+IAP-A800:64713:64829 [5] NCCL INFO Channel 04/32 :    0
+IAP-A800:64713:64829 [5] NCCL INFO Channel 05/32 :    0
+IAP-A800:64713:64829 [5] NCCL INFO Channel 06/32 :    0
+IAP-A800:64713:64829 [5] NCCL INFO Channel 07/32 :    0
+IAP-A800:64713:64829 [5] NCCL INFO Channel 08/32 :    0
+IAP-A800:64713:64829 [5] NCCL INFO Channel 09/32 :    0
+IAP-A800:64713:64829 [5] NCCL INFO Channel 10/32 :    0
+IAP-A800:64713:64829 [5] NCCL INFO Channel 11/32 :    0
+IAP-A800:64713:64829 [5] NCCL INFO Channel 12/32 :    0
+IAP-A800:64713:64829 [5] NCCL INFO Channel 13/32 :    0
+IAP-A800:64713:64829 [5] NCCL INFO Channel 14/32 :    0
+IAP-A800:64713:64829 [5] NCCL INFO Channel 15/32 :    0
+IAP-A800:64713:64829 [5] NCCL INFO Channel 16/32 :    0
+IAP-A800:64713:64829 [5] NCCL INFO Channel 17/32 :    0
+IAP-A800:64713:64829 [5] NCCL INFO Channel 18/32 :    0
+IAP-A800:64713:64829 [5] NCCL INFO Channel 19/32 :    0
+IAP-A800:64713:64829 [5] NCCL INFO Channel 20/32 :    0
+IAP-A800:64713:64829 [5] NCCL INFO Channel 21/32 :    0
+IAP-A800:64713:64829 [5] NCCL INFO Channel 22/32 :    0
+IAP-A800:64713:64829 [5] NCCL INFO Channel 23/32 :    0
+IAP-A800:64713:64829 [5] NCCL INFO Channel 24/32 :    0
+IAP-A800:64713:64829 [5] NCCL INFO Channel 25/32 :    0
+IAP-A800:64713:64829 [5] NCCL INFO Channel 26/32 :    0
+IAP-A800:64713:64829 [5] NCCL INFO Channel 27/32 :    0
+IAP-A800:64713:64829 [5] NCCL INFO Channel 28/32 :    0
+IAP-A800:64713:64829 [5] NCCL INFO Channel 29/32 :    0
+IAP-A800:64713:64829 [5] NCCL INFO Channel 30/32 :    0
+IAP-A800:64713:64829 [5] NCCL INFO Channel 31/32 :    0
+IAP-A800:64713:64829 [5] NCCL INFO Trees [0] -1/-1/-1->0->-1 [1] -1/-1/-1->0->-1 [2] -1/-1/-1->0->-1 [3] -1/-1/-1->0->-1 [4] -1/-1/-1->0->-1 [5] -1/-1/-1->0->-1 [6] -1/-1/-1->0->-1 [7] -1/-1/-1->0->-1 [8] -1/-1/-1->0->-1 [9] -1/-1/-1->0->-1 [10] -1/-1/-1->0->-1 [11] -1/-1/-1->0->-1 [12] -1/-1/-1->0->-1 [13] -1/-1/-1->0->-1 [14] -1/-1/-1->0->-1 [15] -1/-1/-1->0->-1 [16] -1/-1/-1->0->-1 [17] -1/-1/-1->0->-1 [18] -1/-1/-1->0->-1 [19] -1/-1/-1->0->-1 [20] -1/-1/-1->0->-1 [21] -1/-1/-1->0->-1 [22] -1/-1/-1->0->-1 [23] -1/-1/-1->0->-1 [24] -1/-1/-1->0->-1 [25] -1/-1/-1->0->-1 [26] -1/-1/-1->0->-1 [27] -1/-1/-1->0->-1 [28] -1/-1/-1->0->-1 [29] -1/-1/-1->0->-1 [30] -1/-1/-1->0->-1 [31] -1/-1/-1->0->-1
+IAP-A800:64713:64829 [5] NCCL INFO P2P Chunksize set to 131072
+IAP-A800:64713:64827 [6] NCCL INFO Setting affinity for GPU 6 to ffffffff,00000000,ffffffff,00000000
+IAP-A800:64713:64827 [6] NCCL INFO comm 0x74ebeb88b490 rank 0 nRanks 1 nNodes 1 localRanks 1 localRank 0 MNNVL 0
+IAP-A800:64713:64827 [6] NCCL INFO Channel 00/32 :    0
+IAP-A800:64713:64827 [6] NCCL INFO Channel 01/32 :    0
+IAP-A800:64713:64827 [6] NCCL INFO Channel 02/32 :    0
+IAP-A800:64713:64827 [6] NCCL INFO Channel 03/32 :    0
+IAP-A800:64713:64827 [6] NCCL INFO Channel 04/32 :    0
+IAP-A800:64713:64827 [6] NCCL INFO Channel 05/32 :    0
+IAP-A800:64713:64827 [6] NCCL INFO Channel 06/32 :    0
+IAP-A800:64713:64827 [6] NCCL INFO Channel 07/32 :    0
+IAP-A800:64713:64827 [6] NCCL INFO Channel 08/32 :    0
+IAP-A800:64713:64827 [6] NCCL INFO Channel 09/32 :    0
+IAP-A800:64713:64827 [6] NCCL INFO Channel 10/32 :    0
+IAP-A800:64713:64827 [6] NCCL INFO Channel 11/32 :    0
+IAP-A800:64713:64827 [6] NCCL INFO Channel 12/32 :    0
+IAP-A800:64713:64827 [6] NCCL INFO Channel 13/32 :    0
+IAP-A800:64713:64827 [6] NCCL INFO Channel 14/32 :    0
+IAP-A800:64713:64827 [6] NCCL INFO Channel 15/32 :    0
+IAP-A800:64713:64827 [6] NCCL INFO Channel 16/32 :    0
+IAP-A800:64713:64827 [6] NCCL INFO Channel 17/32 :    0
+IAP-A800:64713:64827 [6] NCCL INFO Channel 18/32 :    0
+IAP-A800:64713:64827 [6] NCCL INFO Channel 19/32 :    0
+IAP-A800:64713:64827 [6] NCCL INFO Channel 20/32 :    0
+IAP-A800:64713:64827 [6] NCCL INFO Channel 21/32 :    0
+IAP-A800:64713:64827 [6] NCCL INFO Channel 22/32 :    0
+IAP-A800:64713:64827 [6] NCCL INFO Channel 23/32 :    0
+IAP-A800:64713:64827 [6] NCCL INFO Channel 24/32 :    0
+IAP-A800:64713:64827 [6] NCCL INFO Channel 25/32 :    0
+IAP-A800:64713:64827 [6] NCCL INFO Channel 26/32 :    0
+IAP-A800:64713:64827 [6] NCCL INFO Channel 27/32 :    0
+IAP-A800:64713:64827 [6] NCCL INFO Channel 28/32 :    0
+IAP-A800:64713:64827 [6] NCCL INFO Channel 29/32 :    0
+IAP-A800:64713:64827 [6] NCCL INFO Channel 30/32 :    0
+IAP-A800:64713:64827 [6] NCCL INFO Channel 31/32 :    0
+IAP-A800:64713:64827 [6] NCCL INFO Trees [0] -1/-1/-1->0->-1 [1] -1/-1/-1->0->-1 [2] -1/-1/-1->0->-1 [3] -1/-1/-1->0->-1 [4] -1/-1/-1->0->-1 [5] -1/-1/-1->0->-1 [6] -1/-1/-1->0->-1 [7] -1/-1/-1->0->-1 [8] -1/-1/-1->0->-1 [9] -1/-1/-1->0->-1 [10] -1/-1/-1->0->-1 [11] -1/-1/-1->0->-1 [12] -1/-1/-1->0->-1 [13] -1/-1/-1->0->-1 [14] -1/-1/-1->0->-1 [15] -1/-1/-1->0->-1 [16] -1/-1/-1->0->-1 [17] -1/-1/-1->0->-1 [18] -1/-1/-1->0->-1 [19] -1/-1/-1->0->-1 [20] -1/-1/-1->0->-1 [21] -1/-1/-1->0->-1 [22] -1/-1/-1->0->-1 [23] -1/-1/-1->0->-1 [24] -1/-1/-1->0->-1 [25] -1/-1/-1->0->-1 [26] -1/-1/-1->0->-1 [27] -1/-1/-1->0->-1 [28] -1/-1/-1->0->-1 [29] -1/-1/-1->0->-1 [30] -1/-1/-1->0->-1 [31] -1/-1/-1->0->-1
+IAP-A800:64713:64827 [6] NCCL INFO P2P Chunksize set to 131072
+IAP-A800:64713:64828 [7] NCCL INFO Setting affinity for GPU 7 to ffffffff,00000000,ffffffff,00000000
+IAP-A800:64713:64828 [7] NCCL INFO comm 0x74f02780dd30 rank 0 nRanks 1 nNodes 1 localRanks 1 localRank 0 MNNVL 0
+IAP-A800:64713:64828 [7] NCCL INFO Channel 00/32 :    0
+IAP-A800:64713:64828 [7] NCCL INFO Channel 01/32 :    0
+IAP-A800:64713:64828 [7] NCCL INFO Channel 02/32 :    0
+IAP-A800:64713:64828 [7] NCCL INFO Channel 03/32 :    0
+IAP-A800:64713:64828 [7] NCCL INFO Channel 04/32 :    0
+IAP-A800:64713:64828 [7] NCCL INFO Channel 05/32 :    0
+IAP-A800:64713:64828 [7] NCCL INFO Channel 06/32 :    0
+IAP-A800:64713:64828 [7] NCCL INFO Channel 07/32 :    0
+IAP-A800:64713:64828 [7] NCCL INFO Channel 08/32 :    0
+IAP-A800:64713:64828 [7] NCCL INFO Channel 09/32 :    0
+IAP-A800:64713:64828 [7] NCCL INFO Channel 10/32 :    0
+IAP-A800:64713:64828 [7] NCCL INFO Channel 11/32 :    0
+IAP-A800:64713:64828 [7] NCCL INFO Channel 12/32 :    0
+IAP-A800:64713:64828 [7] NCCL INFO Channel 13/32 :    0
+IAP-A800:64713:64828 [7] NCCL INFO Channel 14/32 :    0
+IAP-A800:64713:64828 [7] NCCL INFO Channel 15/32 :    0
+IAP-A800:64713:64828 [7] NCCL INFO Channel 16/32 :    0
+IAP-A800:64713:64828 [7] NCCL INFO Channel 17/32 :    0
+IAP-A800:64713:64828 [7] NCCL INFO Channel 18/32 :    0
+IAP-A800:64713:64828 [7] NCCL INFO Channel 19/32 :    0
+IAP-A800:64713:64828 [7] NCCL INFO Channel 20/32 :    0
+IAP-A800:64713:64828 [7] NCCL INFO Channel 21/32 :    0
+IAP-A800:64713:64828 [7] NCCL INFO Channel 22/32 :    0
+IAP-A800:64713:64828 [7] NCCL INFO Channel 23/32 :    0
+IAP-A800:64713:64828 [7] NCCL INFO Channel 24/32 :    0
+IAP-A800:64713:64828 [7] NCCL INFO Channel 25/32 :    0
+IAP-A800:64713:64828 [7] NCCL INFO Channel 26/32 :    0
+IAP-A800:64713:64828 [7] NCCL INFO Channel 27/32 :    0
+IAP-A800:64713:64828 [7] NCCL INFO Channel 28/32 :    0
+IAP-A800:64713:64828 [7] NCCL INFO Channel 29/32 :    0
+IAP-A800:64713:64828 [7] NCCL INFO Channel 30/32 :    0
+IAP-A800:64713:64828 [7] NCCL INFO Channel 31/32 :    0
+IAP-A800:64713:64828 [7] NCCL INFO Trees [0] -1/-1/-1->0->-1 [1] -1/-1/-1->0->-1 [2] -1/-1/-1->0->-1 [3] -1/-1/-1->0->-1 [4] -1/-1/-1->0->-1 [5] -1/-1/-1->0->-1 [6] -1/-1/-1->0->-1 [7] -1/-1/-1->0->-1 [8] -1/-1/-1->0->-1 [9] -1/-1/-1->0->-1 [10] -1/-1/-1->0->-1 [11] -1/-1/-1->0->-1 [12] -1/-1/-1->0->-1 [13] -1/-1/-1->0->-1 [14] -1/-1/-1->0->-1 [15] -1/-1/-1->0->-1 [16] -1/-1/-1->0->-1 [17] -1/-1/-1->0->-1 [18] -1/-1/-1->0->-1 [19] -1/-1/-1->0->-1 [20] -1/-1/-1->0->-1 [21] -1/-1/-1->0->-1 [22] -1/-1/-1->0->-1 [23] -1/-1/-1->0->-1 [24] -1/-1/-1->0->-1 [25] -1/-1/-1->0->-1 [26] -1/-1/-1->0->-1 [27] -1/-1/-1->0->-1 [28] -1/-1/-1->0->-1 [29] -1/-1/-1->0->-1 [30] -1/-1/-1->0->-1 [31] -1/-1/-1->0->-1
+IAP-A800:64713:64828 [7] NCCL INFO P2P Chunksize set to 131072
+IAP-A800:64713:64824 [2] NCCL INFO Setting affinity for GPU 2 to ffffffff,00000000,ffffffff
+IAP-A800:64713:64824 [2] NCCL INFO comm 0x74e9cc0c01a0 rank 0 nRanks 1 nNodes 1 localRanks 1 localRank 0 MNNVL 0
+IAP-A800:64713:64824 [2] NCCL INFO Channel 00/32 :    0
+IAP-A800:64713:64824 [2] NCCL INFO Channel 01/32 :    0
+IAP-A800:64713:64824 [2] NCCL INFO Channel 02/32 :    0
+IAP-A800:64713:64824 [2] NCCL INFO Channel 03/32 :    0
+IAP-A800:64713:64824 [2] NCCL INFO Channel 04/32 :    0
+IAP-A800:64713:64824 [2] NCCL INFO Channel 05/32 :    0
+IAP-A800:64713:64824 [2] NCCL INFO Channel 06/32 :    0
+IAP-A800:64713:64824 [2] NCCL INFO Channel 07/32 :    0
+IAP-A800:64713:64824 [2] NCCL INFO Channel 08/32 :    0
+IAP-A800:64713:64824 [2] NCCL INFO Channel 09/32 :    0
+IAP-A800:64713:64824 [2] NCCL INFO Channel 10/32 :    0
+IAP-A800:64713:64824 [2] NCCL INFO Channel 11/32 :    0
+IAP-A800:64713:64824 [2] NCCL INFO Channel 12/32 :    0
+IAP-A800:64713:64824 [2] NCCL INFO Channel 13/32 :    0
+IAP-A800:64713:64824 [2] NCCL INFO Channel 14/32 :    0
+IAP-A800:64713:64824 [2] NCCL INFO Channel 15/32 :    0
+IAP-A800:64713:64824 [2] NCCL INFO Channel 16/32 :    0
+IAP-A800:64713:64824 [2] NCCL INFO Channel 17/32 :    0
+IAP-A800:64713:64824 [2] NCCL INFO Channel 18/32 :    0
+IAP-A800:64713:64824 [2] NCCL INFO Channel 19/32 :    0
+IAP-A800:64713:64824 [2] NCCL INFO Channel 20/32 :    0
+IAP-A800:64713:64824 [2] NCCL INFO Channel 21/32 :    0
+IAP-A800:64713:64824 [2] NCCL INFO Channel 22/32 :    0
+IAP-A800:64713:64824 [2] NCCL INFO Channel 23/32 :    0
+IAP-A800:64713:64824 [2] NCCL INFO Channel 24/32 :    0
+IAP-A800:64713:64824 [2] NCCL INFO Channel 25/32 :    0
+IAP-A800:64713:64824 [2] NCCL INFO Channel 26/32 :    0
+IAP-A800:64713:64824 [2] NCCL INFO Channel 27/32 :    0
+IAP-A800:64713:64824 [2] NCCL INFO Channel 28/32 :    0
+IAP-A800:64713:64824 [2] NCCL INFO Channel 29/32 :    0
+IAP-A800:64713:64824 [2] NCCL INFO Channel 30/32 :    0
+IAP-A800:64713:64824 [2] NCCL INFO Channel 31/32 :    0
+IAP-A800:64713:64824 [2] NCCL INFO Trees [0] -1/-1/-1->0->-1 [1] -1/-1/-1->0->-1 [2] -1/-1/-1->0->-1 [3] -1/-1/-1->0->-1 [4] -1/-1/-1->0->-1 [5] -1/-1/-1->0->-1 [6] -1/-1/-1->0->-1 [7] -1/-1/-1->0->-1 [8] -1/-1/-1->0->-1 [9] -1/-1/-1->0->-1 [10] -1/-1/-1->0->-1 [11] -1/-1/-1->0->-1 [12] -1/-1/-1->0->-1 [13] -1/-1/-1->0->-1 [14] -1/-1/-1->0->-1 [15] -1/-1/-1->0->-1 [16] -1/-1/-1->0->-1 [17] -1/-1/-1->0->-1 [18] -1/-1/-1->0->-1 [19] -1/-1/-1->0->-1 [20] -1/-1/-1->0->-1 [21] -1/-1/-1->0->-1 [22] -1/-1/-1->0->-1 [23] -1/-1/-1->0->-1 [24] -1/-1/-1->0->-1 [25] -1/-1/-1->0->-1 [26] -1/-1/-1->0->-1 [27] -1/-1/-1->0->-1 [28] -1/-1/-1->0->-1 [29] -1/-1/-1->0->-1 [30] -1/-1/-1->0->-1 [31] -1/-1/-1->0->-1
+IAP-A800:64713:64824 [2] NCCL INFO P2P Chunksize set to 131072
+IAP-A800:64713:64823 [4] NCCL INFO Setting affinity for GPU 4 to ffffffff,00000000,ffffffff,00000000
+IAP-A800:64713:64823 [4] NCCL INFO comm 0x74ebe787bee0 rank 0 nRanks 1 nNodes 1 localRanks 1 localRank 0 MNNVL 0
+IAP-A800:64713:64823 [4] NCCL INFO Channel 00/32 :    0
+IAP-A800:64713:64823 [4] NCCL INFO Channel 01/32 :    0
+IAP-A800:64713:64823 [4] NCCL INFO Channel 02/32 :    0
+IAP-A800:64713:64823 [4] NCCL INFO Channel 03/32 :    0
+IAP-A800:64713:64823 [4] NCCL INFO Channel 04/32 :    0
+IAP-A800:64713:64823 [4] NCCL INFO Channel 05/32 :    0
+IAP-A800:64713:64823 [4] NCCL INFO Channel 06/32 :    0
+IAP-A800:64713:64823 [4] NCCL INFO Channel 07/32 :    0
+IAP-A800:64713:64823 [4] NCCL INFO Channel 08/32 :    0
+IAP-A800:64713:64823 [4] NCCL INFO Channel 09/32 :    0
+IAP-A800:64713:64823 [4] NCCL INFO Channel 10/32 :    0
+IAP-A800:64713:64823 [4] NCCL INFO Channel 11/32 :    0
+IAP-A800:64713:64823 [4] NCCL INFO Channel 12/32 :    0
+IAP-A800:64713:64823 [4] NCCL INFO Channel 13/32 :    0
+IAP-A800:64713:64823 [4] NCCL INFO Channel 14/32 :    0
+IAP-A800:64713:64823 [4] NCCL INFO Channel 15/32 :    0
+IAP-A800:64713:64823 [4] NCCL INFO Channel 16/32 :    0
+IAP-A800:64713:64823 [4] NCCL INFO Channel 17/32 :    0
+IAP-A800:64713:64823 [4] NCCL INFO Channel 18/32 :    0
+IAP-A800:64713:64823 [4] NCCL INFO Channel 19/32 :    0
+IAP-A800:64713:64823 [4] NCCL INFO Channel 20/32 :    0
+IAP-A800:64713:64823 [4] NCCL INFO Channel 21/32 :    0
+IAP-A800:64713:64823 [4] NCCL INFO Channel 22/32 :    0
+IAP-A800:64713:64823 [4] NCCL INFO Channel 23/32 :    0
+IAP-A800:64713:64823 [4] NCCL INFO Channel 24/32 :    0
+IAP-A800:64713:64823 [4] NCCL INFO Channel 25/32 :    0
+IAP-A800:64713:64823 [4] NCCL INFO Channel 26/32 :    0
+IAP-A800:64713:64823 [4] NCCL INFO Channel 27/32 :    0
+IAP-A800:64713:64823 [4] NCCL INFO Channel 28/32 :    0
+IAP-A800:64713:64823 [4] NCCL INFO Channel 29/32 :    0
+IAP-A800:64713:64823 [4] NCCL INFO Channel 30/32 :    0
+IAP-A800:64713:64823 [4] NCCL INFO Channel 31/32 :    0
+IAP-A800:64713:64823 [4] NCCL INFO Trees [0] -1/-1/-1->0->-1 [1] -1/-1/-1->0->-1 [2] -1/-1/-1->0->-1 [3] -1/-1/-1->0->-1 [4] -1/-1/-1->0->-1 [5] -1/-1/-1->0->-1 [6] -1/-1/-1->0->-1 [7] -1/-1/-1->0->-1 [8] -1/-1/-1->0->-1 [9] -1/-1/-1->0->-1 [10] -1/-1/-1->0->-1 [11] -1/-1/-1->0->-1 [12] -1/-1/-1->0->-1 [13] -1/-1/-1->0->-1 [14] -1/-1/-1->0->-1 [15] -1/-1/-1->0->-1 [16] -1/-1/-1->0->-1 [17] -1/-1/-1->0->-1 [18] -1/-1/-1->0->-1 [19] -1/-1/-1->0->-1 [20] -1/-1/-1->0->-1 [21] -1/-1/-1->0->-1 [22] -1/-1/-1->0->-1 [23] -1/-1/-1->0->-1 [24] -1/-1/-1->0->-1 [25] -1/-1/-1->0->-1 [26] -1/-1/-1->0->-1 [27] -1/-1/-1->0->-1 [28] -1/-1/-1->0->-1 [29] -1/-1/-1->0->-1 [30] -1/-1/-1->0->-1 [31] -1/-1/-1->0->-1
+IAP-A800:64713:64823 [4] NCCL INFO P2P Chunksize set to 131072
+IAP-A800:64713:64825 [0] NCCL INFO Setting affinity for GPU 0 to ffffffff,00000000,ffffffff
+IAP-A800:64713:64825 [0] NCCL INFO comm 0x5faa21433490 rank 0 nRanks 1 nNodes 1 localRanks 1 localRank 0 MNNVL 0
+IAP-A800:64713:64825 [0] NCCL INFO Channel 00/32 :    0
+IAP-A800:64713:64825 [0] NCCL INFO Channel 01/32 :    0
+IAP-A800:64713:64825 [0] NCCL INFO Channel 02/32 :    0
+IAP-A800:64713:64825 [0] NCCL INFO Channel 03/32 :    0
+IAP-A800:64713:64825 [0] NCCL INFO Channel 04/32 :    0
+IAP-A800:64713:64825 [0] NCCL INFO Channel 05/32 :    0
+IAP-A800:64713:64825 [0] NCCL INFO Channel 06/32 :    0
+IAP-A800:64713:64825 [0] NCCL INFO Channel 07/32 :    0
+IAP-A800:64713:64825 [0] NCCL INFO Channel 08/32 :    0
+IAP-A800:64713:64825 [0] NCCL INFO Channel 09/32 :    0
+IAP-A800:64713:64825 [0] NCCL INFO Channel 10/32 :    0
+IAP-A800:64713:64825 [0] NCCL INFO Channel 11/32 :    0
+IAP-A800:64713:64825 [0] NCCL INFO Channel 12/32 :    0
+IAP-A800:64713:64825 [0] NCCL INFO Channel 13/32 :    0
+IAP-A800:64713:64825 [0] NCCL INFO Channel 14/32 :    0
+IAP-A800:64713:64825 [0] NCCL INFO Channel 15/32 :    0
+IAP-A800:64713:64825 [0] NCCL INFO Channel 16/32 :    0
+IAP-A800:64713:64825 [0] NCCL INFO Channel 17/32 :    0
+IAP-A800:64713:64825 [0] NCCL INFO Channel 18/32 :    0
+IAP-A800:64713:64825 [0] NCCL INFO Channel 19/32 :    0
+IAP-A800:64713:64825 [0] NCCL INFO Channel 20/32 :    0
+IAP-A800:64713:64825 [0] NCCL INFO Channel 21/32 :    0
+IAP-A800:64713:64825 [0] NCCL INFO Channel 22/32 :    0
+IAP-A800:64713:64825 [0] NCCL INFO Channel 23/32 :    0
+IAP-A800:64713:64825 [0] NCCL INFO Channel 24/32 :    0
+IAP-A800:64713:64825 [0] NCCL INFO Channel 25/32 :    0
+IAP-A800:64713:64825 [0] NCCL INFO Channel 26/32 :    0
+IAP-A800:64713:64825 [0] NCCL INFO Channel 27/32 :    0
+IAP-A800:64713:64825 [0] NCCL INFO Channel 28/32 :    0
+IAP-A800:64713:64825 [0] NCCL INFO Channel 29/32 :    0
+IAP-A800:64713:64825 [0] NCCL INFO Channel 30/32 :    0
+IAP-A800:64713:64825 [0] NCCL INFO Channel 31/32 :    0
+IAP-A800:64713:64825 [0] NCCL INFO Trees [0] -1/-1/-1->0->-1 [1] -1/-1/-1->0->-1 [2] -1/-1/-1->0->-1 [3] -1/-1/-1->0->-1 [4] -1/-1/-1->0->-1 [5] -1/-1/-1->0->-1 [6] -1/-1/-1->0->-1 [7] -1/-1/-1->0->-1 [8] -1/-1/-1->0->-1 [9] -1/-1/-1->0->-1 [10] -1/-1/-1->0->-1 [11] -1/-1/-1->0->-1 [12] -1/-1/-1->0->-1 [13] -1/-1/-1->0->-1 [14] -1/-1/-1->0->-1 [15] -1/-1/-1->0->-1 [16] -1/-1/-1->0->-1 [17] -1/-1/-1->0->-1 [18] -1/-1/-1->0->-1 [19] -1/-1/-1->0->-1 [20] -1/-1/-1->0->-1 [21] -1/-1/-1->0->-1 [22] -1/-1/-1->0->-1 [23] -1/-1/-1->0->-1 [24] -1/-1/-1->0->-1 [25] -1/-1/-1->0->-1 [26] -1/-1/-1->0->-1 [27] -1/-1/-1->0->-1 [28] -1/-1/-1->0->-1 [29] -1/-1/-1->0->-1 [30] -1/-1/-1->0->-1 [31] -1/-1/-1->0->-1
+IAP-A800:64713:64825 [0] NCCL INFO P2P Chunksize set to 131072
+IAP-A800:64713:64830 [1] NCCL INFO Connected all rings
+IAP-A800:64713:64830 [1] NCCL INFO Connected all trees
+IAP-A800:64713:64830 [1] NCCL INFO 32 coll channels, 32 collnet channels, 0 nvls channels, 32 p2p channels, 32 p2p channels per peer
+IAP-A800:64713:64826 [3] NCCL INFO Connected all rings
+IAP-A800:64713:64826 [3] NCCL INFO Connected all trees
+IAP-A800:64713:64826 [3] NCCL INFO 32 coll channels, 32 collnet channels, 0 nvls channels, 32 p2p channels, 32 p2p channels per peer
+IAP-A800:64713:64830 [1] NCCL INFO Init Compress Memory Pool
+IAP-A800:64713:64830 [1] NCCL INFO ncclCommSplit comm 0x74ebf38dd0b0 rank 0 nranks 1 cudaDev 1 nvmlDev 1 busId 42000 parent 0x5faa2130a280 color 1 key 1 commId 0xaaa2a42489116910 - Init COMPLETE
+IAP-A800:64713:64827 [6] NCCL INFO Connected all rings
+IAP-A800:64713:64827 [6] NCCL INFO Connected all trees
+IAP-A800:64713:64827 [6] NCCL INFO 32 coll channels, 32 collnet channels, 0 nvls channels, 32 p2p channels, 32 p2p channels per peer
+IAP-A800:64713:64829 [5] NCCL INFO Connected all rings
+IAP-A800:64713:64829 [5] NCCL INFO Connected all trees
+IAP-A800:64713:64829 [5] NCCL INFO 32 coll channels, 32 collnet channels, 0 nvls channels, 32 p2p channels, 32 p2p channels per peer
+IAP-A800:64713:64825 [0] NCCL INFO Connected all rings
+IAP-A800:64713:64825 [0] NCCL INFO Connected all trees
+IAP-A800:64713:64825 [0] NCCL INFO 32 coll channels, 32 collnet channels, 0 nvls channels, 32 p2p channels, 32 p2p channels per peer
+IAP-A800:64713:64828 [7] NCCL INFO Connected all rings
+IAP-A800:64713:64828 [7] NCCL INFO Connected all trees
+IAP-A800:64713:64828 [7] NCCL INFO 32 coll channels, 32 collnet channels, 0 nvls channels, 32 p2p channels, 32 p2p channels per peer
+IAP-A800:64713:64790 [1] NCCL INFO NCCL_LOCAL_REGISTER set by environment to 1.
+IAP-A800:64713:64790 [1] NCCL INFO Registering 0x74d84c000000 size 19327352832
+IAP-A800:64713:64826 [3] NCCL INFO Init Compress Memory Pool
+IAP-A800:64713:64826 [3] NCCL INFO ncclCommSplit comm 0x74ee0788b4e0 rank 0 nranks 1 cudaDev 3 nvmlDev 3 busId 67000 parent 0x5faa213184b0 color 3 key 3 commId 0x9e0c33fbd002bbe7 - Init COMPLETE
+IAP-A800:64713:64824 [2] NCCL INFO Connected all rings
+IAP-A800:64713:64824 [2] NCCL INFO Connected all trees
+IAP-A800:64713:64824 [2] NCCL INFO 32 coll channels, 32 collnet channels, 0 nvls channels, 32 p2p channels, 32 p2p channels per peer
+IAP-A800:64713:64823 [4] NCCL INFO Connected all rings
+IAP-A800:64713:64823 [4] NCCL INFO Connected all trees
+IAP-A800:64713:64823 [4] NCCL INFO 32 coll channels, 32 collnet channels, 0 nvls channels, 32 p2p channels, 32 p2p channels per peer
+IAP-A800:64713:64788 [3] NCCL INFO Registering 0x74d398000000 size 19327352832
+IAP-A800:64713:64827 [6] NCCL INFO Init Compress Memory Pool
+IAP-A800:64713:64827 [6] NCCL INFO ncclCommSplit comm 0x74ebeb88b490 rank 0 nranks 1 cudaDev 6 nvmlDev 6 busId d0000 parent 0x5faa2132d750 color 6 key 6 commId 0x8d16cd11b660a854 - Init COMPLETE
+IAP-A800:64713:64829 [5] NCCL INFO Init Compress Memory Pool
+IAP-A800:64713:64829 [5] NCCL INFO ncclCommSplit comm 0x74e9db89fa10 rank 0 nranks 1 cudaDev 5 nvmlDev 5 busId b1000 parent 0x5faa21326670 color 5 key 5 commId 0x6a78b785e97e492b - Init COMPLETE
+IAP-A800:64713:64828 [7] NCCL INFO Init Compress Memory Pool
+IAP-A800:64713:64828 [7] NCCL INFO ncclCommSplit comm 0x74f02780dd30 rank 0 nranks 1 cudaDev 7 nvmlDev 7 busId d3000 parent 0x5faa21334830 color 7 key 7 commId 0xca08927479a59f9d - Init COMPLETE
+IAP-A800:64713:64855 [1] NCCL INFO Channel 00/1 : 1[1] -> 2[2] via P2P/direct pointer/read
+IAP-A800:64713:64825 [0] NCCL INFO Init Compress Memory Pool
+IAP-A800:64713:64825 [0] NCCL INFO ncclCommSplit comm 0x5faa21433490 rank 0 nranks 1 cudaDev 0 nvmlDev 0 busId 3d000 parent 0x5faa212ff8b0 color 0 key 0 commId 0xcdf103514927715e - Init COMPLETE
+IAP-A800:64713:64855 [1] NCCL INFO Channel 01/1 : 1[1] -> 2[2] via P2P/direct pointer/read
+IAP-A800:64713:64785 [6] NCCL INFO Registering 0x74cef8000000 size 19327352832
+IAP-A800:64713:64855 [1] NCCL INFO Channel 02/1 : 1[1] -> 2[2] via P2P/direct pointer/read
+IAP-A800:64713:64855 [1] NCCL INFO Channel 03/1 : 1[1] -> 2[2] via P2P/direct pointer/read
+IAP-A800:64713:64786 [5] NCCL INFO Registering 0x74ca74000000 size 19327352832
+IAP-A800:64713:64855 [1] NCCL INFO Channel 04/1 : 1[1] -> 2[2] via P2P/direct pointer/read
+IAP-A800:64713:64855 [1] NCCL INFO Channel 05/1 : 1[1] -> 2[2] via P2P/direct pointer/read
+IAP-A800:64713:64856 [3] NCCL INFO Channel 00/1 : 3[3] -> 4[4] via P2P/direct pointer/read
+IAP-A800:64713:64856 [3] NCCL INFO Channel 01/1 : 3[3] -> 4[4] via P2P/direct pointer/read
+IAP-A800:64713:64855 [1] NCCL INFO Channel 06/1 : 1[1] -> 2[2] via P2P/direct pointer/read
+IAP-A800:64713:64856 [3] NCCL INFO Channel 02/1 : 3[3] -> 4[4] via P2P/direct pointer/read
+IAP-A800:64713:64856 [3] NCCL INFO Channel 03/1 : 3[3] -> 4[4] via P2P/direct pointer/read
+IAP-A800:64713:64855 [1] NCCL INFO Channel 07/1 : 1[1] -> 2[2] via P2P/direct pointer/read
+IAP-A800:64713:64856 [3] NCCL INFO Channel 04/1 : 3[3] -> 4[4] via P2P/direct pointer/read
+IAP-A800:64713:64856 [3] NCCL INFO Channel 05/1 : 3[3] -> 4[4] via P2P/direct pointer/read
+IAP-A800:64713:64855 [1] NCCL INFO Channel 08/1 : 1[1] -> 2[2] via P2P/direct pointer/read
+IAP-A800:64713:64856 [3] NCCL INFO Channel 06/1 : 3[3] -> 4[4] via P2P/direct pointer/read
+IAP-A800:64713:64856 [3] NCCL INFO Channel 07/1 : 3[3] -> 4[4] via P2P/direct pointer/read
+IAP-A800:64713:64855 [1] NCCL INFO Channel 09/1 : 1[1] -> 2[2] via P2P/direct pointer/read
+IAP-A800:64713:64856 [3] NCCL INFO Channel 08/1 : 3[3] -> 4[4] via P2P/direct pointer/read
+IAP-A800:64713:64856 [3] NCCL INFO Channel 09/1 : 3[3] -> 4[4] via P2P/direct pointer/read
+IAP-A800:64713:64855 [1] NCCL INFO Channel 10/1 : 1[1] -> 2[2] via P2P/direct pointer/read
+IAP-A800:64713:64856 [3] NCCL INFO Channel 10/1 : 3[3] -> 4[4] via P2P/direct pointer/read
+IAP-A800:64713:64856 [3] NCCL INFO Channel 11/1 : 3[3] -> 4[4] via P2P/direct pointer/read
+IAP-A800:64713:64855 [1] NCCL INFO Channel 11/1 : 1[1] -> 2[2] via P2P/direct pointer/read
+IAP-A800:64713:64856 [3] NCCL INFO Channel 12/1 : 3[3] -> 4[4] via P2P/direct pointer/read
+IAP-A800:64713:64856 [3] NCCL INFO Channel 13/1 : 3[3] -> 4[4] via P2P/direct pointer/read
+IAP-A800:64713:64855 [1] NCCL INFO Channel 12/1 : 1[1] -> 2[2] via P2P/direct pointer/read
+IAP-A800:64713:64856 [3] NCCL INFO Channel 14/1 : 3[3] -> 4[4] via P2P/direct pointer/read
+IAP-A800:64713:64856 [3] NCCL INFO Channel 15/1 : 3[3] -> 4[4] via P2P/direct pointer/read
+IAP-A800:64713:64855 [1] NCCL INFO Channel 13/1 : 1[1] -> 2[2] via P2P/direct pointer/read
+IAP-A800:64713:64855 [1] NCCL INFO Channel 14/1 : 1[1] -> 2[2] via P2P/direct pointer/read
+IAP-A800:64713:64855 [1] NCCL INFO Channel 15/1 : 1[1] -> 2[2] via P2P/direct pointer/read
+IAP-A800:64713:64857 [6] NCCL INFO Channel 00/1 : 6[6] -> 7[7] via P2P/direct pointer/read
+IAP-A800:64713:64857 [6] NCCL INFO Channel 01/1 : 6[6] -> 7[7] via P2P/direct pointer/read
+IAP-A800:64713:64857 [6] NCCL INFO Channel 02/1 : 6[6] -> 7[7] via P2P/direct pointer/read
+IAP-A800:64713:64857 [6] NCCL INFO Channel 03/1 : 6[6] -> 7[7] via P2P/direct pointer/read
+IAP-A800:64713:64857 [6] NCCL INFO Channel 04/1 : 6[6] -> 7[7] via P2P/direct pointer/read
+IAP-A800:64713:64857 [6] NCCL INFO Channel 05/1 : 6[6] -> 7[7] via P2P/direct pointer/read
+IAP-A800:64713:64857 [6] NCCL INFO Channel 06/1 : 6[6] -> 7[7] via P2P/direct pointer/read
+IAP-A800:64713:64857 [6] NCCL INFO Channel 07/1 : 6[6] -> 7[7] via P2P/direct pointer/read
+IAP-A800:64713:64857 [6] NCCL INFO Channel 08/1 : 6[6] -> 7[7] via P2P/direct pointer/read
+IAP-A800:64713:64857 [6] NCCL INFO Channel 09/1 : 6[6] -> 7[7] via P2P/direct pointer/read
+IAP-A800:64713:64857 [6] NCCL INFO Channel 10/1 : 6[6] -> 7[7] via P2P/direct pointer/read
+IAP-A800:64713:64857 [6] NCCL INFO Channel 11/1 : 6[6] -> 7[7] via P2P/direct pointer/read
+IAP-A800:64713:64857 [6] NCCL INFO Channel 12/1 : 6[6] -> 7[7] via P2P/direct pointer/read
+IAP-A800:64713:64857 [6] NCCL INFO Channel 13/1 : 6[6] -> 7[7] via P2P/direct pointer/read
+IAP-A800:64713:64857 [6] NCCL INFO Channel 14/1 : 6[6] -> 7[7] via P2P/direct pointer/read
+IAP-A800:64713:64857 [6] NCCL INFO Channel 15/1 : 6[6] -> 7[7] via P2P/direct pointer/read
+IAP-A800:64713:64824 [2] NCCL INFO Init Compress Memory Pool
+IAP-A800:64713:64824 [2] NCCL INFO ncclCommSplit comm 0x74e9cc0c01a0 rank 0 nranks 1 cudaDev 2 nvmlDev 2 busId 61000 parent 0x5faa213113d0 color 2 key 2 commId 0x5db28483ca96fdbc - Init COMPLETE
+IAP-A800:64713:64784 [7] NCCL INFO Registering 0x74c5ec000000 size 19327352832
+IAP-A800:64713:64823 [4] NCCL INFO Init Compress Memory Pool
+IAP-A800:64713:64823 [4] NCCL INFO ncclCommSplit comm 0x74ebe787bee0 rank 0 nranks 1 cudaDev 4 nvmlDev 4 busId ad000 parent 0x5faa2131f590 color 4 key 4 commId 0x999290e408559d06 - Init COMPLETE
+IAP-A800:64713:64858 [5] NCCL INFO Channel 00/1 : 5[5] -> 6[6] via P2P/direct pointer/read
+IAP-A800:64713:64858 [5] NCCL INFO Channel 01/1 : 5[5] -> 6[6] via P2P/direct pointer/read
+IAP-A800:64713:64858 [5] NCCL INFO Channel 02/1 : 5[5] -> 6[6] via P2P/direct pointer/read
+IAP-A800:64713:64858 [5] NCCL INFO Channel 03/1 : 5[5] -> 6[6] via P2P/direct pointer/read
+IAP-A800:64713:64858 [5] NCCL INFO Channel 04/1 : 5[5] -> 6[6] via P2P/direct pointer/read
+IAP-A800:64713:64858 [5] NCCL INFO Channel 05/1 : 5[5] -> 6[6] via P2P/direct pointer/read
+IAP-A800:64713:64858 [5] NCCL INFO Channel 06/1 : 5[5] -> 6[6] via P2P/direct pointer/read
+IAP-A800:64713:64858 [5] NCCL INFO Channel 07/1 : 5[5] -> 6[6] via P2P/direct pointer/read
+IAP-A800:64713:64858 [5] NCCL INFO Channel 08/1 : 5[5] -> 6[6] via P2P/direct pointer/read
+IAP-A800:64713:64858 [5] NCCL INFO Channel 09/1 : 5[5] -> 6[6] via P2P/direct pointer/read
+IAP-A800:64713:64858 [5] NCCL INFO Channel 10/1 : 5[5] -> 6[6] via P2P/direct pointer/read
+IAP-A800:64713:64858 [5] NCCL INFO Channel 11/1 : 5[5] -> 6[6] via P2P/direct pointer/read
+IAP-A800:64713:64858 [5] NCCL INFO Channel 12/1 : 5[5] -> 6[6] via P2P/direct pointer/read
+IAP-A800:64713:64858 [5] NCCL INFO Channel 13/1 : 5[5] -> 6[6] via P2P/direct pointer/read
+IAP-A800:64713:64858 [5] NCCL INFO Channel 14/1 : 5[5] -> 6[6] via P2P/direct pointer/read
+IAP-A800:64713:64858 [5] NCCL INFO Channel 15/1 : 5[5] -> 6[6] via P2P/direct pointer/read
+IAP-A800:64713:64713 [0] NCCL INFO Registering 0x74c158000000 size 19327352832
+IAP-A800:64713:64789 [2] NCCL INFO Registering 0x74b794000000 size 19327352832
+IAP-A800:64713:64787 [4] NCCL INFO Registering 0x74bc18000000 size 19327352832
+IAP-A800:64713:64859 [7] NCCL INFO Channel 00/1 : 7[7] -> 0[0] via P2P/direct pointer/read
+IAP-A800:64713:64859 [7] NCCL INFO Channel 01/1 : 7[7] -> 0[0] via P2P/direct pointer/read
+IAP-A800:64713:64859 [7] NCCL INFO Channel 02/1 : 7[7] -> 0[0] via P2P/direct pointer/read
+IAP-A800:64713:64859 [7] NCCL INFO Channel 03/1 : 7[7] -> 0[0] via P2P/direct pointer/read
+IAP-A800:64713:64859 [7] NCCL INFO Channel 04/1 : 7[7] -> 0[0] via P2P/direct pointer/read
+IAP-A800:64713:64859 [7] NCCL INFO Channel 05/1 : 7[7] -> 0[0] via P2P/direct pointer/read
+IAP-A800:64713:64859 [7] NCCL INFO Channel 06/1 : 7[7] -> 0[0] via P2P/direct pointer/read
+IAP-A800:64713:64859 [7] NCCL INFO Channel 07/1 : 7[7] -> 0[0] via P2P/direct pointer/read
+IAP-A800:64713:64859 [7] NCCL INFO Channel 08/1 : 7[7] -> 0[0] via P2P/direct pointer/read
+IAP-A800:64713:64859 [7] NCCL INFO Channel 09/1 : 7[7] -> 0[0] via P2P/direct pointer/read
+IAP-A800:64713:64859 [7] NCCL INFO Channel 10/1 : 7[7] -> 0[0] via P2P/direct pointer/read
+IAP-A800:64713:64859 [7] NCCL INFO Channel 11/1 : 7[7] -> 0[0] via P2P/direct pointer/read
+IAP-A800:64713:64859 [7] NCCL INFO Channel 12/1 : 7[7] -> 0[0] via P2P/direct pointer/read
+IAP-A800:64713:64859 [7] NCCL INFO Channel 13/1 : 7[7] -> 0[0] via P2P/direct pointer/read
+IAP-A800:64713:64859 [7] NCCL INFO Channel 14/1 : 7[7] -> 0[0] via P2P/direct pointer/read
+IAP-A800:64713:64859 [7] NCCL INFO Channel 15/1 : 7[7] -> 0[0] via P2P/direct pointer/read
+IAP-A800:64713:64857 [6] NCCL INFO Channel 00/1 : 6[6] -> 0[0] via P2P/direct pointer/read
+IAP-A800:64713:64857 [6] NCCL INFO Channel 01/1 : 6[6] -> 0[0] via P2P/direct pointer/read
+IAP-A800:64713:64857 [6] NCCL INFO Channel 02/1 : 6[6] -> 0[0] via P2P/direct pointer/read
+IAP-A800:64713:64857 [6] NCCL INFO Channel 03/1 : 6[6] -> 0[0] via P2P/direct pointer/read
+IAP-A800:64713:64857 [6] NCCL INFO Channel 04/1 : 6[6] -> 0[0] via P2P/direct pointer/read
+IAP-A800:64713:64857 [6] NCCL INFO Channel 05/1 : 6[6] -> 0[0] via P2P/direct pointer/read
+IAP-A800:64713:64857 [6] NCCL INFO Channel 06/1 : 6[6] -> 0[0] via P2P/direct pointer/read
+IAP-A800:64713:64857 [6] NCCL INFO Channel 07/1 : 6[6] -> 0[0] via P2P/direct pointer/read
+IAP-A800:64713:64857 [6] NCCL INFO Channel 08/1 : 6[6] -> 0[0] via P2P/direct pointer/read
+IAP-A800:64713:64857 [6] NCCL INFO Channel 09/1 : 6[6] -> 0[0] via P2P/direct pointer/read
+IAP-A800:64713:64857 [6] NCCL INFO Channel 10/1 : 6[6] -> 0[0] via P2P/direct pointer/read
+IAP-A800:64713:64857 [6] NCCL INFO Channel 11/1 : 6[6] -> 0[0] via P2P/direct pointer/read
+IAP-A800:64713:64857 [6] NCCL INFO Channel 12/1 : 6[6] -> 0[0] via P2P/direct pointer/read
+IAP-A800:64713:64857 [6] NCCL INFO Channel 13/1 : 6[6] -> 0[0] via P2P/direct pointer/read
+IAP-A800:64713:64857 [6] NCCL INFO Channel 14/1 : 6[6] -> 0[0] via P2P/direct pointer/read
+IAP-A800:64713:64857 [6] NCCL INFO Channel 15/1 : 6[6] -> 0[0] via P2P/direct pointer/read
+IAP-A800:64713:64860 [0] NCCL INFO Channel 00/1 : 0[0] -> 1[1] via P2P/direct pointer/read
+IAP-A800:64713:64860 [0] NCCL INFO Channel 01/1 : 0[0] -> 1[1] via P2P/direct pointer/read
+IAP-A800:64713:64860 [0] NCCL INFO Channel 02/1 : 0[0] -> 1[1] via P2P/direct pointer/read
+IAP-A800:64713:64860 [0] NCCL INFO Channel 03/1 : 0[0] -> 1[1] via P2P/direct pointer/read
+IAP-A800:64713:64860 [0] NCCL INFO Channel 04/1 : 0[0] -> 1[1] via P2P/direct pointer/read
+IAP-A800:64713:64860 [0] NCCL INFO Channel 05/1 : 0[0] -> 1[1] via P2P/direct pointer/read
+IAP-A800:64713:64860 [0] NCCL INFO Channel 06/1 : 0[0] -> 1[1] via P2P/direct pointer/read
+IAP-A800:64713:64860 [0] NCCL INFO Channel 07/1 : 0[0] -> 1[1] via P2P/direct pointer/read
+IAP-A800:64713:64860 [0] NCCL INFO Channel 08/1 : 0[0] -> 1[1] via P2P/direct pointer/read
+IAP-A800:64713:64860 [0] NCCL INFO Channel 09/1 : 0[0] -> 1[1] via P2P/direct pointer/read
+IAP-A800:64713:64860 [0] NCCL INFO Channel 10/1 : 0[0] -> 1[1] via P2P/direct pointer/read
+IAP-A800:64713:64860 [0] NCCL INFO Channel 11/1 : 0[0] -> 1[1] via P2P/direct pointer/read
+IAP-A800:64713:64860 [0] NCCL INFO Channel 12/1 : 0[0] -> 1[1] via P2P/direct pointer/read
+IAP-A800:64713:64860 [0] NCCL INFO Channel 13/1 : 0[0] -> 1[1] via P2P/direct pointer/read
+IAP-A800:64713:64860 [0] NCCL INFO Channel 14/1 : 0[0] -> 1[1] via P2P/direct pointer/read
+IAP-A800:64713:64860 [0] NCCL INFO Channel 15/1 : 0[0] -> 1[1] via P2P/direct pointer/read
+IAP-A800:64713:64861 [2] NCCL INFO Channel 00/1 : 2[2] -> 3[3] via P2P/direct pointer/read
+IAP-A800:64713:64861 [2] NCCL INFO Channel 01/1 : 2[2] -> 3[3] via P2P/direct pointer/read
+IAP-A800:64713:64861 [2] NCCL INFO Channel 02/1 : 2[2] -> 3[3] via P2P/direct pointer/read
+IAP-A800:64713:64861 [2] NCCL INFO Channel 03/1 : 2[2] -> 3[3] via P2P/direct pointer/read
+IAP-A800:64713:64861 [2] NCCL INFO Channel 04/1 : 2[2] -> 3[3] via P2P/direct pointer/read
+IAP-A800:64713:64861 [2] NCCL INFO Channel 05/1 : 2[2] -> 3[3] via P2P/direct pointer/read
+IAP-A800:64713:64861 [2] NCCL INFO Channel 06/1 : 2[2] -> 3[3] via P2P/direct pointer/read
+IAP-A800:64713:64861 [2] NCCL INFO Channel 07/1 : 2[2] -> 3[3] via P2P/direct pointer/read
+IAP-A800:64713:64861 [2] NCCL INFO Channel 08/1 : 2[2] -> 3[3] via P2P/direct pointer/read
+IAP-A800:64713:64861 [2] NCCL INFO Channel 09/1 : 2[2] -> 3[3] via P2P/direct pointer/read
+IAP-A800:64713:64859 [7] NCCL INFO Channel 00/1 : 7[7] -> 1[1] via P2P/direct pointer/read
+IAP-A800:64713:64860 [0] NCCL INFO Channel 00/1 : 0[0] -> 2[2] via P2P/direct pointer/read
+IAP-A800:64713:64861 [2] NCCL INFO Channel 10/1 : 2[2] -> 3[3] via P2P/direct pointer/read
+IAP-A800:64713:64859 [7] NCCL INFO Channel 01/1 : 7[7] -> 1[1] via P2P/direct pointer/read
+IAP-A800:64713:64860 [0] NCCL INFO Channel 01/1 : 0[0] -> 2[2] via P2P/direct pointer/read
+IAP-A800:64713:64861 [2] NCCL INFO Channel 11/1 : 2[2] -> 3[3] via P2P/direct pointer/read
+IAP-A800:64713:64859 [7] NCCL INFO Channel 02/1 : 7[7] -> 1[1] via P2P/direct pointer/read
+IAP-A800:64713:64860 [0] NCCL INFO Channel 02/1 : 0[0] -> 2[2] via P2P/direct pointer/read
+IAP-A800:64713:64861 [2] NCCL INFO Channel 12/1 : 2[2] -> 3[3] via P2P/direct pointer/read
+IAP-A800:64713:64859 [7] NCCL INFO Channel 03/1 : 7[7] -> 1[1] via P2P/direct pointer/read
+IAP-A800:64713:64860 [0] NCCL INFO Channel 03/1 : 0[0] -> 2[2] via P2P/direct pointer/read
+IAP-A800:64713:64861 [2] NCCL INFO Channel 13/1 : 2[2] -> 3[3] via P2P/direct pointer/read
+IAP-A800:64713:64859 [7] NCCL INFO Channel 04/1 : 7[7] -> 1[1] via P2P/direct pointer/read
+IAP-A800:64713:64860 [0] NCCL INFO Channel 04/1 : 0[0] -> 2[2] via P2P/direct pointer/read
+IAP-A800:64713:64861 [2] NCCL INFO Channel 14/1 : 2[2] -> 3[3] via P2P/direct pointer/read
+IAP-A800:64713:64859 [7] NCCL INFO Channel 05/1 : 7[7] -> 1[1] via P2P/direct pointer/read
+IAP-A800:64713:64860 [0] NCCL INFO Channel 05/1 : 0[0] -> 2[2] via P2P/direct pointer/read
+IAP-A800:64713:64861 [2] NCCL INFO Channel 15/1 : 2[2] -> 3[3] via P2P/direct pointer/read
+IAP-A800:64713:64859 [7] NCCL INFO Channel 06/1 : 7[7] -> 1[1] via P2P/direct pointer/read
+IAP-A800:64713:64860 [0] NCCL INFO Channel 06/1 : 0[0] -> 2[2] via P2P/direct pointer/read
+IAP-A800:64713:64859 [7] NCCL INFO Channel 07/1 : 7[7] -> 1[1] via P2P/direct pointer/read
+IAP-A800:64713:64860 [0] NCCL INFO Channel 07/1 : 0[0] -> 2[2] via P2P/direct pointer/read
+IAP-A800:64713:64859 [7] NCCL INFO Channel 08/1 : 7[7] -> 1[1] via P2P/direct pointer/read
+IAP-A800:64713:64860 [0] NCCL INFO Channel 08/1 : 0[0] -> 2[2] via P2P/direct pointer/read
+IAP-A800:64713:64859 [7] NCCL INFO Channel 09/1 : 7[7] -> 1[1] via P2P/direct pointer/read
+IAP-A800:64713:64860 [0] NCCL INFO Channel 09/1 : 0[0] -> 2[2] via P2P/direct pointer/read
+IAP-A800:64713:64859 [7] NCCL INFO Channel 10/1 : 7[7] -> 1[1] via P2P/direct pointer/read
+IAP-A800:64713:64860 [0] NCCL INFO Channel 10/1 : 0[0] -> 2[2] via P2P/direct pointer/read
+IAP-A800:64713:64859 [7] NCCL INFO Channel 11/1 : 7[7] -> 1[1] via P2P/direct pointer/read
+IAP-A800:64713:64859 [7] NCCL INFO Channel 12/1 : 7[7] -> 1[1] via P2P/direct pointer/read
+IAP-A800:64713:64860 [0] NCCL INFO Channel 11/1 : 0[0] -> 2[2] via P2P/direct pointer/read
+IAP-A800:64713:64859 [7] NCCL INFO Channel 13/1 : 7[7] -> 1[1] via P2P/direct pointer/read
+IAP-A800:64713:64860 [0] NCCL INFO Channel 12/1 : 0[0] -> 2[2] via P2P/direct pointer/read
+IAP-A800:64713:64860 [0] NCCL INFO Channel 13/1 : 0[0] -> 2[2] via P2P/direct pointer/read
+IAP-A800:64713:64859 [7] NCCL INFO Channel 14/1 : 7[7] -> 1[1] via P2P/direct pointer/read
+IAP-A800:64713:64860 [0] NCCL INFO Channel 14/1 : 0[0] -> 2[2] via P2P/direct pointer/read
+IAP-A800:64713:64859 [7] NCCL INFO Channel 15/1 : 7[7] -> 1[1] via P2P/direct pointer/read
+IAP-A800:64713:64860 [0] NCCL INFO Channel 15/1 : 0[0] -> 2[2] via P2P/direct pointer/read
+IAP-A800:64713:64855 [1] NCCL INFO Channel 00/1 : 1[1] -> 3[3] via P2P/direct pointer/read
+IAP-A800:64713:64855 [1] NCCL INFO Channel 01/1 : 1[1] -> 3[3] via P2P/direct pointer/read
+IAP-A800:64713:64862 [4] NCCL INFO Channel 00/1 : 4[4] -> 5[5] via P2P/direct pointer/read
+IAP-A800:64713:64861 [2] NCCL INFO Channel 00/1 : 2[2] -> 4[4] via P2P/direct pointer/read
+IAP-A800:64713:64855 [1] NCCL INFO Channel 02/1 : 1[1] -> 3[3] via P2P/direct pointer/read
+IAP-A800:64713:64862 [4] NCCL INFO Channel 01/1 : 4[4] -> 5[5] via P2P/direct pointer/read
+IAP-A800:64713:64861 [2] NCCL INFO Channel 01/1 : 2[2] -> 4[4] via P2P/direct pointer/read
+IAP-A800:64713:64855 [1] NCCL INFO Channel 03/1 : 1[1] -> 3[3] via P2P/direct pointer/read
+IAP-A800:64713:64862 [4] NCCL INFO Channel 02/1 : 4[4] -> 5[5] via P2P/direct pointer/read
+IAP-A800:64713:64861 [2] NCCL INFO Channel 02/1 : 2[2] -> 4[4] via P2P/direct pointer/read
+IAP-A800:64713:64855 [1] NCCL INFO Channel 04/1 : 1[1] -> 3[3] via P2P/direct pointer/read
+IAP-A800:64713:64862 [4] NCCL INFO Channel 03/1 : 4[4] -> 5[5] via P2P/direct pointer/read
+IAP-A800:64713:64861 [2] NCCL INFO Channel 03/1 : 2[2] -> 4[4] via P2P/direct pointer/read
+IAP-A800:64713:64855 [1] NCCL INFO Channel 05/1 : 1[1] -> 3[3] via P2P/direct pointer/read
+IAP-A800:64713:64862 [4] NCCL INFO Channel 04/1 : 4[4] -> 5[5] via P2P/direct pointer/read
+IAP-A800:64713:64861 [2] NCCL INFO Channel 04/1 : 2[2] -> 4[4] via P2P/direct pointer/read
+IAP-A800:64713:64855 [1] NCCL INFO Channel 06/1 : 1[1] -> 3[3] via P2P/direct pointer/read
+IAP-A800:64713:64862 [4] NCCL INFO Channel 05/1 : 4[4] -> 5[5] via P2P/direct pointer/read
+IAP-A800:64713:64861 [2] NCCL INFO Channel 05/1 : 2[2] -> 4[4] via P2P/direct pointer/read
+IAP-A800:64713:64855 [1] NCCL INFO Channel 07/1 : 1[1] -> 3[3] via P2P/direct pointer/read
+IAP-A800:64713:64862 [4] NCCL INFO Channel 06/1 : 4[4] -> 5[5] via P2P/direct pointer/read
+IAP-A800:64713:64861 [2] NCCL INFO Channel 06/1 : 2[2] -> 4[4] via P2P/direct pointer/read
+IAP-A800:64713:64855 [1] NCCL INFO Channel 08/1 : 1[1] -> 3[3] via P2P/direct pointer/read
+IAP-A800:64713:64862 [4] NCCL INFO Channel 07/1 : 4[4] -> 5[5] via P2P/direct pointer/read
+IAP-A800:64713:64861 [2] NCCL INFO Channel 07/1 : 2[2] -> 4[4] via P2P/direct pointer/read
+IAP-A800:64713:64855 [1] NCCL INFO Channel 09/1 : 1[1] -> 3[3] via P2P/direct pointer/read
+IAP-A800:64713:64862 [4] NCCL INFO Channel 08/1 : 4[4] -> 5[5] via P2P/direct pointer/read
+IAP-A800:64713:64861 [2] NCCL INFO Channel 08/1 : 2[2] -> 4[4] via P2P/direct pointer/read
+IAP-A800:64713:64855 [1] NCCL INFO Channel 10/1 : 1[1] -> 3[3] via P2P/direct pointer/read
+IAP-A800:64713:64862 [4] NCCL INFO Channel 09/1 : 4[4] -> 5[5] via P2P/direct pointer/read
+IAP-A800:64713:64861 [2] NCCL INFO Channel 09/1 : 2[2] -> 4[4] via P2P/direct pointer/read
+IAP-A800:64713:64855 [1] NCCL INFO Channel 11/1 : 1[1] -> 3[3] via P2P/direct pointer/read
+IAP-A800:64713:64862 [4] NCCL INFO Channel 10/1 : 4[4] -> 5[5] via P2P/direct pointer/read
+IAP-A800:64713:64861 [2] NCCL INFO Channel 10/1 : 2[2] -> 4[4] via P2P/direct pointer/read
+IAP-A800:64713:64855 [1] NCCL INFO Channel 12/1 : 1[1] -> 3[3] via P2P/direct pointer/read
+IAP-A800:64713:64862 [4] NCCL INFO Channel 11/1 : 4[4] -> 5[5] via P2P/direct pointer/read
+IAP-A800:64713:64861 [2] NCCL INFO Channel 11/1 : 2[2] -> 4[4] via P2P/direct pointer/read
+IAP-A800:64713:64855 [1] NCCL INFO Channel 13/1 : 1[1] -> 3[3] via P2P/direct pointer/read
+IAP-A800:64713:64862 [4] NCCL INFO Channel 12/1 : 4[4] -> 5[5] via P2P/direct pointer/read
+IAP-A800:64713:64861 [2] NCCL INFO Channel 12/1 : 2[2] -> 4[4] via P2P/direct pointer/read
+IAP-A800:64713:64855 [1] NCCL INFO Channel 14/1 : 1[1] -> 3[3] via P2P/direct pointer/read
+IAP-A800:64713:64862 [4] NCCL INFO Channel 13/1 : 4[4] -> 5[5] via P2P/direct pointer/read
+IAP-A800:64713:64861 [2] NCCL INFO Channel 13/1 : 2[2] -> 4[4] via P2P/direct pointer/read
+IAP-A800:64713:64855 [1] NCCL INFO Channel 15/1 : 1[1] -> 3[3] via P2P/direct pointer/read
+IAP-A800:64713:64862 [4] NCCL INFO Channel 14/1 : 4[4] -> 5[5] via P2P/direct pointer/read
+IAP-A800:64713:64861 [2] NCCL INFO Channel 14/1 : 2[2] -> 4[4] via P2P/direct pointer/read
+IAP-A800:64713:64862 [4] NCCL INFO Channel 15/1 : 4[4] -> 5[5] via P2P/direct pointer/read
+IAP-A800:64713:64861 [2] NCCL INFO Channel 15/1 : 2[2] -> 4[4] via P2P/direct pointer/read
+IAP-A800:64713:64858 [5] NCCL INFO Channel 00/1 : 5[5] -> 7[7] via P2P/direct pointer/read
+IAP-A800:64713:64858 [5] NCCL INFO Channel 01/1 : 5[5] -> 7[7] via P2P/direct pointer/read
+IAP-A800:64713:64858 [5] NCCL INFO Channel 02/1 : 5[5] -> 7[7] via P2P/direct pointer/read
+IAP-A800:64713:64860 [0] NCCL INFO Channel 00/1 : 0[0] -> 3[3] via P2P/direct pointer/read
+IAP-A800:64713:64858 [5] NCCL INFO Channel 03/1 : 5[5] -> 7[7] via P2P/direct pointer/read
+IAP-A800:64713:64860 [0] NCCL INFO Channel 01/1 : 0[0] -> 3[3] via P2P/direct pointer/read
+IAP-A800:64713:64858 [5] NCCL INFO Channel 04/1 : 5[5] -> 7[7] via P2P/direct pointer/read
+IAP-A800:64713:64856 [3] NCCL INFO Channel 00/1 : 3[3] -> 5[5] via P2P/direct pointer/read
+IAP-A800:64713:64860 [0] NCCL INFO Channel 02/1 : 0[0] -> 3[3] via P2P/direct pointer/read
+IAP-A800:64713:64862 [4] NCCL INFO Channel 00/1 : 4[4] -> 6[6] via P2P/direct pointer/read
+IAP-A800:64713:64858 [5] NCCL INFO Channel 05/1 : 5[5] -> 7[7] via P2P/direct pointer/read
+IAP-A800:64713:64856 [3] NCCL INFO Channel 01/1 : 3[3] -> 5[5] via P2P/direct pointer/read
+IAP-A800:64713:64860 [0] NCCL INFO Channel 03/1 : 0[0] -> 3[3] via P2P/direct pointer/read
+IAP-A800:64713:64862 [4] NCCL INFO Channel 01/1 : 4[4] -> 6[6] via P2P/direct pointer/read
+IAP-A800:64713:64858 [5] NCCL INFO Channel 06/1 : 5[5] -> 7[7] via P2P/direct pointer/read
+IAP-A800:64713:64856 [3] NCCL INFO Channel 02/1 : 3[3] -> 5[5] via P2P/direct pointer/read
+IAP-A800:64713:64860 [0] NCCL INFO Channel 04/1 : 0[0] -> 3[3] via P2P/direct pointer/read
+IAP-A800:64713:64862 [4] NCCL INFO Channel 02/1 : 4[4] -> 6[6] via P2P/direct pointer/read
+IAP-A800:64713:64856 [3] NCCL INFO Channel 03/1 : 3[3] -> 5[5] via P2P/direct pointer/read
+IAP-A800:64713:64858 [5] NCCL INFO Channel 07/1 : 5[5] -> 7[7] via P2P/direct pointer/read
+IAP-A800:64713:64860 [0] NCCL INFO Channel 05/1 : 0[0] -> 3[3] via P2P/direct pointer/read
+IAP-A800:64713:64862 [4] NCCL INFO Channel 03/1 : 4[4] -> 6[6] via P2P/direct pointer/read
+IAP-A800:64713:64856 [3] NCCL INFO Channel 04/1 : 3[3] -> 5[5] via P2P/direct pointer/read
+IAP-A800:64713:64858 [5] NCCL INFO Channel 08/1 : 5[5] -> 7[7] via P2P/direct pointer/read
+IAP-A800:64713:64860 [0] NCCL INFO Channel 06/1 : 0[0] -> 3[3] via P2P/direct pointer/read
+IAP-A800:64713:64862 [4] NCCL INFO Channel 04/1 : 4[4] -> 6[6] via P2P/direct pointer/read
+IAP-A800:64713:64856 [3] NCCL INFO Channel 05/1 : 3[3] -> 5[5] via P2P/direct pointer/read
+IAP-A800:64713:64858 [5] NCCL INFO Channel 09/1 : 5[5] -> 7[7] via P2P/direct pointer/read
+IAP-A800:64713:64860 [0] NCCL INFO Channel 07/1 : 0[0] -> 3[3] via P2P/direct pointer/read
+IAP-A800:64713:64862 [4] NCCL INFO Channel 05/1 : 4[4] -> 6[6] via P2P/direct pointer/read
+IAP-A800:64713:64856 [3] NCCL INFO Channel 06/1 : 3[3] -> 5[5] via P2P/direct pointer/read
+IAP-A800:64713:64858 [5] NCCL INFO Channel 10/1 : 5[5] -> 7[7] via P2P/direct pointer/read
+IAP-A800:64713:64860 [0] NCCL INFO Channel 08/1 : 0[0] -> 3[3] via P2P/direct pointer/read
+IAP-A800:64713:64862 [4] NCCL INFO Channel 06/1 : 4[4] -> 6[6] via P2P/direct pointer/read
+IAP-A800:64713:64856 [3] NCCL INFO Channel 07/1 : 3[3] -> 5[5] via P2P/direct pointer/read
+IAP-A800:64713:64858 [5] NCCL INFO Channel 11/1 : 5[5] -> 7[7] via P2P/direct pointer/read
+IAP-A800:64713:64860 [0] NCCL INFO Channel 09/1 : 0[0] -> 3[3] via P2P/direct pointer/read
+IAP-A800:64713:64862 [4] NCCL INFO Channel 07/1 : 4[4] -> 6[6] via P2P/direct pointer/read
+IAP-A800:64713:64856 [3] NCCL INFO Channel 08/1 : 3[3] -> 5[5] via P2P/direct pointer/read
+IAP-A800:64713:64858 [5] NCCL INFO Channel 12/1 : 5[5] -> 7[7] via P2P/direct pointer/read
+IAP-A800:64713:64860 [0] NCCL INFO Channel 10/1 : 0[0] -> 3[3] via P2P/direct pointer/read
+IAP-A800:64713:64862 [4] NCCL INFO Channel 08/1 : 4[4] -> 6[6] via P2P/direct pointer/read
+IAP-A800:64713:64858 [5] NCCL INFO Channel 13/1 : 5[5] -> 7[7] via P2P/direct pointer/read
+IAP-A800:64713:64856 [3] NCCL INFO Channel 09/1 : 3[3] -> 5[5] via P2P/direct pointer/read
+IAP-A800:64713:64860 [0] NCCL INFO Channel 11/1 : 0[0] -> 3[3] via P2P/direct pointer/read
+IAP-A800:64713:64862 [4] NCCL INFO Channel 09/1 : 4[4] -> 6[6] via P2P/direct pointer/read
+IAP-A800:64713:64858 [5] NCCL INFO Channel 14/1 : 5[5] -> 7[7] via P2P/direct pointer/read
+IAP-A800:64713:64856 [3] NCCL INFO Channel 10/1 : 3[3] -> 5[5] via P2P/direct pointer/read
+IAP-A800:64713:64860 [0] NCCL INFO Channel 12/1 : 0[0] -> 3[3] via P2P/direct pointer/read
+IAP-A800:64713:64862 [4] NCCL INFO Channel 10/1 : 4[4] -> 6[6] via P2P/direct pointer/read
+IAP-A800:64713:64858 [5] NCCL INFO Channel 15/1 : 5[5] -> 7[7] via P2P/direct pointer/read
+IAP-A800:64713:64856 [3] NCCL INFO Channel 11/1 : 3[3] -> 5[5] via P2P/direct pointer/read
+IAP-A800:64713:64860 [0] NCCL INFO Channel 13/1 : 0[0] -> 3[3] via P2P/direct pointer/read
+IAP-A800:64713:64862 [4] NCCL INFO Channel 11/1 : 4[4] -> 6[6] via P2P/direct pointer/read
+IAP-A800:64713:64856 [3] NCCL INFO Channel 12/1 : 3[3] -> 5[5] via P2P/direct pointer/read
+IAP-A800:64713:64860 [0] NCCL INFO Channel 14/1 : 0[0] -> 3[3] via P2P/direct pointer/read
+IAP-A800:64713:64862 [4] NCCL INFO Channel 12/1 : 4[4] -> 6[6] via P2P/direct pointer/read
+IAP-A800:64713:64856 [3] NCCL INFO Channel 13/1 : 3[3] -> 5[5] via P2P/direct pointer/read
+IAP-A800:64713:64862 [4] NCCL INFO Channel 13/1 : 4[4] -> 6[6] via P2P/direct pointer/read
+IAP-A800:64713:64860 [0] NCCL INFO Channel 15/1 : 0[0] -> 3[3] via P2P/direct pointer/read
+IAP-A800:64713:64856 [3] NCCL INFO Channel 14/1 : 3[3] -> 5[5] via P2P/direct pointer/read
+IAP-A800:64713:64862 [4] NCCL INFO Channel 14/1 : 4[4] -> 6[6] via P2P/direct pointer/read
+IAP-A800:64713:64856 [3] NCCL INFO Channel 15/1 : 3[3] -> 5[5] via P2P/direct pointer/read
+IAP-A800:64713:64862 [4] NCCL INFO Channel 15/1 : 4[4] -> 6[6] via P2P/direct pointer/read
+IAP-A800:64713:64859 [7] NCCL INFO Channel 00/1 : 7[7] -> 2[2] via P2P/direct pointer/read
+IAP-A800:64713:64859 [7] NCCL INFO Channel 01/1 : 7[7] -> 2[2] via P2P/direct pointer/read
+IAP-A800:64713:64859 [7] NCCL INFO Channel 02/1 : 7[7] -> 2[2] via P2P/direct pointer/read
+IAP-A800:64713:64859 [7] NCCL INFO Channel 03/1 : 7[7] -> 2[2] via P2P/direct pointer/read
+IAP-A800:64713:64858 [5] NCCL INFO Channel 00/1 : 5[5] -> 0[0] via P2P/direct pointer/read
+IAP-A800:64713:64859 [7] NCCL INFO Channel 04/1 : 7[7] -> 2[2] via P2P/direct pointer/read
+IAP-A800:64713:64856 [3] NCCL INFO Channel 00/1 : 3[3] -> 6[6] via P2P/direct pointer/read
+IAP-A800:64713:64858 [5] NCCL INFO Channel 01/1 : 5[5] -> 0[0] via P2P/direct pointer/read
+IAP-A800:64713:64862 [4] NCCL INFO Channel 00/1 : 4[4] -> 7[7] via P2P/direct pointer/read
+IAP-A800:64713:64859 [7] NCCL INFO Channel 05/1 : 7[7] -> 2[2] via P2P/direct pointer/read
+IAP-A800:64713:64861 [2] NCCL INFO Channel 00/1 : 2[2] -> 5[5] via P2P/direct pointer/read
+IAP-A800:64713:64858 [5] NCCL INFO Channel 02/1 : 5[5] -> 0[0] via P2P/direct pointer/read
+IAP-A800:64713:64856 [3] NCCL INFO Channel 01/1 : 3[3] -> 6[6] via P2P/direct pointer/read
+IAP-A800:64713:64861 [2] NCCL INFO Channel 01/1 : 2[2] -> 5[5] via P2P/direct pointer/read
+IAP-A800:64713:64862 [4] NCCL INFO Channel 01/1 : 4[4] -> 7[7] via P2P/direct pointer/read
+IAP-A800:64713:64859 [7] NCCL INFO Channel 06/1 : 7[7] -> 2[2] via P2P/direct pointer/read
+IAP-A800:64713:64861 [2] NCCL INFO Channel 02/1 : 2[2] -> 5[5] via P2P/direct pointer/read
+IAP-A800:64713:64858 [5] NCCL INFO Channel 03/1 : 5[5] -> 0[0] via P2P/direct pointer/read
+IAP-A800:64713:64855 [1] NCCL INFO Channel 00/1 : 1[1] -> 4[4] via P2P/direct pointer/read
+IAP-A800:64713:64862 [4] NCCL INFO Channel 02/1 : 4[4] -> 7[7] via P2P/direct pointer/read
+IAP-A800:64713:64856 [3] NCCL INFO Channel 02/1 : 3[3] -> 6[6] via P2P/direct pointer/read
+IAP-A800:64713:64859 [7] NCCL INFO Channel 07/1 : 7[7] -> 2[2] via P2P/direct pointer/read
+IAP-A800:64713:64857 [6] NCCL INFO Channel 00/1 : 6[6] -> 1[1] via P2P/direct pointer/read
+IAP-A800:64713:64855 [1] NCCL INFO Channel 01/1 : 1[1] -> 4[4] via P2P/direct pointer/read
+IAP-A800:64713:64858 [5] NCCL INFO Channel 04/1 : 5[5] -> 0[0] via P2P/direct pointer/read
+IAP-A800:64713:64859 [7] NCCL INFO Channel 08/1 : 7[7] -> 2[2] via P2P/direct pointer/read
+IAP-A800:64713:64861 [2] NCCL INFO Channel 03/1 : 2[2] -> 5[5] via P2P/direct pointer/read
+IAP-A800:64713:64862 [4] NCCL INFO Channel 03/1 : 4[4] -> 7[7] via P2P/direct pointer/read
+IAP-A800:64713:64856 [3] NCCL INFO Channel 03/1 : 3[3] -> 6[6] via P2P/direct pointer/read
+IAP-A800:64713:64857 [6] NCCL INFO Channel 01/1 : 6[6] -> 1[1] via P2P/direct pointer/read
+IAP-A800:64713:64858 [5] NCCL INFO Channel 05/1 : 5[5] -> 0[0] via P2P/direct pointer/read
+IAP-A800:64713:64861 [2] NCCL INFO Channel 04/1 : 2[2] -> 5[5] via P2P/direct pointer/read
+IAP-A800:64713:64859 [7] NCCL INFO Channel 09/1 : 7[7] -> 2[2] via P2P/direct pointer/read
+IAP-A800:64713:64855 [1] NCCL INFO Channel 02/1 : 1[1] -> 4[4] via P2P/direct pointer/read
+IAP-A800:64713:64862 [4] NCCL INFO Channel 04/1 : 4[4] -> 7[7] via P2P/direct pointer/read
+IAP-A800:64713:64856 [3] NCCL INFO Channel 04/1 : 3[3] -> 6[6] via P2P/direct pointer/read
+IAP-A800:64713:64858 [5] NCCL INFO Channel 06/1 : 5[5] -> 0[0] via P2P/direct pointer/read
+IAP-A800:64713:64857 [6] NCCL INFO Channel 02/1 : 6[6] -> 1[1] via P2P/direct pointer/read
+IAP-A800:64713:64861 [2] NCCL INFO Channel 05/1 : 2[2] -> 5[5] via P2P/direct pointer/read
+IAP-A800:64713:64862 [4] NCCL INFO Channel 05/1 : 4[4] -> 7[7] via P2P/direct pointer/read
+IAP-A800:64713:64855 [1] NCCL INFO Channel 03/1 : 1[1] -> 4[4] via P2P/direct pointer/read
+IAP-A800:64713:64859 [7] NCCL INFO Channel 10/1 : 7[7] -> 2[2] via P2P/direct pointer/read
+IAP-A800:64713:64856 [3] NCCL INFO Channel 05/1 : 3[3] -> 6[6] via P2P/direct pointer/read
+IAP-A800:64713:64858 [5] NCCL INFO Channel 07/1 : 5[5] -> 0[0] via P2P/direct pointer/read
+IAP-A800:64713:64857 [6] NCCL INFO Channel 03/1 : 6[6] -> 1[1] via P2P/direct pointer/read
+IAP-A800:64713:64861 [2] NCCL INFO Channel 06/1 : 2[2] -> 5[5] via P2P/direct pointer/read
+IAP-A800:64713:64862 [4] NCCL INFO Channel 06/1 : 4[4] -> 7[7] via P2P/direct pointer/read
+IAP-A800:64713:64855 [1] NCCL INFO Channel 04/1 : 1[1] -> 4[4] via P2P/direct pointer/read
+IAP-A800:64713:64859 [7] NCCL INFO Channel 11/1 : 7[7] -> 2[2] via P2P/direct pointer/read
+IAP-A800:64713:64856 [3] NCCL INFO Channel 06/1 : 3[3] -> 6[6] via P2P/direct pointer/read
+IAP-A800:64713:64858 [5] NCCL INFO Channel 08/1 : 5[5] -> 0[0] via P2P/direct pointer/read
+IAP-A800:64713:64857 [6] NCCL INFO Channel 04/1 : 6[6] -> 1[1] via P2P/direct pointer/read
+IAP-A800:64713:64861 [2] NCCL INFO Channel 07/1 : 2[2] -> 5[5] via P2P/direct pointer/read
+IAP-A800:64713:64862 [4] NCCL INFO Channel 07/1 : 4[4] -> 7[7] via P2P/direct pointer/read
+IAP-A800:64713:64855 [1] NCCL INFO Channel 05/1 : 1[1] -> 4[4] via P2P/direct pointer/read
+IAP-A800:64713:64859 [7] NCCL INFO Channel 12/1 : 7[7] -> 2[2] via P2P/direct pointer/read
+IAP-A800:64713:64856 [3] NCCL INFO Channel 07/1 : 3[3] -> 6[6] via P2P/direct pointer/read
+IAP-A800:64713:64858 [5] NCCL INFO Channel 09/1 : 5[5] -> 0[0] via P2P/direct pointer/read
+IAP-A800:64713:64857 [6] NCCL INFO Channel 05/1 : 6[6] -> 1[1] via P2P/direct pointer/read
+IAP-A800:64713:64861 [2] NCCL INFO Channel 08/1 : 2[2] -> 5[5] via P2P/direct pointer/read
+IAP-A800:64713:64862 [4] NCCL INFO Channel 08/1 : 4[4] -> 7[7] via P2P/direct pointer/read
+IAP-A800:64713:64855 [1] NCCL INFO Channel 06/1 : 1[1] -> 4[4] via P2P/direct pointer/read
+IAP-A800:64713:64859 [7] NCCL INFO Channel 13/1 : 7[7] -> 2[2] via P2P/direct pointer/read
+IAP-A800:64713:64856 [3] NCCL INFO Channel 08/1 : 3[3] -> 6[6] via P2P/direct pointer/read
+IAP-A800:64713:64858 [5] NCCL INFO Channel 10/1 : 5[5] -> 0[0] via P2P/direct pointer/read
+IAP-A800:64713:64857 [6] NCCL INFO Channel 06/1 : 6[6] -> 1[1] via P2P/direct pointer/read
+IAP-A800:64713:64861 [2] NCCL INFO Channel 09/1 : 2[2] -> 5[5] via P2P/direct pointer/read
+IAP-A800:64713:64862 [4] NCCL INFO Channel 09/1 : 4[4] -> 7[7] via P2P/direct pointer/read
+IAP-A800:64713:64855 [1] NCCL INFO Channel 07/1 : 1[1] -> 4[4] via P2P/direct pointer/read
+IAP-A800:64713:64859 [7] NCCL INFO Channel 14/1 : 7[7] -> 2[2] via P2P/direct pointer/read
+IAP-A800:64713:64856 [3] NCCL INFO Channel 09/1 : 3[3] -> 6[6] via P2P/direct pointer/read
+IAP-A800:64713:64858 [5] NCCL INFO Channel 11/1 : 5[5] -> 0[0] via P2P/direct pointer/read
+IAP-A800:64713:64857 [6] NCCL INFO Channel 07/1 : 6[6] -> 1[1] via P2P/direct pointer/read
+IAP-A800:64713:64861 [2] NCCL INFO Channel 10/1 : 2[2] -> 5[5] via P2P/direct pointer/read
+IAP-A800:64713:64862 [4] NCCL INFO Channel 10/1 : 4[4] -> 7[7] via P2P/direct pointer/read
+IAP-A800:64713:64855 [1] NCCL INFO Channel 08/1 : 1[1] -> 4[4] via P2P/direct pointer/read
+IAP-A800:64713:64861 [2] NCCL INFO Channel 11/1 : 2[2] -> 5[5] via P2P/direct pointer/read
+IAP-A800:64713:64856 [3] NCCL INFO Channel 10/1 : 3[3] -> 6[6] via P2P/direct pointer/read
+IAP-A800:64713:64855 [1] NCCL INFO Channel 09/1 : 1[1] -> 4[4] via P2P/direct pointer/read
+IAP-A800:64713:64861 [2] NCCL INFO Channel 12/1 : 2[2] -> 5[5] via P2P/direct pointer/read
+IAP-A800:64713:64859 [7] NCCL INFO Channel 15/1 : 7[7] -> 2[2] via P2P/direct pointer/read
+IAP-A800:64713:64862 [4] NCCL INFO Channel 11/1 : 4[4] -> 7[7] via P2P/direct pointer/read
+IAP-A800:64713:64858 [5] NCCL INFO Channel 12/1 : 5[5] -> 0[0] via P2P/direct pointer/read
+IAP-A800:64713:64856 [3] NCCL INFO Channel 11/1 : 3[3] -> 6[6] via P2P/direct pointer/read
+IAP-A800:64713:64858 [5] NCCL INFO Channel 13/1 : 5[5] -> 0[0] via P2P/direct pointer/read
+IAP-A800:64713:64861 [2] NCCL INFO Channel 13/1 : 2[2] -> 5[5] via P2P/direct pointer/read
+IAP-A800:64713:64856 [3] NCCL INFO Channel 12/1 : 3[3] -> 6[6] via P2P/direct pointer/read
+IAP-A800:64713:64862 [4] NCCL INFO Channel 12/1 : 4[4] -> 7[7] via P2P/direct pointer/read
+IAP-A800:64713:64855 [1] NCCL INFO Channel 10/1 : 1[1] -> 4[4] via P2P/direct pointer/read
+IAP-A800:64713:64857 [6] NCCL INFO Channel 08/1 : 6[6] -> 1[1] via P2P/direct pointer/read
+IAP-A800:64713:64858 [5] NCCL INFO Channel 14/1 : 5[5] -> 0[0] via P2P/direct pointer/read
+IAP-A800:64713:64861 [2] NCCL INFO Channel 14/1 : 2[2] -> 5[5] via P2P/direct pointer/read
+IAP-A800:64713:64856 [3] NCCL INFO Channel 13/1 : 3[3] -> 6[6] via P2P/direct pointer/read
+IAP-A800:64713:64862 [4] NCCL INFO Channel 13/1 : 4[4] -> 7[7] via P2P/direct pointer/read
+IAP-A800:64713:64855 [1] NCCL INFO Channel 11/1 : 1[1] -> 4[4] via P2P/direct pointer/read
+IAP-A800:64713:64857 [6] NCCL INFO Channel 09/1 : 6[6] -> 1[1] via P2P/direct pointer/read
+IAP-A800:64713:64858 [5] NCCL INFO Channel 15/1 : 5[5] -> 0[0] via P2P/direct pointer/read
+IAP-A800:64713:64861 [2] NCCL INFO Channel 15/1 : 2[2] -> 5[5] via P2P/direct pointer/read
+IAP-A800:64713:64856 [3] NCCL INFO Channel 14/1 : 3[3] -> 6[6] via P2P/direct pointer/read
+IAP-A800:64713:64862 [4] NCCL INFO Channel 14/1 : 4[4] -> 7[7] via P2P/direct pointer/read
+IAP-A800:64713:64855 [1] NCCL INFO Channel 12/1 : 1[1] -> 4[4] via P2P/direct pointer/read
+IAP-A800:64713:64856 [3] NCCL INFO Channel 15/1 : 3[3] -> 6[6] via P2P/direct pointer/read
+IAP-A800:64713:64862 [4] NCCL INFO Channel 15/1 : 4[4] -> 7[7] via P2P/direct pointer/read
+IAP-A800:64713:64855 [1] NCCL INFO Channel 13/1 : 1[1] -> 4[4] via P2P/direct pointer/read
+IAP-A800:64713:64857 [6] NCCL INFO Channel 10/1 : 6[6] -> 1[1] via P2P/direct pointer/read
+IAP-A800:64713:64855 [1] NCCL INFO Channel 14/1 : 1[1] -> 4[4] via P2P/direct pointer/read
+IAP-A800:64713:64857 [6] NCCL INFO Channel 11/1 : 6[6] -> 1[1] via P2P/direct pointer/read
+IAP-A800:64713:64855 [1] NCCL INFO Channel 15/1 : 1[1] -> 4[4] via P2P/direct pointer/read
+IAP-A800:64713:64857 [6] NCCL INFO Channel 12/1 : 6[6] -> 1[1] via P2P/direct pointer/read
+IAP-A800:64713:64857 [6] NCCL INFO Channel 13/1 : 6[6] -> 1[1] via P2P/direct pointer/read
+IAP-A800:64713:64857 [6] NCCL INFO Channel 14/1 : 6[6] -> 1[1] via P2P/direct pointer/read
+IAP-A800:64713:64857 [6] NCCL INFO Channel 15/1 : 6[6] -> 1[1] via P2P/direct pointer/read
+IAP-A800:64713:64858 [5] NCCL INFO Channel 00/1 : 5[5] -> 1[1] via P2P/direct pointer/read
+IAP-A800:64713:64860 [0] NCCL INFO Channel 00/1 : 0[0] -> 4[4] via P2P/direct pointer/read
+IAP-A800:64713:64861 [2] NCCL INFO Channel 00/1 : 2[2] -> 6[6] via P2P/direct pointer/read
+IAP-A800:64713:64860 [0] NCCL INFO Channel 01/1 : 0[0] -> 4[4] via P2P/direct pointer/read
+IAP-A800:64713:64858 [5] NCCL INFO Channel 01/1 : 5[5] -> 1[1] via P2P/direct pointer/read
+IAP-A800:64713:64861 [2] NCCL INFO Channel 01/1 : 2[2] -> 6[6] via P2P/direct pointer/read
+IAP-A800:64713:64860 [0] NCCL INFO Channel 02/1 : 0[0] -> 4[4] via P2P/direct pointer/read
+IAP-A800:64713:64858 [5] NCCL INFO Channel 02/1 : 5[5] -> 1[1] via P2P/direct pointer/read
+IAP-A800:64713:64861 [2] NCCL INFO Channel 02/1 : 2[2] -> 6[6] via P2P/direct pointer/read
+IAP-A800:64713:64859 [7] NCCL INFO Channel 00/1 : 7[7] -> 3[3] via P2P/direct pointer/read
+IAP-A800:64713:64858 [5] NCCL INFO Channel 03/1 : 5[5] -> 1[1] via P2P/direct pointer/read
+IAP-A800:64713:64860 [0] NCCL INFO Channel 03/1 : 0[0] -> 4[4] via P2P/direct pointer/read
+IAP-A800:64713:64862 [4] NCCL INFO Channel 00/1 : 4[4] -> 0[0] via P2P/direct pointer/read
+IAP-A800:64713:64861 [2] NCCL INFO Channel 03/1 : 2[2] -> 6[6] via P2P/direct pointer/read
+IAP-A800:64713:64858 [5] NCCL INFO Channel 04/1 : 5[5] -> 1[1] via P2P/direct pointer/read
+IAP-A800:64713:64859 [7] NCCL INFO Channel 01/1 : 7[7] -> 3[3] via P2P/direct pointer/read
+IAP-A800:64713:64862 [4] NCCL INFO Channel 01/1 : 4[4] -> 0[0] via P2P/direct pointer/read
+IAP-A800:64713:64860 [0] NCCL INFO Channel 04/1 : 0[0] -> 4[4] via P2P/direct pointer/read
+IAP-A800:64713:64861 [2] NCCL INFO Channel 04/1 : 2[2] -> 6[6] via P2P/direct pointer/read
+IAP-A800:64713:64859 [7] NCCL INFO Channel 02/1 : 7[7] -> 3[3] via P2P/direct pointer/read
+IAP-A800:64713:64858 [5] NCCL INFO Channel 05/1 : 5[5] -> 1[1] via P2P/direct pointer/read
+IAP-A800:64713:64860 [0] NCCL INFO Channel 05/1 : 0[0] -> 4[4] via P2P/direct pointer/read
+IAP-A800:64713:64862 [4] NCCL INFO Channel 02/1 : 4[4] -> 0[0] via P2P/direct pointer/read
+IAP-A800:64713:64861 [2] NCCL INFO Channel 05/1 : 2[2] -> 6[6] via P2P/direct pointer/read
+IAP-A800:64713:64859 [7] NCCL INFO Channel 03/1 : 7[7] -> 3[3] via P2P/direct pointer/read
+IAP-A800:64713:64860 [0] NCCL INFO Channel 06/1 : 0[0] -> 4[4] via P2P/direct pointer/read
+IAP-A800:64713:64858 [5] NCCL INFO Channel 06/1 : 5[5] -> 1[1] via P2P/direct pointer/read
+IAP-A800:64713:64862 [4] NCCL INFO Channel 03/1 : 4[4] -> 0[0] via P2P/direct pointer/read
+IAP-A800:64713:64861 [2] NCCL INFO Channel 06/1 : 2[2] -> 6[6] via P2P/direct pointer/read
+IAP-A800:64713:64859 [7] NCCL INFO Channel 04/1 : 7[7] -> 3[3] via P2P/direct pointer/read
+IAP-A800:64713:64858 [5] NCCL INFO Channel 07/1 : 5[5] -> 1[1] via P2P/direct pointer/read
+IAP-A800:64713:64860 [0] NCCL INFO Channel 07/1 : 0[0] -> 4[4] via P2P/direct pointer/read
+IAP-A800:64713:64862 [4] NCCL INFO Channel 04/1 : 4[4] -> 0[0] via P2P/direct pointer/read
+IAP-A800:64713:64859 [7] NCCL INFO Channel 05/1 : 7[7] -> 3[3] via P2P/direct pointer/read
+IAP-A800:64713:64861 [2] NCCL INFO Channel 07/1 : 2[2] -> 6[6] via P2P/direct pointer/read
+IAP-A800:64713:64858 [5] NCCL INFO Channel 08/1 : 5[5] -> 1[1] via P2P/direct pointer/read
+IAP-A800:64713:64862 [4] NCCL INFO Channel 05/1 : 4[4] -> 0[0] via P2P/direct pointer/read
+IAP-A800:64713:64859 [7] NCCL INFO Channel 06/1 : 7[7] -> 3[3] via P2P/direct pointer/read
+IAP-A800:64713:64861 [2] NCCL INFO Channel 08/1 : 2[2] -> 6[6] via P2P/direct pointer/read
+IAP-A800:64713:64858 [5] NCCL INFO Channel 09/1 : 5[5] -> 1[1] via P2P/direct pointer/read
+IAP-A800:64713:64860 [0] NCCL INFO Channel 08/1 : 0[0] -> 4[4] via P2P/direct pointer/read
+IAP-A800:64713:64856 [3] NCCL INFO Channel 00/1 : 3[3] -> 7[7] via P2P/direct pointer/read
+IAP-A800:64713:64855 [1] NCCL INFO Channel 00/1 : 1[1] -> 5[5] via P2P/direct pointer/read
+IAP-A800:64713:64859 [7] NCCL INFO Channel 07/1 : 7[7] -> 3[3] via P2P/direct pointer/read
+IAP-A800:64713:64862 [4] NCCL INFO Channel 06/1 : 4[4] -> 0[0] via P2P/direct pointer/read
+IAP-A800:64713:64857 [6] NCCL INFO Channel 00/1 : 6[6] -> 2[2] via P2P/direct pointer/read
+IAP-A800:64713:64860 [0] NCCL INFO Channel 09/1 : 0[0] -> 4[4] via P2P/direct pointer/read
+IAP-A800:64713:64861 [2] NCCL INFO Channel 09/1 : 2[2] -> 6[6] via P2P/direct pointer/read
+IAP-A800:64713:64858 [5] NCCL INFO Channel 10/1 : 5[5] -> 1[1] via P2P/direct pointer/read
+IAP-A800:64713:64855 [1] NCCL INFO Channel 01/1 : 1[1] -> 5[5] via P2P/direct pointer/read
+IAP-A800:64713:64856 [3] NCCL INFO Channel 01/1 : 3[3] -> 7[7] via P2P/direct pointer/read
+IAP-A800:64713:64859 [7] NCCL INFO Channel 08/1 : 7[7] -> 3[3] via P2P/direct pointer/read
+IAP-A800:64713:64862 [4] NCCL INFO Channel 07/1 : 4[4] -> 0[0] via P2P/direct pointer/read
+IAP-A800:64713:64860 [0] NCCL INFO Channel 10/1 : 0[0] -> 4[4] via P2P/direct pointer/read
+IAP-A800:64713:64857 [6] NCCL INFO Channel 01/1 : 6[6] -> 2[2] via P2P/direct pointer/read
+IAP-A800:64713:64858 [5] NCCL INFO Channel 11/1 : 5[5] -> 1[1] via P2P/direct pointer/read
+IAP-A800:64713:64861 [2] NCCL INFO Channel 10/1 : 2[2] -> 6[6] via P2P/direct pointer/read
+IAP-A800:64713:64856 [3] NCCL INFO Channel 02/1 : 3[3] -> 7[7] via P2P/direct pointer/read
+IAP-A800:64713:64855 [1] NCCL INFO Channel 02/1 : 1[1] -> 5[5] via P2P/direct pointer/read
+IAP-A800:64713:64859 [7] NCCL INFO Channel 09/1 : 7[7] -> 3[3] via P2P/direct pointer/read
+IAP-A800:64713:64862 [4] NCCL INFO Channel 08/1 : 4[4] -> 0[0] via P2P/direct pointer/read
+IAP-A800:64713:64860 [0] NCCL INFO Channel 11/1 : 0[0] -> 4[4] via P2P/direct pointer/read
+IAP-A800:64713:64857 [6] NCCL INFO Channel 02/1 : 6[6] -> 2[2] via P2P/direct pointer/read
+IAP-A800:64713:64858 [5] NCCL INFO Channel 12/1 : 5[5] -> 1[1] via P2P/direct pointer/read
+IAP-A800:64713:64861 [2] NCCL INFO Channel 11/1 : 2[2] -> 6[6] via P2P/direct pointer/read
+IAP-A800:64713:64860 [0] NCCL INFO Channel 12/1 : 0[0] -> 4[4] via P2P/direct pointer/read
+IAP-A800:64713:64855 [1] NCCL INFO Channel 03/1 : 1[1] -> 5[5] via P2P/direct pointer/read
+IAP-A800:64713:64859 [7] NCCL INFO Channel 10/1 : 7[7] -> 3[3] via P2P/direct pointer/read
+IAP-A800:64713:64862 [4] NCCL INFO Channel 09/1 : 4[4] -> 0[0] via P2P/direct pointer/read
+IAP-A800:64713:64856 [3] NCCL INFO Channel 03/1 : 3[3] -> 7[7] via P2P/direct pointer/read
+IAP-A800:64713:64857 [6] NCCL INFO Channel 03/1 : 6[6] -> 2[2] via P2P/direct pointer/read
+IAP-A800:64713:64858 [5] NCCL INFO Channel 13/1 : 5[5] -> 1[1] via P2P/direct pointer/read
+IAP-A800:64713:64861 [2] NCCL INFO Channel 12/1 : 2[2] -> 6[6] via P2P/direct pointer/read
+IAP-A800:64713:64860 [0] NCCL INFO Channel 13/1 : 0[0] -> 4[4] via P2P/direct pointer/read
+IAP-A800:64713:64855 [1] NCCL INFO Channel 04/1 : 1[1] -> 5[5] via P2P/direct pointer/read
+IAP-A800:64713:64859 [7] NCCL INFO Channel 11/1 : 7[7] -> 3[3] via P2P/direct pointer/read
+IAP-A800:64713:64862 [4] NCCL INFO Channel 10/1 : 4[4] -> 0[0] via P2P/direct pointer/read
+IAP-A800:64713:64856 [3] NCCL INFO Channel 04/1 : 3[3] -> 7[7] via P2P/direct pointer/read
+IAP-A800:64713:64857 [6] NCCL INFO Channel 04/1 : 6[6] -> 2[2] via P2P/direct pointer/read
+IAP-A800:64713:64858 [5] NCCL INFO Channel 14/1 : 5[5] -> 1[1] via P2P/direct pointer/read
+IAP-A800:64713:64861 [2] NCCL INFO Channel 13/1 : 2[2] -> 6[6] via P2P/direct pointer/read
+IAP-A800:64713:64860 [0] NCCL INFO Channel 14/1 : 0[0] -> 4[4] via P2P/direct pointer/read
+IAP-A800:64713:64855 [1] NCCL INFO Channel 05/1 : 1[1] -> 5[5] via P2P/direct pointer/read
+IAP-A800:64713:64861 [2] NCCL INFO Channel 14/1 : 2[2] -> 6[6] via P2P/direct pointer/read
+IAP-A800:64713:64862 [4] NCCL INFO Channel 11/1 : 4[4] -> 0[0] via P2P/direct pointer/read
+IAP-A800:64713:64856 [3] NCCL INFO Channel 05/1 : 3[3] -> 7[7] via P2P/direct pointer/read
+IAP-A800:64713:64861 [2] NCCL INFO Channel 15/1 : 2[2] -> 6[6] via P2P/direct pointer/read
+IAP-A800:64713:64858 [5] NCCL INFO Channel 15/1 : 5[5] -> 1[1] via P2P/direct pointer/read
+IAP-A800:64713:64859 [7] NCCL INFO Channel 12/1 : 7[7] -> 3[3] via P2P/direct pointer/read
+IAP-A800:64713:64860 [0] NCCL INFO Channel 15/1 : 0[0] -> 4[4] via P2P/direct pointer/read
+IAP-A800:64713:64855 [1] NCCL INFO Channel 06/1 : 1[1] -> 5[5] via P2P/direct pointer/read
+IAP-A800:64713:64857 [6] NCCL INFO Channel 05/1 : 6[6] -> 2[2] via P2P/direct pointer/read
+IAP-A800:64713:64862 [4] NCCL INFO Channel 12/1 : 4[4] -> 0[0] via P2P/direct pointer/read
+IAP-A800:64713:64856 [3] NCCL INFO Channel 06/1 : 3[3] -> 7[7] via P2P/direct pointer/read
+IAP-A800:64713:64859 [7] NCCL INFO Channel 13/1 : 7[7] -> 3[3] via P2P/direct pointer/read
+IAP-A800:64713:64855 [1] NCCL INFO Channel 07/1 : 1[1] -> 5[5] via P2P/direct pointer/read
+IAP-A800:64713:64857 [6] NCCL INFO Channel 06/1 : 6[6] -> 2[2] via P2P/direct pointer/read
+IAP-A800:64713:64862 [4] NCCL INFO Channel 13/1 : 4[4] -> 0[0] via P2P/direct pointer/read
+IAP-A800:64713:64856 [3] NCCL INFO Channel 07/1 : 3[3] -> 7[7] via P2P/direct pointer/read
+IAP-A800:64713:64859 [7] NCCL INFO Channel 14/1 : 7[7] -> 3[3] via P2P/direct pointer/read
+IAP-A800:64713:64855 [1] NCCL INFO Channel 08/1 : 1[1] -> 5[5] via P2P/direct pointer/read
+IAP-A800:64713:64857 [6] NCCL INFO Channel 07/1 : 6[6] -> 2[2] via P2P/direct pointer/read
+IAP-A800:64713:64862 [4] NCCL INFO Channel 14/1 : 4[4] -> 0[0] via P2P/direct pointer/read
+IAP-A800:64713:64856 [3] NCCL INFO Channel 08/1 : 3[3] -> 7[7] via P2P/direct pointer/read
+IAP-A800:64713:64859 [7] NCCL INFO Channel 15/1 : 7[7] -> 3[3] via P2P/direct pointer/read
+IAP-A800:64713:64855 [1] NCCL INFO Channel 09/1 : 1[1] -> 5[5] via P2P/direct pointer/read
+IAP-A800:64713:64857 [6] NCCL INFO Channel 08/1 : 6[6] -> 2[2] via P2P/direct pointer/read
+IAP-A800:64713:64862 [4] NCCL INFO Channel 15/1 : 4[4] -> 0[0] via P2P/direct pointer/read
+IAP-A800:64713:64856 [3] NCCL INFO Channel 09/1 : 3[3] -> 7[7] via P2P/direct pointer/read
+IAP-A800:64713:64855 [1] NCCL INFO Channel 10/1 : 1[1] -> 5[5] via P2P/direct pointer/read
+IAP-A800:64713:64857 [6] NCCL INFO Channel 09/1 : 6[6] -> 2[2] via P2P/direct pointer/read
+IAP-A800:64713:64856 [3] NCCL INFO Channel 10/1 : 3[3] -> 7[7] via P2P/direct pointer/read
+IAP-A800:64713:64855 [1] NCCL INFO Channel 11/1 : 1[1] -> 5[5] via P2P/direct pointer/read
+IAP-A800:64713:64857 [6] NCCL INFO Channel 10/1 : 6[6] -> 2[2] via P2P/direct pointer/read
+IAP-A800:64713:64856 [3] NCCL INFO Channel 11/1 : 3[3] -> 7[7] via P2P/direct pointer/read
+IAP-A800:64713:64855 [1] NCCL INFO Channel 12/1 : 1[1] -> 5[5] via P2P/direct pointer/read
+IAP-A800:64713:64857 [6] NCCL INFO Channel 11/1 : 6[6] -> 2[2] via P2P/direct pointer/read
+IAP-A800:64713:64856 [3] NCCL INFO Channel 12/1 : 3[3] -> 7[7] via P2P/direct pointer/read
+IAP-A800:64713:64855 [1] NCCL INFO Channel 13/1 : 1[1] -> 5[5] via P2P/direct pointer/read
+IAP-A800:64713:64857 [6] NCCL INFO Channel 12/1 : 6[6] -> 2[2] via P2P/direct pointer/read
+IAP-A800:64713:64856 [3] NCCL INFO Channel 13/1 : 3[3] -> 7[7] via P2P/direct pointer/read
+IAP-A800:64713:64855 [1] NCCL INFO Channel 14/1 : 1[1] -> 5[5] via P2P/direct pointer/read
+IAP-A800:64713:64857 [6] NCCL INFO Channel 13/1 : 6[6] -> 2[2] via P2P/direct pointer/read
+IAP-A800:64713:64856 [3] NCCL INFO Channel 14/1 : 3[3] -> 7[7] via P2P/direct pointer/read
+IAP-A800:64713:64855 [1] NCCL INFO Channel 15/1 : 1[1] -> 5[5] via P2P/direct pointer/read
+IAP-A800:64713:64857 [6] NCCL INFO Channel 14/1 : 6[6] -> 2[2] via P2P/direct pointer/read
+IAP-A800:64713:64856 [3] NCCL INFO Channel 15/1 : 3[3] -> 7[7] via P2P/direct pointer/read
+IAP-A800:64713:64857 [6] NCCL INFO Channel 15/1 : 6[6] -> 2[2] via P2P/direct pointer/read
+IAP-A800:64713:64860 [0] NCCL INFO Channel 00/1 : 0[0] -> 5[5] via P2P/direct pointer/read
+IAP-A800:64713:64862 [4] NCCL INFO Channel 00/1 : 4[4] -> 1[1] via P2P/direct pointer/read
+IAP-A800:64713:64860 [0] NCCL INFO Channel 01/1 : 0[0] -> 5[5] via P2P/direct pointer/read
+IAP-A800:64713:64860 [0] NCCL INFO Channel 02/1 : 0[0] -> 5[5] via P2P/direct pointer/read
+IAP-A800:64713:64862 [4] NCCL INFO Channel 01/1 : 4[4] -> 1[1] via P2P/direct pointer/read
+IAP-A800:64713:64862 [4] NCCL INFO Channel 02/1 : 4[4] -> 1[1] via P2P/direct pointer/read
+IAP-A800:64713:64860 [0] NCCL INFO Channel 03/1 : 0[0] -> 5[5] via P2P/direct pointer/read
+IAP-A800:64713:64862 [4] NCCL INFO Channel 03/1 : 4[4] -> 1[1] via P2P/direct pointer/read
+IAP-A800:64713:64860 [0] NCCL INFO Channel 04/1 : 0[0] -> 5[5] via P2P/direct pointer/read
+IAP-A800:64713:64855 [1] NCCL INFO Channel 00/1 : 1[1] -> 6[6] via P2P/direct pointer/read
+IAP-A800:64713:64862 [4] NCCL INFO Channel 04/1 : 4[4] -> 1[1] via P2P/direct pointer/read
+IAP-A800:64713:64855 [1] NCCL INFO Channel 01/1 : 1[1] -> 6[6] via P2P/direct pointer/read
+IAP-A800:64713:64856 [3] NCCL INFO Channel 00/1 : 3[3] -> 0[0] via P2P/direct pointer/read
+IAP-A800:64713:64860 [0] NCCL INFO Channel 05/1 : 0[0] -> 5[5] via P2P/direct pointer/read
+IAP-A800:64713:64855 [1] NCCL INFO Channel 02/1 : 1[1] -> 6[6] via P2P/direct pointer/read
+IAP-A800:64713:64862 [4] NCCL INFO Channel 05/1 : 4[4] -> 1[1] via P2P/direct pointer/read
+IAP-A800:64713:64861 [2] NCCL INFO Channel 00/1 : 2[2] -> 7[7] via P2P/direct pointer/read
+IAP-A800:64713:64862 [4] NCCL INFO Channel 06/1 : 4[4] -> 1[1] via P2P/direct pointer/read
+IAP-A800:64713:64856 [3] NCCL INFO Channel 01/1 : 3[3] -> 0[0] via P2P/direct pointer/read
+IAP-A800:64713:64855 [1] NCCL INFO Channel 03/1 : 1[1] -> 6[6] via P2P/direct pointer/read
+IAP-A800:64713:64860 [0] NCCL INFO Channel 06/1 : 0[0] -> 5[5] via P2P/direct pointer/read
+IAP-A800:64713:64861 [2] NCCL INFO Channel 01/1 : 2[2] -> 7[7] via P2P/direct pointer/read
+IAP-A800:64713:64859 [7] NCCL INFO Channel 00/1 : 7[7] -> 4[4] via P2P/direct pointer/read
+IAP-A800:64713:64855 [1] NCCL INFO Channel 04/1 : 1[1] -> 6[6] via P2P/direct pointer/read
+IAP-A800:64713:64862 [4] NCCL INFO Channel 07/1 : 4[4] -> 1[1] via P2P/direct pointer/read
+IAP-A800:64713:64860 [0] NCCL INFO Channel 07/1 : 0[0] -> 5[5] via P2P/direct pointer/read
+IAP-A800:64713:64861 [2] NCCL INFO Channel 02/1 : 2[2] -> 7[7] via P2P/direct pointer/read
+IAP-A800:64713:64857 [6] NCCL INFO Channel 00/1 : 6[6] -> 3[3] via P2P/direct pointer/read
+IAP-A800:64713:64858 [5] NCCL INFO Channel 00/1 : 5[5] -> 2[2] via P2P/direct pointer/read
+IAP-A800:64713:64855 [1] NCCL INFO Channel 05/1 : 1[1] -> 6[6] via P2P/direct pointer/read
+IAP-A800:64713:64856 [3] NCCL INFO Channel 02/1 : 3[3] -> 0[0] via P2P/direct pointer/read
+IAP-A800:64713:64859 [7] NCCL INFO Channel 01/1 : 7[7] -> 4[4] via P2P/direct pointer/read
+IAP-A800:64713:64862 [4] NCCL INFO Channel 08/1 : 4[4] -> 1[1] via P2P/direct pointer/read
+IAP-A800:64713:64861 [2] NCCL INFO Channel 03/1 : 2[2] -> 7[7] via P2P/direct pointer/read
+IAP-A800:64713:64860 [0] NCCL INFO Channel 08/1 : 0[0] -> 5[5] via P2P/direct pointer/read
+IAP-A800:64713:64857 [6] NCCL INFO Channel 01/1 : 6[6] -> 3[3] via P2P/direct pointer/read
+IAP-A800:64713:64858 [5] NCCL INFO Channel 01/1 : 5[5] -> 2[2] via P2P/direct pointer/read
+IAP-A800:64713:64859 [7] NCCL INFO Channel 02/1 : 7[7] -> 4[4] via P2P/direct pointer/read
+IAP-A800:64713:64862 [4] NCCL INFO Channel 09/1 : 4[4] -> 1[1] via P2P/direct pointer/read
+IAP-A800:64713:64855 [1] NCCL INFO Channel 06/1 : 1[1] -> 6[6] via P2P/direct pointer/read
+IAP-A800:64713:64856 [3] NCCL INFO Channel 03/1 : 3[3] -> 0[0] via P2P/direct pointer/read
+IAP-A800:64713:64861 [2] NCCL INFO Channel 04/1 : 2[2] -> 7[7] via P2P/direct pointer/read
+IAP-A800:64713:64860 [0] NCCL INFO Channel 09/1 : 0[0] -> 5[5] via P2P/direct pointer/read
+IAP-A800:64713:64857 [6] NCCL INFO Channel 02/1 : 6[6] -> 3[3] via P2P/direct pointer/read
+IAP-A800:64713:64858 [5] NCCL INFO Channel 02/1 : 5[5] -> 2[2] via P2P/direct pointer/read
+IAP-A800:64713:64859 [7] NCCL INFO Channel 03/1 : 7[7] -> 4[4] via P2P/direct pointer/read
+IAP-A800:64713:64862 [4] NCCL INFO Channel 10/1 : 4[4] -> 1[1] via P2P/direct pointer/read
+IAP-A800:64713:64855 [1] NCCL INFO Channel 07/1 : 1[1] -> 6[6] via P2P/direct pointer/read
+IAP-A800:64713:64856 [3] NCCL INFO Channel 04/1 : 3[3] -> 0[0] via P2P/direct pointer/read
+IAP-A800:64713:64861 [2] NCCL INFO Channel 05/1 : 2[2] -> 7[7] via P2P/direct pointer/read
+IAP-A800:64713:64860 [0] NCCL INFO Channel 10/1 : 0[0] -> 5[5] via P2P/direct pointer/read
+IAP-A800:64713:64857 [6] NCCL INFO Channel 03/1 : 6[6] -> 3[3] via P2P/direct pointer/read
+IAP-A800:64713:64858 [5] NCCL INFO Channel 03/1 : 5[5] -> 2[2] via P2P/direct pointer/read
+IAP-A800:64713:64859 [7] NCCL INFO Channel 04/1 : 7[7] -> 4[4] via P2P/direct pointer/read
+IAP-A800:64713:64862 [4] NCCL INFO Channel 11/1 : 4[4] -> 1[1] via P2P/direct pointer/read
+IAP-A800:64713:64855 [1] NCCL INFO Channel 08/1 : 1[1] -> 6[6] via P2P/direct pointer/read
+IAP-A800:64713:64859 [7] NCCL INFO Channel 05/1 : 7[7] -> 4[4] via P2P/direct pointer/read
+IAP-A800:64713:64861 [2] NCCL INFO Channel 06/1 : 2[2] -> 7[7] via P2P/direct pointer/read
+IAP-A800:64713:64860 [0] NCCL INFO Channel 11/1 : 0[0] -> 5[5] via P2P/direct pointer/read
+IAP-A800:64713:64857 [6] NCCL INFO Channel 04/1 : 6[6] -> 3[3] via P2P/direct pointer/read
+IAP-A800:64713:64858 [5] NCCL INFO Channel 04/1 : 5[5] -> 2[2] via P2P/direct pointer/read
+IAP-A800:64713:64856 [3] NCCL INFO Channel 05/1 : 3[3] -> 0[0] via P2P/direct pointer/read
+IAP-A800:64713:64862 [4] NCCL INFO Channel 12/1 : 4[4] -> 1[1] via P2P/direct pointer/read
+IAP-A800:64713:64855 [1] NCCL INFO Channel 09/1 : 1[1] -> 6[6] via P2P/direct pointer/read
+IAP-A800:64713:64859 [7] NCCL INFO Channel 06/1 : 7[7] -> 4[4] via P2P/direct pointer/read
+IAP-A800:64713:64861 [2] NCCL INFO Channel 07/1 : 2[2] -> 7[7] via P2P/direct pointer/read
+IAP-A800:64713:64860 [0] NCCL INFO Channel 12/1 : 0[0] -> 5[5] via P2P/direct pointer/read
+IAP-A800:64713:64857 [6] NCCL INFO Channel 05/1 : 6[6] -> 3[3] via P2P/direct pointer/read
+IAP-A800:64713:64858 [5] NCCL INFO Channel 05/1 : 5[5] -> 2[2] via P2P/direct pointer/read
+IAP-A800:64713:64856 [3] NCCL INFO Channel 06/1 : 3[3] -> 0[0] via P2P/direct pointer/read
+IAP-A800:64713:64862 [4] NCCL INFO Channel 13/1 : 4[4] -> 1[1] via P2P/direct pointer/read
+IAP-A800:64713:64855 [1] NCCL INFO Channel 10/1 : 1[1] -> 6[6] via P2P/direct pointer/read
+IAP-A800:64713:64859 [7] NCCL INFO Channel 07/1 : 7[7] -> 4[4] via P2P/direct pointer/read
+IAP-A800:64713:64861 [2] NCCL INFO Channel 08/1 : 2[2] -> 7[7] via P2P/direct pointer/read
+IAP-A800:64713:64860 [0] NCCL INFO Channel 13/1 : 0[0] -> 5[5] via P2P/direct pointer/read
+IAP-A800:64713:64857 [6] NCCL INFO Channel 06/1 : 6[6] -> 3[3] via P2P/direct pointer/read
+IAP-A800:64713:64858 [5] NCCL INFO Channel 06/1 : 5[5] -> 2[2] via P2P/direct pointer/read
+IAP-A800:64713:64856 [3] NCCL INFO Channel 07/1 : 3[3] -> 0[0] via P2P/direct pointer/read
+IAP-A800:64713:64862 [4] NCCL INFO Channel 14/1 : 4[4] -> 1[1] via P2P/direct pointer/read
+IAP-A800:64713:64855 [1] NCCL INFO Channel 11/1 : 1[1] -> 6[6] via P2P/direct pointer/read
+IAP-A800:64713:64859 [7] NCCL INFO Channel 08/1 : 7[7] -> 4[4] via P2P/direct pointer/read
+IAP-A800:64713:64861 [2] NCCL INFO Channel 09/1 : 2[2] -> 7[7] via P2P/direct pointer/read
+IAP-A800:64713:64860 [0] NCCL INFO Channel 14/1 : 0[0] -> 5[5] via P2P/direct pointer/read
+IAP-A800:64713:64857 [6] NCCL INFO Channel 07/1 : 6[6] -> 3[3] via P2P/direct pointer/read
+IAP-A800:64713:64858 [5] NCCL INFO Channel 07/1 : 5[5] -> 2[2] via P2P/direct pointer/read
+IAP-A800:64713:64856 [3] NCCL INFO Channel 08/1 : 3[3] -> 0[0] via P2P/direct pointer/read
+IAP-A800:64713:64862 [4] NCCL INFO Channel 15/1 : 4[4] -> 1[1] via P2P/direct pointer/read
+IAP-A800:64713:64855 [1] NCCL INFO Channel 12/1 : 1[1] -> 6[6] via P2P/direct pointer/read
+IAP-A800:64713:64859 [7] NCCL INFO Channel 09/1 : 7[7] -> 4[4] via P2P/direct pointer/read
+IAP-A800:64713:64861 [2] NCCL INFO Channel 10/1 : 2[2] -> 7[7] via P2P/direct pointer/read
+IAP-A800:64713:64860 [0] NCCL INFO Channel 15/1 : 0[0] -> 5[5] via P2P/direct pointer/read
+IAP-A800:64713:64857 [6] NCCL INFO Channel 08/1 : 6[6] -> 3[3] via P2P/direct pointer/read
+IAP-A800:64713:64856 [3] NCCL INFO Channel 09/1 : 3[3] -> 0[0] via P2P/direct pointer/read
+IAP-A800:64713:64858 [5] NCCL INFO Channel 08/1 : 5[5] -> 2[2] via P2P/direct pointer/read
+IAP-A800:64713:64855 [1] NCCL INFO Channel 13/1 : 1[1] -> 6[6] via P2P/direct pointer/read
+IAP-A800:64713:64858 [5] NCCL INFO Channel 09/1 : 5[5] -> 2[2] via P2P/direct pointer/read
+IAP-A800:64713:64861 [2] NCCL INFO Channel 11/1 : 2[2] -> 7[7] via P2P/direct pointer/read
+IAP-A800:64713:64857 [6] NCCL INFO Channel 09/1 : 6[6] -> 3[3] via P2P/direct pointer/read
+IAP-A800:64713:64856 [3] NCCL INFO Channel 10/1 : 3[3] -> 0[0] via P2P/direct pointer/read
+IAP-A800:64713:64859 [7] NCCL INFO Channel 10/1 : 7[7] -> 4[4] via P2P/direct pointer/read
+IAP-A800:64713:64855 [1] NCCL INFO Channel 14/1 : 1[1] -> 6[6] via P2P/direct pointer/read
+IAP-A800:64713:64858 [5] NCCL INFO Channel 10/1 : 5[5] -> 2[2] via P2P/direct pointer/read
+IAP-A800:64713:64861 [2] NCCL INFO Channel 12/1 : 2[2] -> 7[7] via P2P/direct pointer/read
+IAP-A800:64713:64856 [3] NCCL INFO Channel 11/1 : 3[3] -> 0[0] via P2P/direct pointer/read
+IAP-A800:64713:64857 [6] NCCL INFO Channel 10/1 : 6[6] -> 3[3] via P2P/direct pointer/read
+IAP-A800:64713:64859 [7] NCCL INFO Channel 11/1 : 7[7] -> 4[4] via P2P/direct pointer/read
+IAP-A800:64713:64855 [1] NCCL INFO Channel 15/1 : 1[1] -> 6[6] via P2P/direct pointer/read
+IAP-A800:64713:64858 [5] NCCL INFO Channel 11/1 : 5[5] -> 2[2] via P2P/direct pointer/read
+IAP-A800:64713:64861 [2] NCCL INFO Channel 13/1 : 2[2] -> 7[7] via P2P/direct pointer/read
+IAP-A800:64713:64856 [3] NCCL INFO Channel 12/1 : 3[3] -> 0[0] via P2P/direct pointer/read
+IAP-A800:64713:64857 [6] NCCL INFO Channel 11/1 : 6[6] -> 3[3] via P2P/direct pointer/read
+IAP-A800:64713:64859 [7] NCCL INFO Channel 12/1 : 7[7] -> 4[4] via P2P/direct pointer/read
+IAP-A800:64713:64858 [5] NCCL INFO Channel 12/1 : 5[5] -> 2[2] via P2P/direct pointer/read
+IAP-A800:64713:64861 [2] NCCL INFO Channel 14/1 : 2[2] -> 7[7] via P2P/direct pointer/read
+IAP-A800:64713:64856 [3] NCCL INFO Channel 13/1 : 3[3] -> 0[0] via P2P/direct pointer/read
+IAP-A800:64713:64857 [6] NCCL INFO Channel 12/1 : 6[6] -> 3[3] via P2P/direct pointer/read
+IAP-A800:64713:64859 [7] NCCL INFO Channel 13/1 : 7[7] -> 4[4] via P2P/direct pointer/read
+IAP-A800:64713:64858 [5] NCCL INFO Channel 13/1 : 5[5] -> 2[2] via P2P/direct pointer/read
+IAP-A800:64713:64861 [2] NCCL INFO Channel 15/1 : 2[2] -> 7[7] via P2P/direct pointer/read
+IAP-A800:64713:64856 [3] NCCL INFO Channel 14/1 : 3[3] -> 0[0] via P2P/direct pointer/read
+IAP-A800:64713:64857 [6] NCCL INFO Channel 13/1 : 6[6] -> 3[3] via P2P/direct pointer/read
+IAP-A800:64713:64859 [7] NCCL INFO Channel 14/1 : 7[7] -> 4[4] via P2P/direct pointer/read
+IAP-A800:64713:64858 [5] NCCL INFO Channel 14/1 : 5[5] -> 2[2] via P2P/direct pointer/read
+IAP-A800:64713:64856 [3] NCCL INFO Channel 15/1 : 3[3] -> 0[0] via P2P/direct pointer/read
+IAP-A800:64713:64857 [6] NCCL INFO Channel 14/1 : 6[6] -> 3[3] via P2P/direct pointer/read
+IAP-A800:64713:64859 [7] NCCL INFO Channel 15/1 : 7[7] -> 4[4] via P2P/direct pointer/read
+IAP-A800:64713:64858 [5] NCCL INFO Channel 15/1 : 5[5] -> 2[2] via P2P/direct pointer/read
+IAP-A800:64713:64857 [6] NCCL INFO Channel 15/1 : 6[6] -> 3[3] via P2P/direct pointer/read
+IAP-A800:64713:64861 [2] NCCL INFO Channel 00/1 : 2[2] -> 0[0] via P2P/direct pointer/read
+IAP-A800:64713:64861 [2] NCCL INFO Channel 01/1 : 2[2] -> 0[0] via P2P/direct pointer/read
+IAP-A800:64713:64859 [7] NCCL INFO Channel 00/1 : 7[7] -> 5[5] via P2P/direct pointer/read
+IAP-A800:64713:64856 [3] NCCL INFO Channel 00/1 : 3[3] -> 1[1] via P2P/direct pointer/read
+IAP-A800:64713:64862 [4] NCCL INFO Channel 00/1 : 4[4] -> 2[2] via P2P/direct pointer/read
+IAP-A800:64713:64859 [7] NCCL INFO Channel 01/1 : 7[7] -> 5[5] via P2P/direct pointer/read
+IAP-A800:64713:64861 [2] NCCL INFO Channel 02/1 : 2[2] -> 0[0] via P2P/direct pointer/read
+IAP-A800:64713:64858 [5] NCCL INFO Channel 00/1 : 5[5] -> 3[3] via P2P/direct pointer/read
+IAP-A800:64713:64857 [6] NCCL INFO Channel 00/1 : 6[6] -> 4[4] via P2P/direct pointer/read
+IAP-A800:64713:64862 [4] NCCL INFO Channel 01/1 : 4[4] -> 2[2] via P2P/direct pointer/read
+IAP-A800:64713:64861 [2] NCCL INFO Channel 03/1 : 2[2] -> 0[0] via P2P/direct pointer/read
+IAP-A800:64713:64855 [1] NCCL INFO Channel 00/1 : 1[1] -> 7[7] via P2P/direct pointer/read
+IAP-A800:64713:64859 [7] NCCL INFO Channel 02/1 : 7[7] -> 5[5] via P2P/direct pointer/read
+IAP-A800:64713:64856 [3] NCCL INFO Channel 01/1 : 3[3] -> 1[1] via P2P/direct pointer/read
+IAP-A800:64713:64858 [5] NCCL INFO Channel 01/1 : 5[5] -> 3[3] via P2P/direct pointer/read
+IAP-A800:64713:64857 [6] NCCL INFO Channel 01/1 : 6[6] -> 4[4] via P2P/direct pointer/read
+IAP-A800:64713:64862 [4] NCCL INFO Channel 02/1 : 4[4] -> 2[2] via P2P/direct pointer/read
+IAP-A800:64713:64861 [2] NCCL INFO Channel 04/1 : 2[2] -> 0[0] via P2P/direct pointer/read
+IAP-A800:64713:64860 [0] NCCL INFO Channel 00/1 : 0[0] -> 6[6] via P2P/direct pointer/read
+IAP-A800:64713:64855 [1] NCCL INFO Channel 01/1 : 1[1] -> 7[7] via P2P/direct pointer/read
+IAP-A800:64713:64858 [5] NCCL INFO Channel 02/1 : 5[5] -> 3[3] via P2P/direct pointer/read
+IAP-A800:64713:64856 [3] NCCL INFO Channel 02/1 : 3[3] -> 1[1] via P2P/direct pointer/read
+IAP-A800:64713:64859 [7] NCCL INFO Channel 03/1 : 7[7] -> 5[5] via P2P/direct pointer/read
+IAP-A800:64713:64857 [6] NCCL INFO Channel 02/1 : 6[6] -> 4[4] via P2P/direct pointer/read
+IAP-A800:64713:64862 [4] NCCL INFO Channel 03/1 : 4[4] -> 2[2] via P2P/direct pointer/read
+IAP-A800:64713:64861 [2] NCCL INFO Channel 05/1 : 2[2] -> 0[0] via P2P/direct pointer/read
+IAP-A800:64713:64860 [0] NCCL INFO Channel 01/1 : 0[0] -> 6[6] via P2P/direct pointer/read
+IAP-A800:64713:64855 [1] NCCL INFO Channel 02/1 : 1[1] -> 7[7] via P2P/direct pointer/read
+IAP-A800:64713:64858 [5] NCCL INFO Channel 03/1 : 5[5] -> 3[3] via P2P/direct pointer/read
+IAP-A800:64713:64856 [3] NCCL INFO Channel 03/1 : 3[3] -> 1[1] via P2P/direct pointer/read
+IAP-A800:64713:64859 [7] NCCL INFO Channel 04/1 : 7[7] -> 5[5] via P2P/direct pointer/read
+IAP-A800:64713:64857 [6] NCCL INFO Channel 03/1 : 6[6] -> 4[4] via P2P/direct pointer/read
+IAP-A800:64713:64862 [4] NCCL INFO Channel 04/1 : 4[4] -> 2[2] via P2P/direct pointer/read
+IAP-A800:64713:64861 [2] NCCL INFO Channel 06/1 : 2[2] -> 0[0] via P2P/direct pointer/read
+IAP-A800:64713:64860 [0] NCCL INFO Channel 02/1 : 0[0] -> 6[6] via P2P/direct pointer/read
+IAP-A800:64713:64855 [1] NCCL INFO Channel 03/1 : 1[1] -> 7[7] via P2P/direct pointer/read
+IAP-A800:64713:64858 [5] NCCL INFO Channel 04/1 : 5[5] -> 3[3] via P2P/direct pointer/read
+IAP-A800:64713:64856 [3] NCCL INFO Channel 04/1 : 3[3] -> 1[1] via P2P/direct pointer/read
+IAP-A800:64713:64859 [7] NCCL INFO Channel 05/1 : 7[7] -> 5[5] via P2P/direct pointer/read
+IAP-A800:64713:64857 [6] NCCL INFO Channel 04/1 : 6[6] -> 4[4] via P2P/direct pointer/read
+IAP-A800:64713:64862 [4] NCCL INFO Channel 05/1 : 4[4] -> 2[2] via P2P/direct pointer/read
+IAP-A800:64713:64861 [2] NCCL INFO Channel 07/1 : 2[2] -> 0[0] via P2P/direct pointer/read
+IAP-A800:64713:64860 [0] NCCL INFO Channel 03/1 : 0[0] -> 6[6] via P2P/direct pointer/read
+IAP-A800:64713:64855 [1] NCCL INFO Channel 04/1 : 1[1] -> 7[7] via P2P/direct pointer/read
+IAP-A800:64713:64858 [5] NCCL INFO Channel 05/1 : 5[5] -> 3[3] via P2P/direct pointer/read
+IAP-A800:64713:64856 [3] NCCL INFO Channel 05/1 : 3[3] -> 1[1] via P2P/direct pointer/read
+IAP-A800:64713:64859 [7] NCCL INFO Channel 06/1 : 7[7] -> 5[5] via P2P/direct pointer/read
+IAP-A800:64713:64857 [6] NCCL INFO Channel 05/1 : 6[6] -> 4[4] via P2P/direct pointer/read
+IAP-A800:64713:64862 [4] NCCL INFO Channel 06/1 : 4[4] -> 2[2] via P2P/direct pointer/read
+IAP-A800:64713:64861 [2] NCCL INFO Channel 08/1 : 2[2] -> 0[0] via P2P/direct pointer/read
+IAP-A800:64713:64860 [0] NCCL INFO Channel 04/1 : 0[0] -> 6[6] via P2P/direct pointer/read
+IAP-A800:64713:64855 [1] NCCL INFO Channel 05/1 : 1[1] -> 7[7] via P2P/direct pointer/read
+IAP-A800:64713:64858 [5] NCCL INFO Channel 06/1 : 5[5] -> 3[3] via P2P/direct pointer/read
+IAP-A800:64713:64856 [3] NCCL INFO Channel 06/1 : 3[3] -> 1[1] via P2P/direct pointer/read
+IAP-A800:64713:64859 [7] NCCL INFO Channel 07/1 : 7[7] -> 5[5] via P2P/direct pointer/read
+IAP-A800:64713:64857 [6] NCCL INFO Channel 06/1 : 6[6] -> 4[4] via P2P/direct pointer/read
+IAP-A800:64713:64862 [4] NCCL INFO Channel 07/1 : 4[4] -> 2[2] via P2P/direct pointer/read
+IAP-A800:64713:64861 [2] NCCL INFO Channel 09/1 : 2[2] -> 0[0] via P2P/direct pointer/read
+IAP-A800:64713:64860 [0] NCCL INFO Channel 05/1 : 0[0] -> 6[6] via P2P/direct pointer/read
+IAP-A800:64713:64855 [1] NCCL INFO Channel 06/1 : 1[1] -> 7[7] via P2P/direct pointer/read
+IAP-A800:64713:64858 [5] NCCL INFO Channel 07/1 : 5[5] -> 3[3] via P2P/direct pointer/read
+IAP-A800:64713:64856 [3] NCCL INFO Channel 07/1 : 3[3] -> 1[1] via P2P/direct pointer/read
+IAP-A800:64713:64859 [7] NCCL INFO Channel 08/1 : 7[7] -> 5[5] via P2P/direct pointer/read
+IAP-A800:64713:64857 [6] NCCL INFO Channel 07/1 : 6[6] -> 4[4] via P2P/direct pointer/read
+IAP-A800:64713:64862 [4] NCCL INFO Channel 08/1 : 4[4] -> 2[2] via P2P/direct pointer/read
+IAP-A800:64713:64861 [2] NCCL INFO Channel 10/1 : 2[2] -> 0[0] via P2P/direct pointer/read
+IAP-A800:64713:64860 [0] NCCL INFO Channel 06/1 : 0[0] -> 6[6] via P2P/direct pointer/read
+IAP-A800:64713:64855 [1] NCCL INFO Channel 07/1 : 1[1] -> 7[7] via P2P/direct pointer/read
+IAP-A800:64713:64858 [5] NCCL INFO Channel 08/1 : 5[5] -> 3[3] via P2P/direct pointer/read
+IAP-A800:64713:64856 [3] NCCL INFO Channel 08/1 : 3[3] -> 1[1] via P2P/direct pointer/read
+IAP-A800:64713:64859 [7] NCCL INFO Channel 09/1 : 7[7] -> 5[5] via P2P/direct pointer/read
+IAP-A800:64713:64857 [6] NCCL INFO Channel 08/1 : 6[6] -> 4[4] via P2P/direct pointer/read
+IAP-A800:64713:64862 [4] NCCL INFO Channel 09/1 : 4[4] -> 2[2] via P2P/direct pointer/read
+IAP-A800:64713:64861 [2] NCCL INFO Channel 11/1 : 2[2] -> 0[0] via P2P/direct pointer/read
+IAP-A800:64713:64857 [6] NCCL INFO Channel 09/1 : 6[6] -> 4[4] via P2P/direct pointer/read
+IAP-A800:64713:64855 [1] NCCL INFO Channel 08/1 : 1[1] -> 7[7] via P2P/direct pointer/read
+IAP-A800:64713:64858 [5] NCCL INFO Channel 09/1 : 5[5] -> 3[3] via P2P/direct pointer/read
+IAP-A800:64713:64857 [6] NCCL INFO Channel 10/1 : 6[6] -> 4[4] via P2P/direct pointer/read
+IAP-A800:64713:64859 [7] NCCL INFO Channel 10/1 : 7[7] -> 5[5] via P2P/direct pointer/read
+IAP-A800:64713:64860 [0] NCCL INFO Channel 07/1 : 0[0] -> 6[6] via P2P/direct pointer/read
+IAP-A800:64713:64862 [4] NCCL INFO Channel 10/1 : 4[4] -> 2[2] via P2P/direct pointer/read
+IAP-A800:64713:64859 [7] NCCL INFO Channel 11/1 : 7[7] -> 5[5] via P2P/direct pointer/read
+IAP-A800:64713:64856 [3] NCCL INFO Channel 09/1 : 3[3] -> 1[1] via P2P/direct pointer/read
+IAP-A800:64713:64855 [1] NCCL INFO Channel 09/1 : 1[1] -> 7[7] via P2P/direct pointer/read
+IAP-A800:64713:64858 [5] NCCL INFO Channel 10/1 : 5[5] -> 3[3] via P2P/direct pointer/read
+IAP-A800:64713:64857 [6] NCCL INFO Channel 11/1 : 6[6] -> 4[4] via P2P/direct pointer/read
+IAP-A800:64713:64861 [2] NCCL INFO Channel 12/1 : 2[2] -> 0[0] via P2P/direct pointer/read
+IAP-A800:64713:64860 [0] NCCL INFO Channel 08/1 : 0[0] -> 6[6] via P2P/direct pointer/read
+IAP-A800:64713:64862 [4] NCCL INFO Channel 11/1 : 4[4] -> 2[2] via P2P/direct pointer/read
+IAP-A800:64713:64859 [7] NCCL INFO Channel 12/1 : 7[7] -> 5[5] via P2P/direct pointer/read
+IAP-A800:64713:64856 [3] NCCL INFO Channel 10/1 : 3[3] -> 1[1] via P2P/direct pointer/read
+IAP-A800:64713:64855 [1] NCCL INFO Channel 10/1 : 1[1] -> 7[7] via P2P/direct pointer/read
+IAP-A800:64713:64858 [5] NCCL INFO Channel 11/1 : 5[5] -> 3[3] via P2P/direct pointer/read
+IAP-A800:64713:64857 [6] NCCL INFO Channel 12/1 : 6[6] -> 4[4] via P2P/direct pointer/read
+IAP-A800:64713:64861 [2] NCCL INFO Channel 13/1 : 2[2] -> 0[0] via P2P/direct pointer/read
+IAP-A800:64713:64860 [0] NCCL INFO Channel 09/1 : 0[0] -> 6[6] via P2P/direct pointer/read
+IAP-A800:64713:64857 [6] NCCL INFO Channel 13/1 : 6[6] -> 4[4] via P2P/direct pointer/read
+IAP-A800:64713:64859 [7] NCCL INFO Channel 13/1 : 7[7] -> 5[5] via P2P/direct pointer/read
+IAP-A800:64713:64856 [3] NCCL INFO Channel 11/1 : 3[3] -> 1[1] via P2P/direct pointer/read
+IAP-A800:64713:64855 [1] NCCL INFO Channel 11/1 : 1[1] -> 7[7] via P2P/direct pointer/read
+IAP-A800:64713:64858 [5] NCCL INFO Channel 12/1 : 5[5] -> 3[3] via P2P/direct pointer/read
+IAP-A800:64713:64862 [4] NCCL INFO Channel 12/1 : 4[4] -> 2[2] via P2P/direct pointer/read
+IAP-A800:64713:64861 [2] NCCL INFO Channel 14/1 : 2[2] -> 0[0] via P2P/direct pointer/read
+IAP-A800:64713:64860 [0] NCCL INFO Channel 10/1 : 0[0] -> 6[6] via P2P/direct pointer/read
+IAP-A800:64713:64857 [6] NCCL INFO Channel 14/1 : 6[6] -> 4[4] via P2P/direct pointer/read
+IAP-A800:64713:64859 [7] NCCL INFO Channel 14/1 : 7[7] -> 5[5] via P2P/direct pointer/read
+IAP-A800:64713:64856 [3] NCCL INFO Channel 12/1 : 3[3] -> 1[1] via P2P/direct pointer/read
+IAP-A800:64713:64855 [1] NCCL INFO Channel 12/1 : 1[1] -> 7[7] via P2P/direct pointer/read
+IAP-A800:64713:64858 [5] NCCL INFO Channel 13/1 : 5[5] -> 3[3] via P2P/direct pointer/read
+IAP-A800:64713:64862 [4] NCCL INFO Channel 13/1 : 4[4] -> 2[2] via P2P/direct pointer/read
+IAP-A800:64713:64861 [2] NCCL INFO Channel 15/1 : 2[2] -> 0[0] via P2P/direct pointer/read
+IAP-A800:64713:64860 [0] NCCL INFO Channel 11/1 : 0[0] -> 6[6] via P2P/direct pointer/read
+IAP-A800:64713:64857 [6] NCCL INFO Channel 15/1 : 6[6] -> 4[4] via P2P/direct pointer/read
+IAP-A800:64713:64859 [7] NCCL INFO Channel 15/1 : 7[7] -> 5[5] via P2P/direct pointer/read
+IAP-A800:64713:64856 [3] NCCL INFO Channel 13/1 : 3[3] -> 1[1] via P2P/direct pointer/read
+IAP-A800:64713:64855 [1] NCCL INFO Channel 13/1 : 1[1] -> 7[7] via P2P/direct pointer/read
+IAP-A800:64713:64862 [4] NCCL INFO Channel 14/1 : 4[4] -> 2[2] via P2P/direct pointer/read
+IAP-A800:64713:64860 [0] NCCL INFO Channel 12/1 : 0[0] -> 6[6] via P2P/direct pointer/read
+IAP-A800:64713:64858 [5] NCCL INFO Channel 14/1 : 5[5] -> 3[3] via P2P/direct pointer/read
+IAP-A800:64713:64856 [3] NCCL INFO Channel 14/1 : 3[3] -> 1[1] via P2P/direct pointer/read
+IAP-A800:64713:64855 [1] NCCL INFO Channel 14/1 : 1[1] -> 7[7] via P2P/direct pointer/read
+IAP-A800:64713:64862 [4] NCCL INFO Channel 15/1 : 4[4] -> 2[2] via P2P/direct pointer/read
+IAP-A800:64713:64860 [0] NCCL INFO Channel 13/1 : 0[0] -> 6[6] via P2P/direct pointer/read
+IAP-A800:64713:64858 [5] NCCL INFO Channel 15/1 : 5[5] -> 3[3] via P2P/direct pointer/read
+IAP-A800:64713:64856 [3] NCCL INFO Channel 15/1 : 3[3] -> 1[1] via P2P/direct pointer/read
+IAP-A800:64713:64855 [1] NCCL INFO Channel 15/1 : 1[1] -> 7[7] via P2P/direct pointer/read
+IAP-A800:64713:64860 [0] NCCL INFO Channel 14/1 : 0[0] -> 6[6] via P2P/direct pointer/read
+IAP-A800:64713:64860 [0] NCCL INFO Channel 15/1 : 0[0] -> 6[6] via P2P/direct pointer/read
+IAP-A800:64713:64861 [2] NCCL INFO Channel 00/1 : 2[2] -> 1[1] via P2P/direct pointer/read
+IAP-A800:64713:64861 [2] NCCL INFO Channel 01/1 : 2[2] -> 1[1] via P2P/direct pointer/read
+IAP-A800:64713:64858 [5] NCCL INFO Channel 00/1 : 5[5] -> 4[4] via P2P/direct pointer/read
+IAP-A800:64713:64861 [2] NCCL INFO Channel 02/1 : 2[2] -> 1[1] via P2P/direct pointer/read
+IAP-A800:64713:64858 [5] NCCL INFO Channel 01/1 : 5[5] -> 4[4] via P2P/direct pointer/read
+IAP-A800:64713:64861 [2] NCCL INFO Channel 03/1 : 2[2] -> 1[1] via P2P/direct pointer/read
+IAP-A800:64713:64862 [4] NCCL INFO Channel 00/1 : 4[4] -> 3[3] via P2P/direct pointer/read
+IAP-A800:64713:64861 [2] NCCL INFO Channel 04/1 : 2[2] -> 1[1] via P2P/direct pointer/read
+IAP-A800:64713:64855 [1] NCCL INFO Channel 00/1 : 1[1] -> 0[0] via P2P/direct pointer/read
+IAP-A800:64713:64858 [5] NCCL INFO Channel 02/1 : 5[5] -> 4[4] via P2P/direct pointer/read
+IAP-A800:64713:64860 [0] NCCL INFO Channel 00/1 : 0[0] -> 7[7] via P2P/direct pointer/read
+IAP-A800:64713:64862 [4] NCCL INFO Channel 01/1 : 4[4] -> 3[3] via P2P/direct pointer/read
+IAP-A800:64713:64856 [3] NCCL INFO Channel 00/1 : 3[3] -> 2[2] via P2P/direct pointer/read
+IAP-A800:64713:64855 [1] NCCL INFO Channel 01/1 : 1[1] -> 0[0] via P2P/direct pointer/read
+IAP-A800:64713:64861 [2] NCCL INFO Channel 05/1 : 2[2] -> 1[1] via P2P/direct pointer/read
+IAP-A800:64713:64860 [0] NCCL INFO Channel 01/1 : 0[0] -> 7[7] via P2P/direct pointer/read
+IAP-A800:64713:64859 [7] NCCL INFO Channel 00/1 : 7[7] -> 6[6] via P2P/direct pointer/read
+IAP-A800:64713:64858 [5] NCCL INFO Channel 03/1 : 5[5] -> 4[4] via P2P/direct pointer/read
+IAP-A800:64713:64862 [4] NCCL INFO Channel 02/1 : 4[4] -> 3[3] via P2P/direct pointer/read
+IAP-A800:64713:64855 [1] NCCL INFO Channel 02/1 : 1[1] -> 0[0] via P2P/direct pointer/read
+IAP-A800:64713:64856 [3] NCCL INFO Channel 01/1 : 3[3] -> 2[2] via P2P/direct pointer/read
+IAP-A800:64713:64861 [2] NCCL INFO Channel 06/1 : 2[2] -> 1[1] via P2P/direct pointer/read
+IAP-A800:64713:64857 [6] NCCL INFO Channel 00/1 : 6[6] -> 5[5] via P2P/direct pointer/read
+IAP-A800:64713:64860 [0] NCCL INFO Channel 02/1 : 0[0] -> 7[7] via P2P/direct pointer/read
+IAP-A800:64713:64858 [5] NCCL INFO Channel 04/1 : 5[5] -> 4[4] via P2P/direct pointer/read
+IAP-A800:64713:64859 [7] NCCL INFO Channel 01/1 : 7[7] -> 6[6] via P2P/direct pointer/read
+IAP-A800:64713:64855 [1] NCCL INFO Channel 03/1 : 1[1] -> 0[0] via P2P/direct pointer/read
+IAP-A800:64713:64862 [4] NCCL INFO Channel 03/1 : 4[4] -> 3[3] via P2P/direct pointer/read
+IAP-A800:64713:64861 [2] NCCL INFO Channel 07/1 : 2[2] -> 1[1] via P2P/direct pointer/read
+IAP-A800:64713:64856 [3] NCCL INFO Channel 02/1 : 3[3] -> 2[2] via P2P/direct pointer/read
+IAP-A800:64713:64857 [6] NCCL INFO Channel 01/1 : 6[6] -> 5[5] via P2P/direct pointer/read
+IAP-A800:64713:64860 [0] NCCL INFO Channel 03/1 : 0[0] -> 7[7] via P2P/direct pointer/read
+IAP-A800:64713:64858 [5] NCCL INFO Channel 05/1 : 5[5] -> 4[4] via P2P/direct pointer/read
+IAP-A800:64713:64859 [7] NCCL INFO Channel 02/1 : 7[7] -> 6[6] via P2P/direct pointer/read
+IAP-A800:64713:64855 [1] NCCL INFO Channel 04/1 : 1[1] -> 0[0] via P2P/direct pointer/read
+IAP-A800:64713:64862 [4] NCCL INFO Channel 04/1 : 4[4] -> 3[3] via P2P/direct pointer/read
+IAP-A800:64713:64861 [2] NCCL INFO Channel 08/1 : 2[2] -> 1[1] via P2P/direct pointer/read
+IAP-A800:64713:64856 [3] NCCL INFO Channel 03/1 : 3[3] -> 2[2] via P2P/direct pointer/read
+IAP-A800:64713:64862 [4] NCCL INFO Channel 05/1 : 4[4] -> 3[3] via P2P/direct pointer/read
+IAP-A800:64713:64860 [0] NCCL INFO Channel 04/1 : 0[0] -> 7[7] via P2P/direct pointer/read
+IAP-A800:64713:64858 [5] NCCL INFO Channel 06/1 : 5[5] -> 4[4] via P2P/direct pointer/read
+IAP-A800:64713:64859 [7] NCCL INFO Channel 03/1 : 7[7] -> 6[6] via P2P/direct pointer/read
+IAP-A800:64713:64855 [1] NCCL INFO Channel 05/1 : 1[1] -> 0[0] via P2P/direct pointer/read
+IAP-A800:64713:64857 [6] NCCL INFO Channel 02/1 : 6[6] -> 5[5] via P2P/direct pointer/read
+IAP-A800:64713:64861 [2] NCCL INFO Channel 09/1 : 2[2] -> 1[1] via P2P/direct pointer/read
+IAP-A800:64713:64856 [3] NCCL INFO Channel 04/1 : 3[3] -> 2[2] via P2P/direct pointer/read
+IAP-A800:64713:64862 [4] NCCL INFO Channel 06/1 : 4[4] -> 3[3] via P2P/direct pointer/read
+IAP-A800:64713:64860 [0] NCCL INFO Channel 05/1 : 0[0] -> 7[7] via P2P/direct pointer/read
+IAP-A800:64713:64858 [5] NCCL INFO Channel 07/1 : 5[5] -> 4[4] via P2P/direct pointer/read
+IAP-A800:64713:64859 [7] NCCL INFO Channel 04/1 : 7[7] -> 6[6] via P2P/direct pointer/read
+IAP-A800:64713:64855 [1] NCCL INFO Channel 06/1 : 1[1] -> 0[0] via P2P/direct pointer/read
+IAP-A800:64713:64857 [6] NCCL INFO Channel 03/1 : 6[6] -> 5[5] via P2P/direct pointer/read
+IAP-A800:64713:64861 [2] NCCL INFO Channel 10/1 : 2[2] -> 1[1] via P2P/direct pointer/read
+IAP-A800:64713:64856 [3] NCCL INFO Channel 05/1 : 3[3] -> 2[2] via P2P/direct pointer/read
+IAP-A800:64713:64862 [4] NCCL INFO Channel 07/1 : 4[4] -> 3[3] via P2P/direct pointer/read
+IAP-A800:64713:64860 [0] NCCL INFO Channel 06/1 : 0[0] -> 7[7] via P2P/direct pointer/read
+IAP-A800:64713:64858 [5] NCCL INFO Channel 08/1 : 5[5] -> 4[4] via P2P/direct pointer/read
+IAP-A800:64713:64859 [7] NCCL INFO Channel 05/1 : 7[7] -> 6[6] via P2P/direct pointer/read
+IAP-A800:64713:64855 [1] NCCL INFO Channel 07/1 : 1[1] -> 0[0] via P2P/direct pointer/read
+IAP-A800:64713:64857 [6] NCCL INFO Channel 04/1 : 6[6] -> 5[5] via P2P/direct pointer/read
+IAP-A800:64713:64861 [2] NCCL INFO Channel 11/1 : 2[2] -> 1[1] via P2P/direct pointer/read
+IAP-A800:64713:64856 [3] NCCL INFO Channel 06/1 : 3[3] -> 2[2] via P2P/direct pointer/read
+IAP-A800:64713:64862 [4] NCCL INFO Channel 08/1 : 4[4] -> 3[3] via P2P/direct pointer/read
+IAP-A800:64713:64860 [0] NCCL INFO Channel 07/1 : 0[0] -> 7[7] via P2P/direct pointer/read
+IAP-A800:64713:64858 [5] NCCL INFO Channel 09/1 : 5[5] -> 4[4] via P2P/direct pointer/read
+IAP-A800:64713:64859 [7] NCCL INFO Channel 06/1 : 7[7] -> 6[6] via P2P/direct pointer/read
+IAP-A800:64713:64855 [1] NCCL INFO Channel 08/1 : 1[1] -> 0[0] via P2P/direct pointer/read
+IAP-A800:64713:64857 [6] NCCL INFO Channel 05/1 : 6[6] -> 5[5] via P2P/direct pointer/read
+IAP-A800:64713:64861 [2] NCCL INFO Channel 12/1 : 2[2] -> 1[1] via P2P/direct pointer/read
+IAP-A800:64713:64856 [3] NCCL INFO Channel 07/1 : 3[3] -> 2[2] via P2P/direct pointer/read
+IAP-A800:64713:64862 [4] NCCL INFO Channel 09/1 : 4[4] -> 3[3] via P2P/direct pointer/read
+IAP-A800:64713:64860 [0] NCCL INFO Channel 08/1 : 0[0] -> 7[7] via P2P/direct pointer/read
+IAP-A800:64713:64858 [5] NCCL INFO Channel 10/1 : 5[5] -> 4[4] via P2P/direct pointer/read
+IAP-A800:64713:64859 [7] NCCL INFO Channel 07/1 : 7[7] -> 6[6] via P2P/direct pointer/read
+IAP-A800:64713:64855 [1] NCCL INFO Channel 09/1 : 1[1] -> 0[0] via P2P/direct pointer/read
+IAP-A800:64713:64857 [6] NCCL INFO Channel 06/1 : 6[6] -> 5[5] via P2P/direct pointer/read
+IAP-A800:64713:64861 [2] NCCL INFO Channel 13/1 : 2[2] -> 1[1] via P2P/direct pointer/read
+IAP-A800:64713:64856 [3] NCCL INFO Channel 08/1 : 3[3] -> 2[2] via P2P/direct pointer/read
+IAP-A800:64713:64862 [4] NCCL INFO Channel 10/1 : 4[4] -> 3[3] via P2P/direct pointer/read
+IAP-A800:64713:64860 [0] NCCL INFO Channel 09/1 : 0[0] -> 7[7] via P2P/direct pointer/read
+IAP-A800:64713:64858 [5] NCCL INFO Channel 11/1 : 5[5] -> 4[4] via P2P/direct pointer/read
+IAP-A800:64713:64859 [7] NCCL INFO Channel 08/1 : 7[7] -> 6[6] via P2P/direct pointer/read
+IAP-A800:64713:64855 [1] NCCL INFO Channel 10/1 : 1[1] -> 0[0] via P2P/direct pointer/read
+IAP-A800:64713:64857 [6] NCCL INFO Channel 07/1 : 6[6] -> 5[5] via P2P/direct pointer/read
+IAP-A800:64713:64861 [2] NCCL INFO Channel 14/1 : 2[2] -> 1[1] via P2P/direct pointer/read
+IAP-A800:64713:64856 [3] NCCL INFO Channel 09/1 : 3[3] -> 2[2] via P2P/direct pointer/read
+IAP-A800:64713:64862 [4] NCCL INFO Channel 11/1 : 4[4] -> 3[3] via P2P/direct pointer/read
+IAP-A800:64713:64860 [0] NCCL INFO Channel 10/1 : 0[0] -> 7[7] via P2P/direct pointer/read
+IAP-A800:64713:64858 [5] NCCL INFO Channel 12/1 : 5[5] -> 4[4] via P2P/direct pointer/read
+IAP-A800:64713:64859 [7] NCCL INFO Channel 09/1 : 7[7] -> 6[6] via P2P/direct pointer/read
+IAP-A800:64713:64855 [1] NCCL INFO Channel 11/1 : 1[1] -> 0[0] via P2P/direct pointer/read
+IAP-A800:64713:64857 [6] NCCL INFO Channel 08/1 : 6[6] -> 5[5] via P2P/direct pointer/read
+IAP-A800:64713:64861 [2] NCCL INFO Channel 15/1 : 2[2] -> 1[1] via P2P/direct pointer/read
+IAP-A800:64713:64856 [3] NCCL INFO Channel 10/1 : 3[3] -> 2[2] via P2P/direct pointer/read
+IAP-A800:64713:64862 [4] NCCL INFO Channel 12/1 : 4[4] -> 3[3] via P2P/direct pointer/read
+IAP-A800:64713:64860 [0] NCCL INFO Channel 11/1 : 0[0] -> 7[7] via P2P/direct pointer/read
+IAP-A800:64713:64858 [5] NCCL INFO Channel 13/1 : 5[5] -> 4[4] via P2P/direct pointer/read
+IAP-A800:64713:64859 [7] NCCL INFO Channel 10/1 : 7[7] -> 6[6] via P2P/direct pointer/read
+IAP-A800:64713:64855 [1] NCCL INFO Channel 12/1 : 1[1] -> 0[0] via P2P/direct pointer/read
+IAP-A800:64713:64857 [6] NCCL INFO Channel 09/1 : 6[6] -> 5[5] via P2P/direct pointer/read
+IAP-A800:64713:64856 [3] NCCL INFO Channel 11/1 : 3[3] -> 2[2] via P2P/direct pointer/read
+IAP-A800:64713:64862 [4] NCCL INFO Channel 13/1 : 4[4] -> 3[3] via P2P/direct pointer/read
+IAP-A800:64713:64860 [0] NCCL INFO Channel 12/1 : 0[0] -> 7[7] via P2P/direct pointer/read
+IAP-A800:64713:64858 [5] NCCL INFO Channel 14/1 : 5[5] -> 4[4] via P2P/direct pointer/read
+IAP-A800:64713:64859 [7] NCCL INFO Channel 11/1 : 7[7] -> 6[6] via P2P/direct pointer/read
+IAP-A800:64713:64855 [1] NCCL INFO Channel 13/1 : 1[1] -> 0[0] via P2P/direct pointer/read
+IAP-A800:64713:64857 [6] NCCL INFO Channel 10/1 : 6[6] -> 5[5] via P2P/direct pointer/read
+IAP-A800:64713:64856 [3] NCCL INFO Channel 12/1 : 3[3] -> 2[2] via P2P/direct pointer/read
+IAP-A800:64713:64862 [4] NCCL INFO Channel 14/1 : 4[4] -> 3[3] via P2P/direct pointer/read
+IAP-A800:64713:64857 [6] NCCL INFO Channel 11/1 : 6[6] -> 5[5] via P2P/direct pointer/read
+IAP-A800:64713:64858 [5] NCCL INFO Channel 15/1 : 5[5] -> 4[4] via P2P/direct pointer/read
+IAP-A800:64713:64859 [7] NCCL INFO Channel 12/1 : 7[7] -> 6[6] via P2P/direct pointer/read
+IAP-A800:64713:64855 [1] NCCL INFO Channel 14/1 : 1[1] -> 0[0] via P2P/direct pointer/read
+IAP-A800:64713:64860 [0] NCCL INFO Channel 13/1 : 0[0] -> 7[7] via P2P/direct pointer/read
+IAP-A800:64713:64857 [6] NCCL INFO Channel 12/1 : 6[6] -> 5[5] via P2P/direct pointer/read
+IAP-A800:64713:64856 [3] NCCL INFO Channel 13/1 : 3[3] -> 2[2] via P2P/direct pointer/read
+IAP-A800:64713:64862 [4] NCCL INFO Channel 15/1 : 4[4] -> 3[3] via P2P/direct pointer/read
+IAP-A800:64713:64857 [6] NCCL INFO Channel 13/1 : 6[6] -> 5[5] via P2P/direct pointer/read
+IAP-A800:64713:64855 [1] NCCL INFO Channel 15/1 : 1[1] -> 0[0] via P2P/direct pointer/read
+IAP-A800:64713:64860 [0] NCCL INFO Channel 14/1 : 0[0] -> 7[7] via P2P/direct pointer/read
+IAP-A800:64713:64859 [7] NCCL INFO Channel 13/1 : 7[7] -> 6[6] via P2P/direct pointer/read
+IAP-A800:64713:64856 [3] NCCL INFO Channel 14/1 : 3[3] -> 2[2] via P2P/direct pointer/read
+IAP-A800:64713:64857 [6] NCCL INFO Channel 14/1 : 6[6] -> 5[5] via P2P/direct pointer/read
+IAP-A800:64713:64860 [0] NCCL INFO Channel 15/1 : 0[0] -> 7[7] via P2P/direct pointer/read
+IAP-A800:64713:64856 [3] NCCL INFO Channel 15/1 : 3[3] -> 2[2] via P2P/direct pointer/read
+IAP-A800:64713:64859 [7] NCCL INFO Channel 14/1 : 7[7] -> 6[6] via P2P/direct pointer/read
+IAP-A800:64713:64857 [6] NCCL INFO Channel 15/1 : 6[6] -> 5[5] via P2P/direct pointer/read
+IAP-A800:64713:64859 [7] NCCL INFO Channel 15/1 : 7[7] -> 6[6] via P2P/direct pointer/read
+IAP-A800:64713:64713 [0] NCCL INFO comm 0x5faa212ff8b0 rank 0 nranks 8 cudaDev 0 busId 3d000 - Destroy COMPLETE
+IAP-A800:64713:64713 [0] NCCL INFO comm 0x5faa2130a280 rank 1 nranks 8 cudaDev 1 busId 42000 - Destroy COMPLETE
+IAP-A800:64713:64713 [0] NCCL INFO comm 0x5faa213113d0 rank 2 nranks 8 cudaDev 2 busId 61000 - Destroy COMPLETE
+IAP-A800:64713:64713 [0] NCCL INFO comm 0x5faa213184b0 rank 3 nranks 8 cudaDev 3 busId 67000 - Destroy COMPLETE
+IAP-A800:64713:64713 [0] NCCL INFO comm 0x5faa2131f590 rank 4 nranks 8 cudaDev 4 busId ad000 - Destroy COMPLETE
+IAP-A800:64713:64713 [0] NCCL INFO comm 0x5faa21326670 rank 5 nranks 8 cudaDev 5 busId b1000 - Destroy COMPLETE
+IAP-A800:64713:64713 [0] NCCL INFO comm 0x5faa2132d750 rank 6 nranks 8 cudaDev 6 busId d0000 - Destroy COMPLETE
+IAP-A800:64713:64713 [0] NCCL INFO Cleanup buffer 0x74c158000000 pages 480000
+IAP-A800:64713:64713 [7] NCCL INFO Cleanup buffer 0x74c5ec000000 pages 480000
+IAP-A800:64713:64713 [6] NCCL INFO Cleanup buffer 0x74cef8000000 pages 480000
+IAP-A800:64713:64713 [5] NCCL INFO Cleanup buffer 0x74ca74000000 pages 480000
+IAP-A800:64713:64713 [4] NCCL INFO Cleanup buffer 0x74bc18000000 pages 480000
+IAP-A800:64713:64713 [3] NCCL INFO Cleanup buffer 0x74d398000000 pages 480000
+IAP-A800:64713:64713 [2] NCCL INFO Cleanup buffer 0x74b794000000 pages 480000
+IAP-A800:64713:64713 [1] NCCL INFO Cleanup buffer 0x74d84c000000 pages 480000
+IAP-A800:64713:64713 [0] NCCL INFO comm 0x5faa21334830 rank 7 nranks 8 cudaDev 7 busId d3000 - Destroy COMPLETE
