@@ -4,12 +4,17 @@ COCCL loads compressors as CUDA shared libraries at communicator initialization 
 
 The paper describes this abstraction as UCPM: required `compress`, `decompress`, and config-registration routines, plus optional fused `decomp_reduce` and `decomp_reduce_recomp` routines. In this artifact, those routines are implemented as fields of `ncclCompressor_t`. 
 
-The in-tree examples are useful templates:
+## Built-in compressor examples
 
-- `src/device/compress/sdp4bit/` builds `libsdp4bit.so` and exports the `sdp4bit` compressor.
-- `src/device/compress/tahquant/` builds `libtahquant.so` and exports the `tahquant` compressor.
-- `src/device/compress/zfp/` builds `libcuzfp.so` and exports the `cuzfp` compressor.
-- Their config files live under `src/device/compress/configs/` and `src/device/compress/configs_training/`.
+COCCL includes three integrated compressors by default. They are both usable compressors and reference examples for adding a new compressor:
+
+| Compressor | Source directory | Runtime name | Shared library | Exported symbol |
+| --- | --- | --- | --- | --- |
+| SDP4Bit | `src/device/compress/sdp4bit/` | `sdp4bit` | `libsdp4bit.so` | `sdp4bit` |
+| TAHQuant | `src/device/compress/tahquant/` | `tahquant` | `libtahquant.so` | `tahquant` |
+| cuZFP | `src/device/compress/zfp/` | `cuzfp` | `libcuzfp.so` | `cuzfp` |
+
+Their config files live under `src/device/compress/configs/` and `src/device/compress/configs_training/`. Use these three directories as examples for the expected source layout, Makefile integration, `ncclCompressor_t` descriptor, config parsing, and runtime naming convention.
 
 ### 1. Implement the compressor shared library
 
@@ -45,7 +50,7 @@ A minimal compressor descriptor looks like this:
 ```cpp
 #include "compressor.h"
 
-extern "C" const ncclCompressor_t mycomp{
+extern "C" __attribute__((visibility("default"))) const ncclCompressor_t mycomp{
   .name = "mycomp",
   .compress = myCompCompress,
   .decompress = myCompDecompress,
@@ -76,8 +81,8 @@ QUAN_SO := $(SUBOBJDIR)/libcompress/libmycomp.so
 Then build COCCL as usual. After the build, verify that the compressor library and exported symbol exist:
 
 ```bash
-ls -l /path/to/coccl/build/obj/device/compress/libcompress/libmycomp.so
-nm -D /path/to/coccl/build/obj/device/compress/libcompress/libmycomp.so | grep ' mycomp$'
+ls -l <path to coccl>/build/obj/device/compress/libcompress/libmycomp.so
+nm -D <path to coccl>/build/obj/device/compress/libcompress/libmycomp.so | grep ' mycomp$'
 ```
 
 If the compressor is built outside the COCCL tree, copy `libmycomp.so` into the directory used by `NCCL_COMPRESSORS_LIB_PATH`.
@@ -124,7 +129,7 @@ Your `parseConfig` callback is responsible for interpreting these keys. COCCL pa
 Set the global loader variables first. `NCCL_ENABLE_COMPRESS=1` without `NCCL_COMPRESSORS` is not enough, because COCCL needs the compressor list before it can load any shared libraries.
 
 ```bash
-export COCCL_PATH=/path/to/coccl
+export COCCL_PATH=<path to coccl>
 export NCCL_HOME=$COCCL_PATH/build
 export LD_LIBRARY_PATH=$NCCL_HOME/lib:$LD_LIBRARY_PATH
 

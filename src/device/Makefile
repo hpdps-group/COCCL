@@ -51,7 +51,7 @@ define DEPENDS
  echo "$(patsubst %.d,%.o,$1) $1: " $$files > $1
 endef
 
-all: $(MANIFEST) $(COMPSUBOBJDIR)
+all: $(MANIFEST) compress.build
 
 ifeq (1,1)
 # Case if the <gensrc> directory is generated on-demand:
@@ -82,6 +82,8 @@ $(OBJDIR)/gensrc/rules.mk: $(OBJDIR)/gensrc ;
 
 $(COMPSUBOBJDIR):
 	@mkdir -p $(COMPSUBOBJDIR)
+
+compress.build: | $(COMPSUBOBJDIR)
 	$(MAKE) -C $(COMPSUBDIR) SUBOBJDIR=$(COMPSUBOBJDIR)
 # SRCS = common.cu onerank.cu
 SRCS = common.cu onerank.cu compress/reduce_extend_kernel.cu
@@ -110,6 +112,6 @@ $(MANIFEST): $(LIB_OBJS) $(DEVGLUE_OBJ)
 -include $(wildcard $(OBJDIR)/*.d)
 -include $(wildcard $(OBJDIR)/genobj/*.d)
 
-.PHONY: clean
+.PHONY: clean compress.build
 clean:
 	rm -rf $(OBJDIR)

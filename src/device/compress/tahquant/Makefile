@@ -37,9 +37,7 @@ TAHQUANT_DIR := tahquant
 # ifeq ($(strip $(TORCH_INCLUDE_CUDA)),)
 #     $(error "PyTorch CUDA include path not found! Ensure PyTorch with CUDA support is installed")
 # endif
-ifeq ($(NVHPC_CUDA_HOME),)
-  NVHPC_CUDA_HOME := /usr/local/cuda
-endif
+NVHPC_CUDA_HOME ?= $(CUDA_HOME)
 
 # PY_INCLUDE := $(shell python -c "import sysconfig; print(sysconfig.get_path('include'))")
 
@@ -156,10 +154,7 @@ $(QUAN_SO): $(OBJS)
 # $(OBJDIR)/%.d: %
 # 	$(call DEPENDS,$@,$<)
 
--include $(wildcard $(OBJDIR)/*.d)
--include $(wildcard $(OBJDIR)/compress/tahquant/*.d)
--include $(wildcard $(OBJDIR)/compress/tahquant/hadamard/*.d)
--include $(wildcard $(OBJDIR)/compress/tahquant/quantization/*.d)
+-include $(DEPS)
 
 # $(OBJDIR)/genobj/%.o: $(OBJDIR)/gensrc $(OBJDIR)/genobj/%.d
 # 	$(call COMPILE,$@,$(OBJDIR)/gensrc/$*)

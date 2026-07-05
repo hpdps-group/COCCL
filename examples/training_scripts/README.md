@@ -18,18 +18,18 @@ Each example keeps its own path configuration:
 
 | Example | Env file | Training framework path | Upstream repository |
 | --- | --- | --- | --- |
-| GPT-2 | `gpt2/training_envs.sh` | `Megatron_PATH=/path/to/Megatron-LM` | [NVIDIA/Megatron-LM](https://github.com/NVIDIA/Megatron-LM) |
-| LingV2 | `LingV2/training_envs.sh` | `FRAMEWORK_PATH=/path/to/LingV2` | [inclusionAI/Ling-V2](https://github.com/inclusionAI/Ling-V2) |
-| Qwen2.5 | `qwen2.5/training_envs.sh` | `FRAMEWORK_PATH=/path/to/Pai-Megatron-Patch` | [alibaba/Pai-Megatron-Patch](https://github.com/alibaba/Pai-Megatron-Patch) |
+| GPT-2 | `gpt2/training_envs.sh` | `Megatron_PATH=<path to Megatron-LM>` | [NVIDIA/Megatron-LM](https://github.com/NVIDIA/Megatron-LM) |
+| LingV2 | `LingV2/training_envs.sh` | `FRAMEWORK_PATH=<path to LingV2>` | [inclusionAI/Ling-V2](https://github.com/inclusionAI/Ling-V2) |
+| Qwen2.5 | `qwen2.5/training_envs.sh` | `FRAMEWORK_PATH=<path to Pai-Megatron-Patch>` | [alibaba/Pai-Megatron-Patch](https://github.com/alibaba/Pai-Megatron-Patch) |
 
 For example:
 
 ```bash
-CUDA_PATH=/path/to/cuda
-COCCL_PATH=/path/to/COCCL_PPoPP_AE
-FRAMEWORK_PATH=/path/to/training/framework
-MODEL_PATH=/path/to/model
-DATASET_PATH=/path/to/dataset
+CUDA_PATH=<path to cuda>
+COCCL_PATH=<path to coccl>
+FRAMEWORK_PATH=<path to training framework>
+MODEL_PATH=<path to model>
+DATASET_PATH=<path to dataset>
 ```
 
 ## 3. Launch Training
@@ -46,4 +46,3 @@ bash train_ling_coccl.sh <nnodes> <gpus_per_node>
 cd Qwen2.5
 bash train_qwen_coccl.sh <nnodes> <gpus_per_node>
 ```
-

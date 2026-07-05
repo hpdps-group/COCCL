@@ -1,5 +1,5 @@
 SHELL := /usr/bin/env bash
-MAKEFALGS += -r
+MAKEFLAGS += -r
 .SUFFIXES:
 .SECONDARY:
 
@@ -13,3 +13,5 @@ all:
 			$(MAKE) -C $$dir SUBOBJDIR=$(SUBOBJDIR); \
 		fi; \
 	done
+
+.PHONY: all

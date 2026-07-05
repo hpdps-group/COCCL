@@ -649,7 +649,7 @@ __hidden cudaError_t launchDequanReduce(void* reducebuff, const void* compbuff, 
     return cudaGetLastError();
 }
 
-extern "C" const ncclCompressor_t sdp4bit{
+extern "C" __attribute__((visibility("default"))) const ncclCompressor_t sdp4bit{
     .name = "sdp4bit",
     .compress = launchQuantize,
     .decompress = launchDequantize,

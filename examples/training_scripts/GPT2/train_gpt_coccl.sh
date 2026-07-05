@@ -14,7 +14,7 @@ export CPLUS_INCLUDE_PATH=$NCCL_HOME/include:$CPLUS_INCLUDE_PATH
 
 echo "$COCCL_PATH"
 
-export NCCL_DEBUG=WRAN
+export NCCL_DEBUG=WARN
 export NCCL_IB_DISABLE=0
 export NCCL_IB_HCA=mlx5_0:1,mlx5_1:1,mlx5_3:1,mlx5_4:1
 export NCCL_SOCKET_IFNAME=bond0

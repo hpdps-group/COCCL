@@ -51,7 +51,7 @@ COCCL is compiled and installed in `build/` unless `BUILDDIR` is set.
 After building COCCL, set the required environment variables:
 
 ```shell
-export COCCL_PATH=$PWD # by default, or the BUILDDIR you set
+export COCCL_PATH=$PWD
 export NCCL_HOME=$COCCL_PATH/build
 export LIBRARY_PATH=$NCCL_HOME/lib:$LIBRARY_PATH
 export LD_LIBRARY_PATH=$NCCL_HOME/lib:$LD_LIBRARY_PATH
@@ -151,13 +151,13 @@ To switch from the NCCL library to the COCCL library, follow the steps below:
    - Verify whether PyTorch now resolves NCCL to the COCCL library.
    
      ```bash
-     ldd /path/to/libtorch.so | grep nccl
+     ldd <path to libtorch.so> | grep nccl
      ```
 
      If the output points to the COCCL build directory, the replacement has succeeded. For example:
    
      ```bash
-     libnccl.so.2 => /path/to/coccl/build/lib/libnccl.so.2
+     libnccl.so.2 => <path to coccl>/build/lib/libnccl.so.2
      ```
    
    - Replace the original NCCL library if `LD_LIBRARY_PATH` does not take effect.
@@ -176,13 +176,13 @@ To switch from the NCCL library to the COCCL library, follow the steps below:
    - Check the PyTorch dependency again after replacement.
    
      ```bash
-     ldd /path/to/libtorch.so | grep nccl
-     ldd /path/to/libtorch_cuda.so | grep nccl
+     ldd <path to libtorch.so> | grep nccl
+     ldd <path to libtorch_cuda.so> | grep nccl
      ```
    
      The output should now resolve `libnccl.so.2` to the COCCL-provided library or to the original path that has been replaced by the COCCL library.
    
-3. For runing script, you can see [trianing examples](examples/training_scripts) for detail.
+3. For running scripts, see [training examples](examples/training_scripts) for details.
 
 
 ## Performance
@@ -202,7 +202,7 @@ At 32 GPUs, COCCL-SDP4Bit achieves 2.60x, 2.58x, 5.66x, and 4.92x speedups on Al
 </p>
 
 | Model | Size | Baseline TFLOPS | COCCL TFLOPS | Speedup |
-| --- | ---: | :--: | ---: | ---: |
+| --- | ---: | ---: | ---: | ---: |
 | GPT | 2.7B | 88.5 | 94.5 | 1.06x |
 | GPT | 6.7B | 148.6 | 163.2 | 1.10x |
 | GPT | 13B | 158.8 | 197.1 | 1.24x |

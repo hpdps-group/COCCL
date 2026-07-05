@@ -5,6 +5,7 @@ MPI_PATH=$2
 COCCL_PATH=$3
 GPUS_PER_NODE=$4
 NNODES=$5
+HOSTFILE=$6
 NGPUS=$(($GPUS_PER_NODE*$NNODES))
 
 # bash build.sh $CUDA_PATH $MPI_PATH $COCCL_PATH
@@ -41,8 +42,9 @@ for ((i=0; i<1;i++))
 do
 echo "------------------------------------------------------alltoall native $gpus H800 GPUs------------------------------------------------------"
 mpirun  -np $gpus \
+        --hostfile $HOSTFILE \
         -x LD_LIBRARY_PATH=$CUDA_HOME/lib64:$NCCL_HOME/lib:$MPI_HOME/lib \
-        -x NCCL_DEBUG=WRAN \
+        -x NCCL_DEBUG=WARN \
         -x NCCL_DEBUG_FILE=ncclcomp.%h \
         -x NCCL_BUFFSIZE=16777216 \
         -x NCCL_ENABLE_COMPRESS=1 \
@@ -73,8 +75,9 @@ for comp in "${COMPRESSORS[@]}"; do
     echo "------------------------------------------------------alltoall comp $gpus H800 GPUs pipe $pipe [compressor=$comp]------------------------------------------------------"
 
     mpirun -np $gpus \
+           --hostfile $HOSTFILE \
            -x LD_LIBRARY_PATH=$CUDA_HOME/lib64:$NCCL_HOME/lib:$MPI_HOME/lib \
-           -x NCCL_DEBUG=WRAN \
+           -x NCCL_DEBUG=WARN \
            -x NCCL_DEBUG_FILE=ncclcomp.%h \
            -x NCCL_BUFFSIZE=16777216 \
            -x NCCL_ENABLE_COMPRESS=1 \
@@ -108,8 +111,9 @@ for ((i=0; i<1;i++))
 do
 echo "------------------------------------------------------allgather native $gpus H800 GPUs------------------------------------------------------"
 mpirun  -np $gpus \
+        --hostfile $HOSTFILE \
         -x LD_LIBRARY_PATH=$CUDA_HOME/lib64:$NCCL_HOME/lib:$MPI_HOME/lib \
-        -x NCCL_DEBUG=WRAN \
+        -x NCCL_DEBUG=WARN \
         -x NCCL_DEBUG_FILE=ncclcomp.%h \
         -x NCCL_BUFFSIZE=16777216 \
         -x NCCL_ENABLE_COMPRESS=1 \
@@ -140,8 +144,9 @@ for ((pipe=1;pipe<=8;pipe=pipe*2))do
     echo "------------------------------------------------------allgather comp $gpus H800 GPUs pipe $pipe [compressor=$comp]------------------------------------------------------"
 
     mpirun -np $gpus \
+           --hostfile $HOSTFILE \
            -x LD_LIBRARY_PATH=$CUDA_HOME/lib64:$NCCL_HOME/lib:$MPI_HOME/lib \
-           -x NCCL_DEBUG=WRAN \
+           -x NCCL_DEBUG=WARN \
            -x NCCL_DEBUG_FILE=ncclcomp.%h \
            -x NCCL_BUFFSIZE=16777216 \
            -x NCCL_ENABLE_COMPRESS=1 \
@@ -174,8 +179,9 @@ for ((i=0; i<1;i++))
 do
 echo "------------------------------------------------------reducescatter native $gpus H800 GPUs------------------------------------------------------"
 mpirun  -np $gpus \
+        --hostfile $HOSTFILE \
         -x LD_LIBRARY_PATH=$CUDA_HOME/lib64:$NCCL_HOME/lib:$MPI_HOME/lib \
-        -x NCCL_DEBUG=WRAN \
+        -x NCCL_DEBUG=WARN \
         -x NCCL_DEBUG_FILE=ncclcomp.%h \
         -x NCCL_BUFFSIZE=16777216 \
         -x NCCL_ENABLE_COMPRESS=1 \
@@ -204,8 +210,9 @@ for ((i=0; i<1;i++))
 do
 echo "------------------------------------------------------reducescatter comp ring $gpus H800 GPUs[compressor=$comp]------------------------------------------------------"
 mpirun  -np $gpus \
+        --hostfile $HOSTFILE \
         -x LD_LIBRARY_PATH=$CUDA_HOME/lib64:$NCCL_HOME/lib:$MPI_HOME/lib \
-        -x NCCL_DEBUG=WRAN \
+        -x NCCL_DEBUG=WARN \
         -x NCCL_DEBUG_FILE=ncclcomp.%h \
         -x NCCL_BUFFSIZE=16777216 \
         -x NCCL_ENABLE_COMPRESS=1 \
@@ -235,8 +242,9 @@ for ((i=0; i<1;i++))
 do
 echo "------------------------------------------------------reducescatter comp oneshot $gpus H800 GPUs pipe $pipe [compressor=$comp]------------------------------------------------------"
 mpirun  -np $gpus \
+        --hostfile $HOSTFILE \
         -x LD_LIBRARY_PATH=$CUDA_HOME/lib64:$NCCL_HOME/lib:$MPI_HOME/lib \
-        -x NCCL_DEBUG=WRAN \
+        -x NCCL_DEBUG=WARN \
         -x NCCL_DEBUG_FILE=ncclcomp.%h \
         -x NCCL_BUFFSIZE=16777216 \
         -x NCCL_ENABLE_COMPRESS=1 \
@@ -266,8 +274,9 @@ for ((i=0; i<1;i++))
 do
 echo "------------------------------------------------------reducescatter comp twoshot new overlap  $gpus H800 GPUs pipe $pipe [compressor=$comp]------------------------------------------------------"
 mpirun  -np $gpus \
+        --hostfile $HOSTFILE \
         -x LD_LIBRARY_PATH=$CUDA_HOME/lib64:$NCCL_HOME/lib:$MPI_HOME/lib \
-        -x NCCL_DEBUG=WRAN \
+        -x NCCL_DEBUG=WARN \
         -x NCCL_DEBUG_FILE=ncclcomp.%h \
         -x NCCL_BUFFSIZE=16777216 \
         -x NCCL_ENABLE_COMPRESS=1 \
@@ -301,8 +310,9 @@ for ((i=0; i<1;i++))
 do
 echo "------------------------------------------------------allreduce native $gpus H800 GPUs------------------------------------------------------"
 mpirun  -np $gpus \
+        --hostfile $HOSTFILE \
         -x LD_LIBRARY_PATH=$CUDA_HOME/lib64:$NCCL_HOME/lib:$MPI_HOME/lib \
-        -x NCCL_DEBUG=WRAN \
+        -x NCCL_DEBUG=WARN \
         -x NCCL_DEBUG_FILE=ncclcomp.%h \
         -x NCCL_BUFFSIZE=16777216 \
         -x NCCL_ENABLE_COMPRESS=1 \
@@ -332,8 +342,9 @@ for ((i=0; i<1;i++))
 do
 echo "------------------------------------------------------allreduce comp ring $gpus H800 GPUs[compressor=$comp]------------------------------------------------------"
 mpirun  -np $gpus \
+        --hostfile $HOSTFILE \
         -x LD_LIBRARY_PATH=$CUDA_HOME/lib64:$NCCL_HOME/lib:$MPI_HOME/lib \
-        -x NCCL_DEBUG=WRAN \
+        -x NCCL_DEBUG=WARN \
         -x NCCL_DEBUG_FILE=ncclcomp.%h \
         -x NCCL_BUFFSIZE=16777216 \
         -x NCCL_ENABLE_COMPRESS=1 \
@@ -361,8 +372,9 @@ for ((i=0; i<1;i++))
 do
 echo "------------------------------------------------------allreduce comp oneshot $gpus H800 GPUs[compressor=$comp]------------------------------------------------------"
 mpirun  -np $gpus \
+        --hostfile $HOSTFILE \
         -x LD_LIBRARY_PATH=$CUDA_HOME/lib64:$NCCL_HOME/lib:$MPI_HOME/lib \
-        -x NCCL_DEBUG=WRAN \
+        -x NCCL_DEBUG=WARN \
         -x NCCL_DEBUG_FILE=ncclcomp.%h \
         -x NCCL_BUFFSIZE=16777216 \
         -x NCCL_ENABLE_COMPRESS=1 \
@@ -390,8 +402,9 @@ for ((i=0; i<1;i++))
 do
 echo "------------------------------------------------------allreduce comp twoshot $gpus H800 GPUs pipe $pipe [compressor=$comp]------------------------------------------------------"
 mpirun  -np $gpus \
+        --hostfile $HOSTFILE \
         -x LD_LIBRARY_PATH=$CUDA_HOME/lib64:$NCCL_HOME/lib:$MPI_HOME/lib \
-        -x NCCL_DEBUG=WRAN \
+        -x NCCL_DEBUG=WARN \
         -x NCCL_DEBUG_FILE=ncclcomp.%h \
         -x NCCL_BUFFSIZE=16777216 \
         -x NCCL_ENABLE_COMPRESS=1 \
@@ -420,8 +433,9 @@ for ((i=0; i<1;i++))
 do
 echo "------------------------------------------------------allreduce comp tripleshot overlap $gpus H800 GPUs pipe $pipe [compressor=$comp]------------------------------------------------------"
 mpirun  -np $gpus \
+        --hostfile $HOSTFILE \
         -x LD_LIBRARY_PATH=$CUDA_HOME/lib64:$NCCL_HOME/lib:$MPI_HOME/lib \
-        -x NCCL_DEBUG=WRAN \
+        -x NCCL_DEBUG=WARN \
         -x NCCL_DEBUG_FILE=ncclcomp.%h \
         -x NCCL_BUFFSIZE=16777216 \
         -x NCCL_ENABLE_COMPRESS=1 \

@@ -311,7 +311,7 @@ __hidden cudaError_t launchDequanReduceQuan(const void* compbuff, void** recompb
 }
 
 
-extern "C" const ncclCompressor_t tahquant{
+extern "C" __attribute__((visibility("default"))) const ncclCompressor_t tahquant{
   .name = "tahquant",
   .compress = launchTahQuant,
   .decompress = launchDequantize,
