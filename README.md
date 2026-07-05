@@ -201,12 +201,49 @@ At 32 GPUs, COCCL-SDP4Bit achieves 2.60x, 2.58x, 5.66x, and 4.92x speedups on Al
   <img src="assets/results/e2e_accuracy.png" alt="End-to-end validation loss with COCCL-3D" width="50%">
 </p>
 
-| Model | Size | Baseline TFLOPS | COCCL TFLOPS | Speedup |
-| --- | ---: | ---: | ---: | ---: |
-| GPT | 2.7B | 88.5 | 94.5 | 1.06x |
-| GPT | 6.7B | 148.6 | 163.2 | 1.10x |
-| GPT | 13B | 158.8 | 197.1 | 1.24x |
-| Qwen2.5 | 7B | 222.3 | 234.2 | 1.05x |
+<div align="center">
+  <table>
+    <thead>
+      <tr>
+        <th align="left">Model</th>
+        <th align="right">Size</th>
+        <th align="right">Baseline TFLOPS</th>
+        <th align="right">COCCL TFLOPS</th>
+        <th align="right">Speedup</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td>GPT</td>
+        <td align="right">2.7B</td>
+        <td align="right">88.5</td>
+        <td align="right">94.5</td>
+        <td align="right">1.06x</td>
+      </tr>
+      <tr>
+        <td>GPT</td>
+        <td align="right">6.7B</td>
+        <td align="right">148.6</td>
+        <td align="right">163.2</td>
+        <td align="right">1.10x</td>
+      </tr>
+      <tr>
+        <td>GPT</td>
+        <td align="right">13B</td>
+        <td align="right">158.8</td>
+        <td align="right">197.1</td>
+        <td align="right">1.24x</td>
+      </tr>
+      <tr>
+        <td>Qwen2.5</td>
+        <td align="right">7B</td>
+        <td align="right">222.3</td>
+        <td align="right">234.2</td>
+        <td align="right">1.05x</td>
+      </tr>
+    </tbody>
+  </table>
+</div>
 
 ## Examples
 
