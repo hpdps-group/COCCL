@@ -24,7 +24,9 @@ __global__ void cached_quantization(int8_t* __restrict__ output_data,
                                     float* __restrict__ params,
                                     const __half* __restrict__ input_data,
                                     int groups,
-                                    int elems_per_group)
+                                    int elems_per_group,
+                                    int64_t elems_per_chunk,
+                                    int64_t elems_per_chunk_padding)
 {
     cg::thread_block tb = cg::this_thread_block();
     cg::thread_block_tile<hw_warp_size> warp = cg::tiled_partition<hw_warp_size>(tb);
@@ -33,8 +35,13 @@ __global__ void cached_quantization(int8_t* __restrict__ output_data,
     const int64_t block_offset =
         (static_cast<int64_t>(tb.group_index().x) * (max_threads / threads_per_group) * elems_per_group) +
         (tb.thread_index().y * elems_per_group);
-    const int elem_offset = tb.thread_index().x * quantize::h_per_load;
-    const int64_t base_offset = block_offset + elem_offset;
+
+    const int elem_offset_group = tb.thread_index().x * quantize::h_per_load;
+    const int64_t padding_offset = block_offset + elem_offset_group;
+    const int64_t chunk_offset = padding_offset / elems_per_chunk_padding;
+    const int64_t elem_offset_chunk = padding_offset % elems_per_chunk_padding;
+    const int64_t base_offset = chunk_offset * elems_per_chunk + elem_offset_chunk;
+
     const int stride = tb.size() * quantize::h_per_load;
 
     const __half* input_base = input_data + base_offset;  //..
@@ -51,7 +58,8 @@ __global__ void cached_quantization(int8_t* __restrict__ output_data,
             mem_access::load_global<quantize::granularity>(
                 iteration_buffer + j * quantize::h2_per_load,
                 input_base + iteration * stride,
-                elem_offset + iteration * stride < elems_per_group);
+                (elem_offset_group + iteration * stride < elems_per_group) &&
+                (elem_offset_chunk + iteration * stride < elems_per_chunk));
         }
     }
 
@@ -71,7 +79,9 @@ __global__ void cached_quantization(int8_t* __restrict__ output_data,
                                     float* __restrict__ params,
                                     const __nv_bfloat16* __restrict__ input_data, // Updated to bfloat16
                                     int groups,
-                                    int elems_per_group)
+                                    int elems_per_group,
+                                    int64_t elems_per_chunk,
+                                    int64_t elems_per_chunk_padding)
 {
     cg::thread_block tb = cg::this_thread_block();
     cg::thread_block_tile<hw_warp_size> warp = cg::tiled_partition<hw_warp_size>(tb);
@@ -80,8 +90,12 @@ __global__ void cached_quantization(int8_t* __restrict__ output_data,
     const int64_t block_offset =
         (static_cast<int64_t>(tb.group_index().x) * (max_threads / threads_per_group) * elems_per_group) +
         (tb.thread_index().y * elems_per_group);
-    const int elem_offset = tb.thread_index().x * quantize::bf_per_load;
-    const int64_t base_offset = block_offset + elem_offset;
+    const int elem_offset_group = tb.thread_index().x * quantize::bf_per_load;
+    const int64_t padding_offset = block_offset + elem_offset_group;
+    const int64_t chunk_offset = padding_offset / elems_per_chunk_padding;
+    const int64_t elem_offset_chunk = padding_offset % elems_per_chunk_padding;
+    const int64_t base_offset = chunk_offset * elems_per_chunk + elem_offset_chunk;
+
     const int stride = tb.size() * quantize::bf_per_load;
 
     const __nv_bfloat16* input_base = input_data + base_offset;
@@ -97,7 +111,8 @@ __global__ void cached_quantization(int8_t* __restrict__ output_data,
             mem_access::load_global<quantize::granularity>(
                 iteration_buffer + j * quantize::bf2_per_load,
                 input_base + iteration * stride,
-                elem_offset + iteration * stride < elems_per_group);
+                (elem_offset_group + iteration * stride < elems_per_group) &&
+                (elem_offset_chunk + iteration * stride < elems_per_chunk));
         }
     }
 
@@ -117,7 +132,9 @@ __global__ void cached_quantization(int8_t* __restrict__ output_data,
                                     float* __restrict__ params,
                                     const float* __restrict__ input_data,
                                     int groups,
-                                    int elems_per_group)
+                                    int elems_per_group,
+                                    int64_t elems_per_chunk,
+                                    int64_t elems_per_chunk_padding)
 {
     cg::thread_block tb = cg::this_thread_block();
     cg::thread_block_tile<hw_warp_size> warp = cg::tiled_partition<hw_warp_size>(tb);
@@ -126,10 +143,12 @@ __global__ void cached_quantization(int8_t* __restrict__ output_data,
     const int64_t block_offset =
         (static_cast<int64_t>(tb.group_index().x) * (max_threads / threads_per_group) * elems_per_group) +
         (tb.thread_index().y * elems_per_group);
-    const int elem_offset = tb.thread_index().x * quantize::f_per_load;
-    const int64_t base_offset = block_offset + elem_offset;
+    const int elem_offset_group = tb.thread_index().x * quantize::f_per_load;
+    const int64_t padding_offset = block_offset + elem_offset_group;
+    const int64_t chunk_offset = padding_offset / elems_per_chunk_padding;
+    const int64_t elem_offset_chunk = padding_offset % elems_per_chunk_padding;
+    const int64_t base_offset = chunk_offset * elems_per_chunk + elem_offset_chunk;
     const int stride = tb.size() * quantize::f_per_load;
-
     const float* input_base = input_data + base_offset;  //..
 
     float local_buffer[UNROLL * internal_unroll * quantize::f_per_load];
@@ -144,7 +163,8 @@ __global__ void cached_quantization(int8_t* __restrict__ output_data,
             mem_access::load_global<quantize::granularity>(
                 iteration_buffer + j * quantize::f_per_load,
                 input_base + iteration * stride,
-                elem_offset + iteration * stride < elems_per_group);
+                (elem_offset_group + iteration * stride < elems_per_group) &&
+                (elem_offset_chunk + iteration * stride < elems_per_chunk));
         }
     }
 
@@ -161,7 +181,7 @@ __global__ void cached_quantization(int8_t* __restrict__ output_data,
                         internal_unroll_l,           \
                         threads_per_group,           \
                         max_threads>                 \
-        <<<grid, block, 0, stream>>>(output_data, params, input_data, groups, elems_per_group);
+        <<<grid, block, 0, stream>>>(output_data, params, input_data, groups, elems_per_group, elems_per_chunk, elems_per_chunk_padding);
 
 #define LAUNCH_CACHED_QUANT(                                                        \
     q_bits, quant_type, unroll_factor_in, internal_unroll_in, threads_per_group_in) \
@@ -185,7 +205,9 @@ __global__ void cached_quantization(int8_t* __restrict__ output_data,
 void launch_quant(int8_t* output_data,
                   float* params,
                   const __half* input_data,
-                  const int groups,
+                //   const int groups,
+                  const int num_chunks,
+                  const int64_t elems_per_chunk,
                   const int elems_per_group,
                   const int num_bits,
                   const quantize::Type quant_type,
@@ -203,6 +225,9 @@ void launch_quant(int8_t* output_data,
     // warp-sized blocks rather than stepping up to 64/96 threads
     const int one_step_threads = next_pow2((elems_per_group + h_per_step - 1) / h_per_step);
     const int threads_per_group = (one_step_threads < max_threads) ? one_step_threads : max_threads;
+    const int groups_per_chunk = (elems_per_chunk + elems_per_group - 1) / elems_per_group;
+    const int64_t elems_per_chunk_padding = (int64_t)groups_per_chunk * elems_per_group;
+    const int groups = num_chunks * groups_per_chunk;
 
     const int groups_per_block =
         is_subblock_schedule ? (max_threads + threads_per_group - 1) / threads_per_group : 1;
@@ -246,7 +271,9 @@ void launch_quant(int8_t* output_data,
 void launch_quant(int8_t* output_data,
                   float* params,
                   const float* input_data,
-                  const int groups,
+                //   const int groups,
+                  const int num_chunks,
+                  const int64_t elems_per_chunk,
                   const int elems_per_group,
                   const int num_bits,
                   const quantize::Type quant_type,
@@ -264,6 +291,9 @@ void launch_quant(int8_t* output_data,
     // warp-sized blocks rather than stepping up to 64/96 threads
     const int one_step_threads = next_pow2((elems_per_group + f_per_step - 1) / f_per_step);
     const int threads_per_group = (one_step_threads < max_threads) ? one_step_threads : max_threads;
+    const int groups_per_chunk = (elems_per_chunk + elems_per_group -1) / elems_per_group;
+    const int64_t elems_per_chunk_padding = (int64_t)groups_per_chunk * elems_per_group;
+    const int groups = num_chunks * groups_per_chunk;
 
     const int groups_per_block =
         is_subblock_schedule ? (max_threads + threads_per_group - 1) / threads_per_group : 1;
@@ -310,7 +340,9 @@ void launch_quant(int8_t* output_data,
 void launch_quant(int8_t* output_data,
                   float* params,
                   const __nv_bfloat16* input_data,  // Changed from __half to __nv_bfloat16
-                  const int groups,
+                //   const int groups,
+                  const int num_chunks,
+                  const int64_t elems_per_chunk,
                   const int elems_per_group,
                   const int num_bits,
                   const quantize::Type quant_type,
@@ -324,6 +356,10 @@ void launch_quant(int8_t* output_data,
 
     const int one_step_threads = next_pow2((elems_per_group + bf_per_step - 1) / bf_per_step);
     const int threads_per_group = (one_step_threads < max_threads) ? one_step_threads : max_threads;
+    const int groups_per_chunk = (elems_per_chunk + elems_per_group -1) / elems_per_group;
+    const int64_t elems_per_chunk_padding = (int64_t)groups_per_chunk * elems_per_group;
+    const int groups = num_chunks * groups_per_chunk;
+
     const int groups_per_block = is_subblock_schedule ? (max_threads + threads_per_group - 1) / threads_per_group : 1;
     const int groups_launch = (groups_per_block + groups - 1) / groups_per_block;
 

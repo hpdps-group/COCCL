@@ -18,9 +18,9 @@ Each example keeps its own path configuration:
 
 | Example | Env file | Training framework path | Upstream repository |
 | --- | --- | --- | --- |
-| GPT-2 | `GPT2/training_envs.sh` | `Megatron_PATH=/path/to/Megatron-LM` | [NVIDIA/Megatron-LM](https://github.com/NVIDIA/Megatron-LM) |
+| GPT-2 | `gpt2/training_envs.sh` | `Megatron_PATH=/path/to/Megatron-LM` | [NVIDIA/Megatron-LM](https://github.com/NVIDIA/Megatron-LM) |
 | LingV2 | `LingV2/training_envs.sh` | `FRAMEWORK_PATH=/path/to/LingV2` | [inclusionAI/Ling-V2](https://github.com/inclusionAI/Ling-V2) |
-| Qwen2.5 | `Qwen2.5/training_envs.sh` | `FRAMEWORK_PATH=/path/to/Pai-Megatron-Patch` | [alibaba/Pai-Megatron-Patch](https://github.com/alibaba/Pai-Megatron-Patch) |
+| Qwen2.5 | `qwen2.5/training_envs.sh` | `FRAMEWORK_PATH=/path/to/Pai-Megatron-Patch` | [alibaba/Pai-Megatron-Patch](https://github.com/alibaba/Pai-Megatron-Patch) |
 
 For example:
 
@@ -46,3 +46,4 @@ bash train_ling_coccl.sh <nnodes> <gpus_per_node>
 cd Qwen2.5
 bash train_qwen_coccl.sh <nnodes> <gpus_per_node>
 ```
+

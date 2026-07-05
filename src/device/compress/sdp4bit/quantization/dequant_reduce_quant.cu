@@ -174,9 +174,9 @@ void launch_dequant_reduce_quant_impl(int8_t* reduced_data,
                                 const float* input_scales,
                                 int out_groups,
                                 int elems_per_out_group,
-                                int64_t elems_per_in_tensor,
                                 int groups_per_in_tensor,
                                 int elems_per_in_group,
+                                int64_t elems_per_in_tensor,
                                 int num_tensors,
                                 cudaStream_t stream)
 {
@@ -186,7 +186,13 @@ void launch_dequant_reduce_quant_impl(int8_t* reduced_data,
         next_pow2((elems_per_in_group + elems_per_thread - 1) / (elems_per_thread));
     // TODO(cmikeh2): Tune this
     const int threads = (one_step_threads < 1024) ? one_step_threads : 1024;
+    // int out_groups = elems_per_in_tensor + elems_per_in_group 
+    // int groups_per_in_tensor = (int)(elems_per_in_tensor + elems_per_in_group - 1) / elems_per_in_group;
 
+    // int outChunkGroups = (inChunkGroups * inGroupCount + outGroupCount - 1) / outGroupCount;
+
+    // int out_groups 
+    // (int)(elems_per_in_tensor + elems_per_out_group - 1) / elems_per_out_group;
     dim3 block(threads);
     dim3 grid(out_groups);
 
@@ -226,9 +232,9 @@ void launch_dequant_reduce_quant_impl(int8_t* reduced_data,
                                                                input_scales,         \
                                                                out_groups,           \
                                                                elems_per_out_group,  \
-                                                               elems_per_in_tensor,  \
                                                                groups_per_in_tensor, \
                                                                elems_per_in_group,   \
+                                                               elems_per_in_tensor,  \
                                                                num_gpus,             \
                                                                stream);
 
@@ -242,9 +248,9 @@ void launch_dequant_reduce_quant(int8_t* reduced_data,
                            quantize::Type quant_type,
                            int out_groups,
                            int elems_per_out_group,
-                           int64_t elems_per_in_tensor,
                            int groups_per_in_tensor,
                            int elems_per_in_group,
+                           int64_t elems_per_in_tensor,
                            cudaStream_t stream)
 {
     if (quant_type == quantize::Type::Symmetric) {

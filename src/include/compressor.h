@@ -24,7 +24,7 @@ typedef struct {
     //   - compDatatype: pointer of compressed datatype (compressor will return the datatype of the compressed buffer)
     //
     cudaError_t (*compress)(const void* orgbuff, void** compbuff, const size_t orgChunkCount, ncclDataType_t orgDayatype, 
-                size_t* compChunkCount, ncclDataType_t* compDatatype, const size_t numChunks, void* config, 
+                size_t* compChunkCount, ncclDataType_t* compDatatype, const size_t numChunks, const int rank, void* config, 
                 cudaMemPool_t compMemPool, cudaStream_t stream);
 
     // Decompress 

@@ -91,10 +91,11 @@ DST_DIR := $(BUILDDIR)
 SRC_FILES := $(wildcard *.cu)
 OBJ_FILES := $(SRC_FILES:%.cu=${DST_DIR}/%.o)
 BIN_FILES_LIST := all_reduce all_gather broadcast reduce_scatter reduce alltoall scatter gather sendrecv hypercube \
-alltoall_comp alltoall_p2p reduce_scatter_ring reduce_scatter_comp all_gather_comp all_gather_ring all_gather_comp_ring \
-all_reduce_oneShot all_reduce_twoShotall all_reduce_twoShotr0 all_reduce_ring all_reduce_optim all_reduce_comp_ring \
-all_reduce_comp_twoShotall all_reduce_comp_twoShotr0 all_reduce_comp_oneShot all_reduce_comp_optim alltoall_commMS_compMS \
-reduce_scatter_comp_oneshot reduce_scatter_comp_twoshot all_gather_comp_twoshot
+alltoall_comp alltoall_p2p reduce_scatter_ring reduce_scatter_comp all_gather_comp all_gather_ring all_gather_comp_overlap\
+all_reduce_oneshot all_reduce_twoShot all_reduce_ring all_reduce_optim all_reduce_comp_ring all_reduce_comp_twoshot all_reduce_comp_twoshot_overlap\
+all_reduce_comp_oneshot all_reduce_comp_optim alltoall_comp_overlap reduce_scatter_comp_oneshot reduce_scatter_comp_twoshot \
+all_gather_comp_twoshot reduce_scatter_comp_twoshot_new_multi all_reduce_comp_tripleshot_tl_overlap all_reduce_comp_tripleshot sendrecv_comp reduce_scatter_comp_oneshot_overlap \
+reduce_scatter_comp_twoshot_tl_overlap
 BIN_FILES := $(BIN_FILES_LIST:%=${DST_DIR}/%_perf)
 
 build: ${BIN_FILES}

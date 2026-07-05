@@ -13,15 +13,17 @@ __global__ void dequantize_kernel(T* __restrict__ dequant_data,
                                   const int8_t* __restrict__ q_data,
                                   const float* __restrict__ q_params,
                                   int elems_per_group,
+                                  int64_t elems_per_chunk,
+                                  int64_t elems_per_chunk_padding,
                                   int64_t total_elems)
 {
     dequantize::to_global<T, numBits, qType, unroll, threads>(
-        dequant_data, q_data, q_params, elems_per_group, total_elems);
+        dequant_data, q_data, q_params, elems_per_group, elems_per_chunk, elems_per_chunk_padding, total_elems);
 }
 
 #define LAUNCH_DEQUANT_KERNEL(num_bits, q_type)                                          \
     dequantize_kernel<T, num_bits, q_type, unroll, threads><<<grid, block, 0, stream>>>( \
-        dequant_data, q_data, q_params, elems_per_group, total_elems);
+        dequant_data, q_data, q_params, elems_per_group, elems_per_chunk, elems_per_chunk_padding, total_elems);
 
 template <typename T>
 void launch_dequantize_kernel(T* dequant_data,
@@ -30,12 +32,14 @@ void launch_dequantize_kernel(T* dequant_data,
                               quantize::Type q_type,
                               int num_bits,
                               int elems_per_group,
+                              int64_t elems_per_chunk,
                               int64_t total_elems,
                               cudaStream_t stream)
 {
     constexpr int unroll = 8;
     constexpr int threads = 512;
     constexpr int elems_per_block = unroll * threads * dequantize::granularity / (sizeof(T));
+    const int64_t elems_per_chunk_padding = (elems_per_chunk + elems_per_group - 1) / elems_per_group * elems_per_group;
 
     const dim3 block(threads);
     const dim3 grid((total_elems + elems_per_block - 1) / elems_per_block);
@@ -59,6 +63,7 @@ template void launch_dequantize_kernel(__half* dequant_data,
                                        quantize::Type q_type,
                                        int num_bits,
                                        int elems_per_group,
+                                       int64_t elems_per_chunk,
                                        int64_t total_elems,
                                        cudaStream_t stream);
 
@@ -68,6 +73,7 @@ template void launch_dequantize_kernel(float* dequant_data,
                                        quantize::Type q_type,
                                        int num_bits,
                                        int elems_per_group,
+                                       int64_t elems_per_chunk,
                                        int64_t total_elems,
                                        cudaStream_t stream);
 
@@ -78,6 +84,7 @@ template void launch_dequantize_kernel(__nv_bfloat16* dequant_data,
                                        quantize::Type q_type,
                                        int num_bits,
                                        int elems_per_group,
+                                       int64_t elems_per_chunk,
                                        int64_t total_elems,
                                        cudaStream_t stream);
 #endif
