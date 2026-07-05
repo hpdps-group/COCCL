@@ -7,6 +7,9 @@
 #include "ds_kernel_utils.h"
 #include "quantization.h"
 #include "quantization_utils.h"
+#include "fast_hadamard_transform_common.h"
+
+#include <iostream>
 
 namespace cg = cooperative_groups;
 
@@ -100,6 +103,8 @@ DS_D_INLINE void _to_global(T* global_output,
                             const int8_t* data,
                             const float* global_params,
                             const int elems_per_group,
+                            const int64_t elems_per_chunk,
+                            const int64_t elems_per_chunk_padding,
                             const int64_t total_elems)
 {
     cg::thread_block tb = cg::this_thread_block();
@@ -136,16 +141,21 @@ DS_D_INLINE void _to_global(T* global_output,
 
     int8_t local_load_buffer[load_granularity * unroll];
     T local_dequant_buffer[T_per_chunk * unroll];
-
+    // const int64_t elems_per_chunk_padding = (elems_per_chunk + elems_per_group - 1) / elems_per_group * elems_per_group;
     /*
     Note: Splitting this loop in half gave about 3-5% performance increase for reasons that aren't
     totally clear to me, so this is a deliberately weird code structure.
     */
 #pragma unroll
     for (int i = 0; i < unroll; i++) {
-        const int64_t elem_id_iter = elem_id_base + i * store_step_stride;
+        const int64_t elem_id_iter_padding = elem_id_base + i * store_step_stride;
+        const int64_t chunk_id_iter = elem_id_iter_padding / elems_per_chunk_padding;
+        const int64_t elem_id_iter_chunk = elem_id_iter_padding % elems_per_chunk_padding;
+        const int64_t elem_id_iter_true = chunk_id_iter * elems_per_chunk + elem_id_iter_chunk;
 
-        if (elem_id_iter < total_elems) {
+        if (elem_id_iter_true < total_elems && elem_id_iter_chunk < elems_per_chunk) {
+            // printf("elem_id_iter_padding %lld chunk_id_iter %lld elem_id_iter_chunk %lld elem_id_iter_true %lld\n", 
+            //     elem_id_iter_padding, chunk_id_iter, elem_id_iter_chunk, elem_id_iter_true);
             // mem_access::load_global<load_granularity>(local_load_buffer + i * load_granularity,
             //                                           load_base + i * load_step_stride);
             const int64_t quant_step = (i * load_step_stride) * (8 / numBits) / elems_per_group * params_size;
@@ -157,19 +167,28 @@ DS_D_INLINE void _to_global(T* global_output,
 
 #pragma unroll
     for (int i = 0; i < unroll; i++) {
-        const int64_t elem_id_iter = elem_id_base + i * store_step_stride;
-        if (elem_id_iter < total_elems) {
+        // const int64_t elem_id_iter = elem_id_base + i * store_step_stride;
+        const int64_t elem_id_iter_padding = elem_id_base + i * store_step_stride;
+        const int64_t chunk_id_iter = elem_id_iter_padding / elems_per_chunk_padding;
+        const int64_t elem_id_iter_chunk = elem_id_iter_padding % elems_per_chunk_padding;
+        const int64_t elem_id_iter_true = chunk_id_iter * elems_per_chunk + elem_id_iter_chunk;
+
+        
+        if (elem_id_iter_true < total_elems && elem_id_iter_chunk < elems_per_chunk) {
+            // printf("aaaaaaa\n");
+            // printf("elem_id_iter_padding %lld elem_id_iter_true %lld\n", elem_id_iter_padding, elem_id_iter_true);
             // TODO(cmikeh2): Can we amortize this division? Perform once on the first iteration and
             // use indexing math to do division free interpolation of the successive groups?
             // const int group_index = elem_id_iter / elems_per_group;
             // Params<qType, numBits> q_params(global_params, group_index);
-            const int64_t group_index = (elem_id_iter / elems_per_group) * (params_size + elems_per_group / (8 / numBits));
+            const int64_t group_index = (elem_id_iter_padding / elems_per_group) * (params_size + elems_per_group / (8 / numBits));
             Params<qType, numBits> q_params((float*)(data + group_index), 0);
+
 
             chunk<T, numBits, qType>(local_dequant_buffer + i * T_per_chunk,
                                      local_load_buffer + i * load_granularity,
                                      q_params);
-            mem_access::store_global<granularity>(global_output + elem_id_iter,
+            mem_access::store_global<granularity>(global_output + elem_id_iter_true,
                                                   local_dequant_buffer + i * T_per_chunk);
         }
     }
@@ -180,11 +199,138 @@ DS_D_INLINE void to_global(T* global_output,
                            const int8_t* data,
                            const float* global_params,
                            const int elems_per_group,
+                           const int64_t elems_per_chunk,
+                           const int64_t elems_per_chunk_padding,
                            const int64_t total_elems)
 {
     if constexpr (numBits == 4 || numBits == 8) {
         _to_global<T, numBits, qType, unroll, threads>(
-            global_output, data, global_params, elems_per_group, total_elems);
+            global_output, data, global_params, elems_per_group, elems_per_chunk, elems_per_chunk_padding, total_elems);
+    } else if constexpr (numBits == 3) {
+        // TODO(cmikeh2): Need this implementation
+        assert(false);
+    } else {
+        assert(false);
+    }
+}
+
+
+template <typename T, int numBits, Type qType, int unroll, int threads>
+DS_D_INLINE void _to_global_ht(T* global_output,
+                            const int8_t* data,
+                            const float* global_params,
+                            const int elems_per_group,
+                            const int64_t elems_per_chunk,
+                            const int64_t elems_per_chunk_padding,
+                            const int64_t total_elems)
+{
+    cg::thread_block tb = cg::this_thread_block();
+    cg::thread_block_tile<hw_warp_size> warp = cg::tiled_partition<hw_warp_size>(tb);
+
+    // Load constants
+    // TODO(cmikeh2): Refactor into functions?
+    constexpr int load_granularity = (granularity / (sizeof(T))) / (numBits == 8 ? 1 : 2);
+    constexpr int load_step_stride = load_granularity * threads;
+    constexpr int load_block_stride = load_step_stride * unroll;
+
+    // Store constants
+    constexpr int T_per_chunk = granularity / sizeof(T);
+    constexpr int store_step_stride = T_per_chunk * threads;
+    constexpr int store_block_stride = store_step_stride * unroll;
+
+    // Load offsets
+    const int64_t load_block_offset = tb.group_index().x * load_block_stride;
+    // Note: we can use `load_granularity` since the dtype is `int8_t`.
+    const int load_thread_offset = tb.thread_index().x * load_granularity;
+
+    const int params_size = (sizeof(T) < 4) ? 2 * sizeof(float) : (qType == Type::Asymmetric ? 2 : 1) * sizeof(float);
+
+    const int64_t quan_offset_base = ((load_block_offset + load_thread_offset) * (8 / numBits) / elems_per_group + 1) * params_size;
+
+    // const int64_t quant_offset = (qType == Type::Asymmetric ? 2 : 1) * sizeof(float);
+
+    const int8_t* load_base = data + load_block_offset + load_thread_offset + quan_offset_base;
+
+    // Store offsets
+    const int64_t store_block_offset = tb.group_index().x * store_block_stride;
+    const int store_thread_offset = tb.thread_index().x * T_per_chunk;
+    const int64_t elem_id_base = store_block_offset + store_thread_offset;
+
+    int8_t local_load_buffer[load_granularity * unroll];
+    T local_dequant_buffer[T_per_chunk * unroll];
+    // const int64_t elems_per_chunk_padding = (elems_per_chunk + elems_per_group - 1) / elems_per_group * elems_per_group;
+
+
+    /*
+    Note: Splitting this loop in half gave about 3-5% performance increase for reasons that aren't
+    totally clear to me, so this is a deliberately weird code structure.
+    */
+#pragma unroll
+    for (int i = 0; i < unroll; i++) {
+        // const int64_t elem_id_iter = elem_id_base + i * store_step_stride;
+
+        const int64_t elem_id_iter_padding = elem_id_base + i * store_step_stride;
+        const int64_t chunk_id_iter = elem_id_iter_padding / elems_per_chunk_padding;
+        const int64_t elem_id_iter_chunk = elem_id_iter_padding % elems_per_chunk_padding;
+        const int64_t elem_id_iter_true = chunk_id_iter * elems_per_chunk + elem_id_iter_chunk;
+
+        if (elem_id_iter_true < total_elems && elem_id_iter_chunk < elems_per_chunk) {
+            // mem_access::load_global<load_granularity>(local_load_buffer + i * load_granularity,
+            //                                           load_base + i * load_step_stride);
+            const int64_t quant_step = (i * load_step_stride) * (8 / numBits) / elems_per_group * params_size;
+
+            mem_access::load_global<load_granularity>(local_load_buffer + i * load_granularity,
+                                                      load_base + i * load_step_stride + quant_step);
+        }
+    }
+    constexpr int kNChunks = 1;
+    constexpr int kNElts = T_per_chunk;
+    constexpr int kLogNElts = cilog2(kNElts);
+    constexpr int kNWarps = 32 / kNElts;
+    constexpr int kLogWarpSize = cilog2(kNWarps);
+#pragma unroll
+    for (int i = 0; i < unroll; i++) {
+        // const int64_t elem_id_iter = elem_id_base + i * store_step_stride;
+
+        const int64_t elem_id_iter_padding = elem_id_base + i * store_step_stride;
+        const int64_t chunk_id_iter = elem_id_iter_padding / elems_per_chunk_padding;
+        const int64_t elem_id_iter_chunk = elem_id_iter_padding % elems_per_chunk_padding;
+        const int64_t elem_id_iter_true = chunk_id_iter * elems_per_chunk + elem_id_iter_chunk;
+
+        if (elem_id_iter_true < total_elems && elem_id_iter_chunk < elems_per_chunk) {
+            // TODO(cmikeh2): Can we amortize this division? Perform once on the first iteration and
+            // use indexing math to do division free interpolation of the successive groups?
+            // const int group_index = elem_id_iter / elems_per_group;
+            // Params<qType, numBits> q_params(global_params, group_index);
+            const int64_t group_index = (elem_id_iter_padding / elems_per_group);
+            const int64_t group_offset = group_index * (params_size + elems_per_group / (8 / numBits));
+            Params<qType, numBits> q_params((float*)(data + group_offset), 0);
+
+            chunk<T, numBits, qType>(local_dequant_buffer + i * T_per_chunk,
+                                     local_load_buffer + i * load_granularity,
+                                     q_params);
+            T* iteration_cast = local_dequant_buffer + i * T_per_chunk;
+            hadamard_mult_thread_quant<kLogNElts, kNChunks>(iteration_cast);
+            hadamard_mult_warp_quant<kLogWarpSize, 0, kNChunks, kNElts>(iteration_cast);
+            for (int j = 0; j < T_per_chunk; j++) iteration_cast[j] *= 0.03125;
+            mem_access::store_global<granularity>(global_output + elem_id_iter_true,
+                                                  local_dequant_buffer + i * T_per_chunk);
+        }
+    }
+}
+
+template <typename T, int numBits, Type qType, int unroll, int threads>
+DS_D_INLINE void to_global_ht(T* global_output,
+                           const int8_t* data,
+                           const float* global_params,
+                           const int elems_per_group,
+                           const int64_t elems_per_chunk,
+                           const int64_t elems_per_chunk_padding,
+                           const int64_t total_elems)
+{
+    if constexpr (numBits == 4 || numBits == 8) {
+        _to_global_ht<T, numBits, qType, unroll, threads>(
+            global_output, data, global_params, elems_per_group, elems_per_chunk, elems_per_chunk_padding, total_elems);
     } else if constexpr (numBits == 3) {
         // TODO(cmikeh2): Need this implementation
         assert(false);

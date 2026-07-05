@@ -30,11 +30,11 @@ testResult_t ReduceScatterInitData(struct threadArgs* args, ncclDataType_t type,
     CUDACHECK(cudaMemset(args->recvbuffs[i], 0, args->expectedBytes));
     void* data = in_place ? args->recvbuffs[i] : args->sendbuffs[i];
     TESTCHECK(InitData(data, sendcount, 0, type, op, rep, nranks, rank));
-    // float* hostdata = (float*)malloc(sendcount*wordSize(type));
+    // __nv_bfloat16* hostdata = (__nv_bfloat16*)malloc(sendcount*wordSize(type));
     // for(int ii=0; ii<sendcount; ii++){
     //   //  hostdata[ii] = (float) (rank*sendcount + ii);
-    //   hostdata[ii] = (float) (rank*sendcount + ii);
-    //   }
+    //   hostdata[ii] = (__nv_bfloat16) (rank*sendcount + ii);
+    // }
     // CUDACHECK(cudaMemcpy(data, hostdata, sendcount*wordSize(type), cudaMemcpyHostToDevice));
     CUDACHECK(cudaMemcpy(args->expected[i], args->recvbuffs[i], args->expectedBytes, cudaMemcpyDefault));
     TESTCHECK(InitDataReduce(args->expected[i], recvcount, rank*recvcount, type, op, rep, nranks));

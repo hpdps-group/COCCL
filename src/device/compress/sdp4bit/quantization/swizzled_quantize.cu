@@ -16,6 +16,7 @@ constexpr int min_threads = 32;
 
 constexpr int step_granularity = 2;
 constexpr int h_per_step = step_granularity * quantize::h_per_load;
+constexpr int bf_per_step = step_granularity * quantize::bf_per_load;
 constexpr int f_per_step = step_granularity * quantize::f_per_load;
 
 }  // namespace swiz_quant
@@ -25,6 +26,8 @@ __global__ void swizzled_quant_kernel(int8_t* quantized_data,
                                       float* quantized_scales,
                                       const __half* uncompressed_data,
                                       int elems_per_group,
+                                      int64_t elems_per_chunk,
+                                      int64_t elems_per_chunk_padding,
                                       int nodes,
                                       int devices_per_node)
 {
@@ -34,8 +37,15 @@ __global__ void swizzled_quant_kernel(int8_t* quantized_data,
     // Indexing offsets, same as normal quantization for in-case
     const int64_t block_rank = blockIdx.x + blockIdx.y * gridDim.x + blockIdx.z * gridDim.x * gridDim.y;
     const int64_t block_offset = block_rank * elems_per_group;
-    const int elem_offset = tb.thread_index().x * quantize::h_per_load;
-    const int64_t base_offset = block_offset + elem_offset;
+    // const int elem_offset = tb.thread_index().x * quantize::h_per_load;
+    // const int64_t base_offset = block_offset + elem_offset;
+
+    const int elem_offset_group = tb.thread_index().x * quantize::h_per_load;
+    const int64_t padding_offset = block_offset + elem_offset_group;
+    const int64_t chunk_offset = padding_offset / elems_per_chunk_padding;
+    const int64_t elem_offset_chunk = padding_offset % elems_per_chunk_padding;
+    const int64_t base_offset = chunk_offset * elems_per_chunk + elem_offset_chunk;
+
     const int stride = tb.size() * quantize::h_per_load;
     const __half* input_base = uncompressed_data + base_offset;
 
@@ -48,7 +58,10 @@ __global__ void swizzled_quant_kernel(int8_t* quantized_data,
         __half2* iteration_buffer = local_buffer + i * quantize::h2_per_load;
 
         mem_access::load_global<quantize::granularity>(
-            iteration_buffer, input_base + i * stride, elem_offset + i * stride < elems_per_group);
+            iteration_buffer, 
+            input_base + i * stride, 
+            (elem_offset_group + i * stride < elems_per_group) && 
+            (elem_offset_chunk + i * stride < elems_per_chunk));
 
 #pragma unroll
         for (int j = 0; j < quantize::h2_per_load; j++) { stats.update(iteration_buffer[j]); }
@@ -65,7 +78,7 @@ __global__ void swizzled_quant_kernel(int8_t* quantized_data,
     constexpr int out_scalar_effect = 8 / numBits;
     const int64_t out_block_rank = output_partition * gridDim.x + blockIdx.x;
     const int64_t out_block_offset = out_block_rank * elems_per_group / out_scalar_effect;
-    const int64_t out_base_offset = out_block_offset + elem_offset / out_scalar_effect;
+    const int64_t out_base_offset = out_block_offset + elem_offset_group / out_scalar_effect;
     int8_t* out_base = quantized_data + out_base_offset;
 
     const int out_stride = stride / out_scalar_effect;
@@ -80,7 +93,7 @@ __global__ void swizzled_quant_kernel(int8_t* quantized_data,
 
 #pragma unroll
     for (int i = 0; i < totalChunks; i++) {
-        if (i * stride + elem_offset < elems_per_group) {
+        if (i * stride + elem_offset_group < elems_per_group) {
             int8_t local_output[quantize::h_per_load / out_scalar_effect];
             quantize::_chunk<numBits, quantType>(
                 local_output, local_buffer + i * quantize::h2_per_load, params);
@@ -91,11 +104,98 @@ __global__ void swizzled_quant_kernel(int8_t* quantized_data,
     }
 }
 
+#ifdef BF16_AVAILABLE
 template <int numBits, int totalChunks, int threads, quantize::Type quantType>
-__global__ void swizzled_quant_kernel_float(int8_t* quantized_data,
+__global__ void swizzled_quant_kernel(int8_t* quantized_data,
+                                      float* quantized_scales,
+                                      const __nv_bfloat16* uncompressed_data,
+                                      int elems_per_group,
+                                      int64_t elems_per_chunk,
+                                      int64_t elems_per_chunk_padding,
+                                      int nodes,
+                                      int devices_per_node)
+{
+    cg::thread_block tb = cg::this_thread_block();
+    cg::thread_block_tile<hw_warp_size> warp = cg::tiled_partition<hw_warp_size>(tb);
+
+    // Indexing offsets, same as normal quantization for in-case
+    const int64_t block_rank = blockIdx.x + blockIdx.y * gridDim.x + blockIdx.z * gridDim.x * gridDim.y;
+    const int64_t block_offset = block_rank * elems_per_group;
+    // const int elem_offset = tb.thread_index().x * quantize::bf_per_load;
+    // const int64_t base_offset = block_offset + elem_offset;
+
+    const int elem_offset_group = tb.thread_index().x * quantize::bf_per_load;
+    const int64_t padding_offset = block_offset + elem_offset_group;
+    const int64_t chunk_offset = padding_offset / elems_per_chunk_padding;
+    const int64_t elem_offset_chunk = padding_offset % elems_per_chunk_padding;
+    const int64_t base_offset = chunk_offset * elems_per_chunk + elem_offset_chunk;
+
+    const int stride = tb.size() * quantize::bf_per_load;
+    const __nv_bfloat16* input_base = uncompressed_data + base_offset;
+
+    // Local buffer
+    __nv_bfloat162 local_buffer[totalChunks * quantize::bf2_per_load];
+
+    quantize::GroupStats<quantType, __nv_bfloat162> stats;
+#pragma unroll
+    for (int i = 0; i < totalChunks; i++) {
+        __nv_bfloat162* iteration_buffer = local_buffer + i * quantize::bf2_per_load;
+
+        mem_access::load_global<quantize::granularity>(
+            iteration_buffer, 
+            input_base + i * stride, 
+            (elem_offset_group + i * stride < elems_per_group) && 
+            (elem_offset_chunk + i * stride < elems_per_chunk));
+
+#pragma unroll
+        for (int j = 0; j < quantize::bf2_per_load; j++) { stats.update(iteration_buffer[j]); }
+    }
+
+    auto params = stats.template get_params<numBits, threads>(tb, warp);
+
+    const int partition_id = blockIdx.z;
+    const int partition_offset = partition_id / devices_per_node;
+    const int partition_base = (partition_id % devices_per_node) * nodes;
+    const int pipelining_offset = blockIdx.y * (devices_per_node * nodes);
+    const int output_partition = (pipelining_offset + partition_base + partition_offset);
+
+    constexpr int out_scalar_effect = 8 / numBits;
+    const int64_t out_block_rank = output_partition * gridDim.x + blockIdx.x;
+    const int64_t out_block_offset = out_block_rank * elems_per_group / out_scalar_effect;
+    const int64_t out_base_offset = out_block_offset + elem_offset_group / out_scalar_effect;
+    int8_t* out_base = quantized_data + out_base_offset;
+
+    const int out_stride = stride / out_scalar_effect;
+    constexpr int num_int8_out = quantize::bf_per_load / out_scalar_effect;
+
+    if (tb.thread_index().x == 0) { 
+        const int64_t params_size = 2 * sizeof(float);
+        const int64_t params_offset = out_block_rank * (params_size + elems_per_group / out_scalar_effect);
+        // params.store(quantized_scales, out_block_rank);
+        params.store(reinterpret_cast<float*>(quantized_data + params_offset), 0);  
+    }
+
+#pragma unroll
+    for (int i = 0; i < totalChunks; i++) {
+        if (i * stride + elem_offset_group < elems_per_group) {
+            int8_t local_output[quantize::bf_per_load / out_scalar_effect];
+            quantize::_chunk<numBits, quantType>(
+                local_output, local_buffer + i * quantize::bf2_per_load, params);
+            const int64_t params_size = 2 * sizeof(float);
+            const int64_t quant_offset = (out_base_offset + i * out_stride) / (elems_per_group / out_scalar_effect) * params_size + params_size;
+            mem_access::store_global<num_int8_out>(out_base + i * out_stride + quant_offset, local_output);
+        }
+    }
+}
+
+#endif
+template <int numBits, int totalChunks, int threads, quantize::Type quantType>
+__global__ void swizzled_quant_kernel(int8_t* quantized_data,
                                             float* quantized_scales,
                                             const float* uncompressed_data,
                                             int elems_per_group,
+                                            int64_t elems_per_chunk,
+                                            int64_t elems_per_chunk_padding,
                                             int nodes,
                                             int devices_per_node)
 {
@@ -105,8 +205,14 @@ __global__ void swizzled_quant_kernel_float(int8_t* quantized_data,
     // Indexing offsets, same as normal quantization for in-case
     const int64_t block_rank = blockIdx.x + blockIdx.y * gridDim.x + blockIdx.z * gridDim.x * gridDim.y;
     const int64_t block_offset = block_rank * elems_per_group;
-    const int elem_offset = tb.thread_index().x * quantize::f_per_load;
-    const int64_t base_offset = block_offset + elem_offset;
+    // const int elem_offset = tb.thread_index().x * quantize::f_per_load;
+    // const int64_t base_offset = block_offset + elem_offset;
+    const int elem_offset_group = tb.thread_index().x * quantize::f_per_load;
+    const int64_t padding_offset = block_offset + elem_offset_group;
+    const int64_t chunk_offset = padding_offset / elems_per_chunk_padding;
+    const int64_t elem_offset_chunk = padding_offset % elems_per_chunk_padding;
+    const int64_t base_offset = chunk_offset * elems_per_chunk + elem_offset_chunk;
+
     const int stride = tb.size() * quantize::f_per_load;
     const float* input_base = uncompressed_data + base_offset;
 
@@ -119,7 +225,10 @@ __global__ void swizzled_quant_kernel_float(int8_t* quantized_data,
         float* iteration_buffer = local_buffer + i * quantize::f_per_load;
 
         mem_access::load_global<quantize::granularity>(
-            iteration_buffer, input_base + i * stride, elem_offset + i * stride < elems_per_group);
+            iteration_buffer, 
+            input_base + i * stride, 
+            (elem_offset_group + i * stride < elems_per_group) && 
+            (elem_offset_chunk + i * stride < elems_per_chunk));
 
 #pragma unroll
         for (int j = 0; j < quantize::f_per_load; j++) { stats.update(iteration_buffer[j]); }
@@ -136,7 +245,7 @@ __global__ void swizzled_quant_kernel_float(int8_t* quantized_data,
     constexpr int out_scalar_effect = 8 / numBits;
     const int64_t out_block_rank = output_partition * gridDim.x + blockIdx.x;
     const int64_t out_block_offset = out_block_rank * elems_per_group / out_scalar_effect;
-    const int64_t out_base_offset = out_block_offset + elem_offset / out_scalar_effect;
+    const int64_t out_base_offset = out_block_offset + elem_offset_group / out_scalar_effect;
     int8_t* out_base = quantized_data + out_base_offset;
 
     const int out_stride = stride / out_scalar_effect;
@@ -153,7 +262,7 @@ __global__ void swizzled_quant_kernel_float(int8_t* quantized_data,
 
 #pragma unroll
     for (int i = 0; i < totalChunks; i++) {
-        if (i * stride + elem_offset < elems_per_group) {
+        if (i * stride + elem_offset_group < elems_per_group) {
             int8_t local_output[quantize::f_per_load / out_scalar_effect];
             quantize::_chunk<numBits, quantType>(
                 local_output, local_buffer + i * quantize::f_per_load, params);
@@ -167,10 +276,13 @@ __global__ void swizzled_quant_kernel_float(int8_t* quantized_data,
     }
 }
 
+// #define LAUNCH_SWIZZLE_QUANT_FLOAT(total_chunks, threads)                                           \
+//     swizzled_quant_kernel_float<numBits, total_chunks, threads, qType><<<grid, block, 0, stream>>>( \
+//         q_data, q_scales, input_data, elems_per_group, nodes, devices_per_node);
 
 #define LAUNCH_SWIZZLE_QUANT(total_chunks, threads)                                           \
     swizzled_quant_kernel<numBits, total_chunks, threads, qType><<<grid, block, 0, stream>>>( \
-        q_data, q_scales, input_data, elems_per_group, nodes, devices_per_node);
+        q_data, q_scales, input_data, elems_per_group, elems_per_chunk, elems_per_chunk_padding, nodes, devices_per_node);
 /*
 Swizzled quantization reorganizes the quantized groups in order to better facilitate
 communication. As an example of the partitioning scheme we have the following example
@@ -193,7 +305,9 @@ template <int numBits, quantize::Type qType>
 void launch_swizzled_quant_impl(int8_t* q_data,
                                 float* q_scales,
                                 const __half* input_data,
-                                int groups,
+                                // int groups,
+                                int num_chunks,
+                                int64_t elems_per_chunk,
                                 int elems_per_group,
                                 int pipelining,
                                 int nodes,
@@ -206,6 +320,10 @@ void launch_swizzled_quant_impl(int8_t* q_data,
                                                                          : swiz_quant::max_threads;
     const int threads = (max_threads < swiz_quant::min_threads) ? swiz_quant::min_threads
                                                                 : max_threads;
+
+    const int groups_per_chunk = (elems_per_chunk + elems_per_group -1) / elems_per_group;
+    const int64_t elems_per_chunk_padding = (int64_t)groups_per_chunk * elems_per_group;
+    const int groups = num_chunks * groups_per_chunk;
 
     dim3 block(threads);
     const int groups_per_partition = groups / (nodes * devices_per_node);
@@ -243,9 +361,9 @@ void launch_swizzled_quant_impl(int8_t* q_data,
     }
 }
 
-#define LAUNCH_SWIZZLE_QUANT_FLOAT(total_chunks, threads)                                           \
-    swizzled_quant_kernel_float<numBits, total_chunks, threads, qType><<<grid, block, 0, stream>>>( \
-        q_data, q_scales, input_data, elems_per_group, nodes, devices_per_node);
+// #define LAUNCH_SWIZZLE_QUANT_FLOAT(total_chunks, threads)                                           \
+//     swizzled_quant_kernel_float<numBits, total_chunks, threads, qType><<<grid, block, 0, stream>>>( \
+//         q_data, q_scales, input_data, elems_per_group, nodes, devices_per_node);
 /*
 Swizzled quantization reorganizes the quantized groups in order to better facilitate
 communication. As an example of the partitioning scheme we have the following example
@@ -268,7 +386,9 @@ template <int numBits, quantize::Type qType>
 void launch_swizzled_quant_impl(int8_t* q_data,
                                 float* q_scales,
                                 const float* input_data,
-                                int groups,
+                                // int groups,
+                                int num_chunks,
+                                int64_t elems_per_chunk,
                                 int elems_per_group,
                                 int pipelining,
                                 int nodes,
@@ -281,6 +401,10 @@ void launch_swizzled_quant_impl(int8_t* q_data,
                                                                          : swiz_quant::max_threads;
     const int threads = (max_threads < swiz_quant::min_threads) ? swiz_quant::min_threads
                                                                 : max_threads;
+    
+    const int groups_per_chunk = (elems_per_chunk + elems_per_group -1) / elems_per_group;
+    const int64_t elems_per_chunk_padding = (int64_t)groups_per_chunk * elems_per_group;
+    const int groups = num_chunks * groups_per_chunk;
 
     dim3 block(threads);
     const int groups_per_partition = groups / (nodes * devices_per_node);
@@ -296,33 +420,98 @@ void launch_swizzled_quant_impl(int8_t* q_data,
     assert(total_unroll % 2 == 0);
 
     if (threads == 32) {
-        LAUNCH_SWIZZLE_QUANT_FLOAT(2, 32);
+        LAUNCH_SWIZZLE_QUANT(2, 32);
     } else if (threads == 64) {
-        LAUNCH_SWIZZLE_QUANT_FLOAT(2, 64);
+        LAUNCH_SWIZZLE_QUANT(2, 64);
     } else if (threads == 128) {
-        LAUNCH_SWIZZLE_QUANT_FLOAT(2, 128);
+        LAUNCH_SWIZZLE_QUANT(2, 128);
     } else if (threads == 256) {
-        LAUNCH_SWIZZLE_QUANT_FLOAT(2, 256);
+        LAUNCH_SWIZZLE_QUANT(2, 256);
     } else if (threads == 512) {
         if (total_unroll == 2) {
-            LAUNCH_SWIZZLE_QUANT_FLOAT(2, 512);
+            LAUNCH_SWIZZLE_QUANT(2, 512);
         } else if (total_unroll == 4) {
-            LAUNCH_SWIZZLE_QUANT_FLOAT(4, 512);
+            LAUNCH_SWIZZLE_QUANT(4, 512);
         } else if (total_unroll == 6) {
-            LAUNCH_SWIZZLE_QUANT_FLOAT(6, 512);
+            LAUNCH_SWIZZLE_QUANT(6, 512);
         } else if (total_unroll == 8) {
-            LAUNCH_SWIZZLE_QUANT_FLOAT(8, 512);
+            LAUNCH_SWIZZLE_QUANT(8, 512);
         } else if (total_unroll == 10) {
-            LAUNCH_SWIZZLE_QUANT_FLOAT(10, 512);
+            LAUNCH_SWIZZLE_QUANT(10, 512);
         }
     }
 }
+
+
+
+#ifdef BF16_AVAILABLE
+template <int numBits, quantize::Type qType>
+void launch_swizzled_quant_impl(int8_t* q_data,
+                                float* q_scales,
+                                const __nv_bfloat16* input_data,
+                                // int groups,
+                                int num_chunks,
+                                int64_t elems_per_chunk,
+                                int elems_per_group,
+                                int pipelining,
+                                int nodes,
+                                int devices_per_node,
+                                cudaStream_t stream)
+{
+    const int one_step_threads =
+        next_pow2((elems_per_group + swiz_quant::bf_per_step - 1) / swiz_quant::bf_per_step);
+    const int max_threads = (one_step_threads < swiz_quant::max_threads) ? one_step_threads
+                                                                         : swiz_quant::max_threads;
+    const int threads = (max_threads < swiz_quant::min_threads) ? swiz_quant::min_threads
+                                                                : max_threads;
+
+    const int groups_per_chunk = (elems_per_chunk + elems_per_group -1) / elems_per_group;
+    const int64_t elems_per_chunk_padding = (int64_t)groups_per_chunk * elems_per_group;
+    const int groups = num_chunks * groups_per_chunk;
+
+    dim3 block(threads);
+    const int groups_per_partition = groups / (nodes * devices_per_node);
+    assert(groups_per_partition % pipelining == 0);
+    const int contiguous_groups = groups_per_partition / pipelining;
+    const int partitions = nodes * devices_per_node;
+    dim3 grid(contiguous_groups, pipelining, partitions);
+
+    const int elems_per_step = threads * swiz_quant::bf_per_step;
+    const int external_unroll = ((elems_per_group + elems_per_step - 1) / elems_per_step);
+    const int total_unroll = external_unroll * swiz_quant::step_granularity;
+
+    assert(total_unroll % 2 == 0);
+
+    if (threads == 32) {
+        LAUNCH_SWIZZLE_QUANT(2, 32);
+    } else if (threads == 64) {
+        LAUNCH_SWIZZLE_QUANT(2, 64);
+    } else if (threads == 128) {
+        LAUNCH_SWIZZLE_QUANT(2, 128);
+    } else if (threads == 256) {
+        LAUNCH_SWIZZLE_QUANT(2, 256);
+    } else if (threads == 512) {
+        if (total_unroll == 2) {
+            LAUNCH_SWIZZLE_QUANT(2, 512);
+        } else if (total_unroll == 4) {
+            LAUNCH_SWIZZLE_QUANT(4, 512);
+        } else if (total_unroll == 6) {
+            LAUNCH_SWIZZLE_QUANT(6, 512);
+        } else if (total_unroll == 8) {
+            LAUNCH_SWIZZLE_QUANT(8, 512);
+        } else if (total_unroll == 10) {
+            LAUNCH_SWIZZLE_QUANT(10, 512);
+        }
+    }
+}
+#endif
 
 #define DISPATCH_SWIZZLE_QUANT(num_bits, qtype)                   \
     launch_swizzled_quant_impl<num_bits, qtype>(q_data,           \
                                                 q_scales,         \
                                                 input_data,       \
-                                                groups,           \
+                                                num_chunks,           \
+                                                elems_per_chunk,  \
                                                 elems_per_group,  \
                                                 pipelining,       \
                                                 nodes,            \
@@ -334,7 +523,9 @@ void launch_swizzled_quant(int8_t* q_data,
                            const __half* input_data,
                            int num_bits,
                            quantize::Type q_type,
-                           int groups,
+                           // int groups,
+                           int num_chunks,
+                           int64_t elems_per_chunk,
                            int elems_per_group,
                            int pipelining,
                            int nodes,
@@ -361,7 +552,9 @@ void launch_swizzled_quant(int8_t* q_data,
                            const float* input_data,
                            int num_bits,
                            quantize::Type q_type,
-                           int groups,
+                           // int groups,
+                           int num_chunks,
+                           int64_t elems_per_chunk,
                            int elems_per_group,
                            int pipelining,
                            int nodes,
@@ -382,3 +575,35 @@ void launch_swizzled_quant(int8_t* q_data,
         }
     }
 }
+
+
+#ifdef BF16_AVAILABLE
+void launch_swizzled_quant(int8_t* q_data,
+                           float* q_scales,
+                           const __nv_bfloat16* input_data,
+                           int num_bits,
+                           quantize::Type q_type,
+                           // int groups,
+                           int num_chunks,
+                           int64_t elems_per_chunk,
+                           int elems_per_group,
+                           int pipelining,
+                           int nodes,
+                           int devices_per_node,
+                           cudaStream_t stream)
+{
+    if (num_bits == 4) {
+        if (q_type == quantize::Type::Asymmetric) {
+            DISPATCH_SWIZZLE_QUANT(4, quantize::Type::Asymmetric);
+        } else if (q_type == quantize::Type::Symmetric) {
+            DISPATCH_SWIZZLE_QUANT(4, quantize::Type::Symmetric);
+        }
+    } else if (num_bits == 8) {
+        if (q_type == quantize::Type::Asymmetric) {
+            DISPATCH_SWIZZLE_QUANT(8, quantize::Type::Asymmetric);
+        } else if (q_type == quantize::Type::Symmetric) {
+            DISPATCH_SWIZZLE_QUANT(8, quantize::Type::Symmetric);
+        }
+    }
+}
+#endif

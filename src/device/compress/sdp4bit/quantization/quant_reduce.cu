@@ -21,8 +21,9 @@ template <int numBits, int numTensors, int totalChunks, quantize::Type quantType
 __global__ void __launch_bounds__(1024) dequant_reduce(float* reduced_data,
                                                        const int8_t* input_data,
                                                        const float* input_scales,
-                                                       int elems_per_out_group,
+                                                    //    int elems_per_out_group,
                                                        int64_t elems_per_in_tensor,
+                                                       int64_t elems_per_in_tensor_padding,
                                                        int groups_per_in_tensor,
                                                        int elems_per_in_group,
                                                        int num_tensors)
@@ -40,6 +41,7 @@ __global__ void __launch_bounds__(1024) dequant_reduce(float* reduced_data,
 
     const int64_t block_offset = tb.group_index().x * elems_per_in_group;
     const int elem_offset = tb.thread_index().x * elems_per_load;
+
     const int64_t base_offset = block_offset + elem_offset;
     const int stride = tb.group_dim().x * elems_per_load;
 
@@ -67,10 +69,10 @@ __global__ void __launch_bounds__(1024) dequant_reduce(float* reduced_data,
                     int8_t load_buffer[elems_per_load];
 
                     const int64_t params_size = (quantType == quantize::Type::Asymmetric ? 2 : 1) * sizeof(float);
-                    const int64_t quant_offset = (j * elems_per_in_tensor + iter_offset) / elems_per_in_group * params_size + params_size; 
+                    const int64_t quant_offset = (j * elems_per_in_tensor_padding + iter_offset) / elems_per_in_group * params_size + params_size; 
         
                     mem_access::load_global<mem_granularity>(
-                        load_buffer, input_data + j * elems_per_in_tensor + iter_offset + quant_offset);
+                        load_buffer, input_data + j * elems_per_in_tensor_padding + iter_offset + quant_offset);
                     
                     const int64_t params_offset = (j * groups_per_in_tensor + iter_scale_idx) * (params_size + elems_per_in_group);
 
@@ -101,14 +103,14 @@ __global__ void __launch_bounds__(1024) dequant_reduce(float* reduced_data,
                     int8_t load_buffer[elems_per_load];
 
                     const int64_t params_size = (quantType == quantize::Type::Asymmetric ? 2 : 1) * sizeof(float);
-                    const int64_t quant_offset = (j * elems_per_in_tensor + iter_offset) * (8 / numBits) / elems_per_in_group * params_size + params_size; 
+                    const int64_t quant_offset = (j * elems_per_in_tensor_padding + iter_offset) / elems_per_in_group * params_size + params_size; 
 
                     // mem_access::load_global<mem_granularity>(
                     //     load_buffer, input_data + j * elems_per_in_tensor + iter_offset);
                     mem_access::load_global<mem_granularity>(
-                        load_buffer, input_data + j * elems_per_in_tensor + iter_offset + quant_offset);
+                        load_buffer, input_data + j * elems_per_in_tensor_padding + iter_offset + quant_offset);
 
-                    const int64_t params_offset = (j * groups_per_in_tensor + iter_scale_idx) * (params_size + elems_per_in_group / (8 / numBits));
+                    const int64_t params_offset = (j * groups_per_in_tensor + iter_scale_idx) * (params_size + elems_per_in_group);
 
 
                     // quantize::Params<quantType, numBits> params(
@@ -134,7 +136,8 @@ __global__ void __launch_bounds__(1024) dequant_reduce(float* reduced_data,
 #pragma unroll
     for (int i = 0; i < totalChunks; i++) {
         const int64_t iter_offset = (i * stride + base_offset) * (8 / numBits);
-        if (i * stride + elem_offset < elems_per_in_group) {
+        // const int64_t 
+        if ((i * stride + elem_offset < elems_per_in_group) && (iter_offset < elems_per_in_tensor  * (8 / numBits))) {
             mem_access::store_global<16>(reduced_data + iter_offset, local_buffer + i * storage_values); //for each thread, each chunk operate on 16bytes, 4 float32 elements. 
                                                                                                         //If you want to change 16, you should also change totalChunks
         }
@@ -152,8 +155,8 @@ int32_t pow2_round(int32_t raw_value)
         <<<grid, block, 0, stream>>>(reduced_data,             \
                                      input_data,               \
                                      input_scales,             \
-                                     elems_per_out_group,      \
                                      elems_per_in_tensor,      \
+                                     elems_per_in_tensor_padding, \
                                      groups_per_in_tensor,     \
                                      elems_per_in_group,       \
                                      num_tensors);
@@ -162,10 +165,10 @@ template <int numBits, int numTensors, quantize::Type quantType>
 void launch_dequant_reduce_impl(float* reduced_data,
                                 const int8_t* input_data,
                                 const float* input_scales,
-                                int out_groups,
-                                int elems_per_out_group,
+                                // int out_groups,
+                                // int elems_per_out_group,
                                 int64_t elems_per_in_tensor,
-                                int groups_per_in_tensor,
+                                // int groups_per_in_tensor,
                                 int elems_per_in_group,
                                 int num_tensors,
                                 cudaStream_t stream)
@@ -177,6 +180,10 @@ void launch_dequant_reduce_impl(float* reduced_data,
         next_pow2((elems_per_in_group + elems_per_thread - 1) / (elems_per_thread));
     // TODO(cmikeh2): Tune this
     const int threads = (one_step_threads < 1024) ? one_step_threads : 1024;
+    int groups_per_in_tensor = (elems_per_in_tensor * (8 / numBits) + elems_per_in_group * (8 / numBits) - 1) 
+                                / (elems_per_in_group * (8 / numBits));
+    int64_t elems_per_in_tensor_padding = (int64_t) groups_per_in_tensor * elems_per_in_group;
+    int out_groups = groups_per_in_tensor;
 
     dim3 block(threads);
     dim3 grid(out_groups);
@@ -214,10 +221,7 @@ void launch_dequant_reduce_impl(float* reduced_data,
     launch_dequant_reduce_impl<NUM_BITS, NUM_GPUS, QUANT_TYPE>(reduced_data,         \
                                                                input_data,           \
                                                                input_scales,         \
-                                                               out_groups,           \
-                                                               elems_per_out_group,  \
                                                                elems_per_in_tensor,  \
-                                                               groups_per_in_tensor, \
                                                                elems_per_in_group,   \
                                                                num_gpus,             \
                                                                stream);
@@ -228,10 +232,10 @@ void launch_dequant_reduce(float* reduced_data,
                            int num_gpus,
                            int num_bits,
                            quantize::Type quant_type,
-                           int out_groups,
-                           int elems_per_out_group,
+                        //    int out_groups,
+                        //    int elems_per_out_group,
                            int64_t elems_per_in_tensor,
-                           int groups_per_in_tensor,
+                        //    int groups_per_in_tensor,
                            int elems_per_in_group,
                            cudaStream_t stream)
 {

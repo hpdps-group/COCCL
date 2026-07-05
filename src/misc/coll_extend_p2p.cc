@@ -25,9 +25,9 @@
 //   return ncclSuccess;
 // }
 
-NCCL_API(ncclResult_t, ncclReduceScatterP2P, const void* sendbuff, void* recvbuff, size_t recvcount,
+NCCL_API(ncclResult_t, ncclReduceScatterRing, const void* sendbuff, void* recvbuff, size_t recvcount,
     ncclDataType_t datatype, ncclRedOp_t op, ncclComm* comm, cudaStream_t stream);
-ncclResult_t ncclReduceScatterP2P(const void* sendbuff, void* recvbuff, size_t recvcount,
+ncclResult_t ncclReduceScatterRing(const void* sendbuff, void* recvbuff, size_t recvcount,
     ncclDataType_t datatype, ncclRedOp_t op, ncclComm* comm, cudaStream_t stream) {
     
     int rightRank = (comm->rank + 1) % comm->nRanks;
@@ -87,16 +87,16 @@ ncclResult_t ncclReduceScatterP2P(const void* sendbuff, void* recvbuff, size_t r
 }
 
 
-NCCL_API(ncclResult_t, ncclAllReduceRingP2P, const void* sendbuff, void* recvbuff, size_t count,
+NCCL_API(ncclResult_t, ncclAllReduceRing, const void* sendbuff, void* recvbuff, size_t count,
     ncclDataType_t datatype, ncclRedOp_t op, ncclComm* comm, cudaStream_t stream);
-ncclResult_t ncclAllReduceRingP2P(const void* sendbuff, void* recvbuff, size_t count,
+ncclResult_t ncclAllReduceRing(const void* sendbuff, void* recvbuff, size_t count,
     ncclDataType_t datatype, ncclRedOp_t op, ncclComm* comm, cudaStream_t stream) {
    
   size_t chunkCount = count / comm->nRanks;
 
   char* r_recvbuf = (char*) recvbuff + comm->rank *  chunkCount * ncclTypeSize(datatype);
 
-  NCCLCHECK(ncclReduceScatterP2P(sendbuff, r_recvbuf, chunkCount, datatype, op, comm, stream));
+  NCCLCHECK(ncclReduceScatterRing(sendbuff, r_recvbuf, chunkCount, datatype, op, comm, stream));
 
   NCCLCHECK(ncclAllGather(r_recvbuf, recvbuff, chunkCount, datatype, comm, stream));
 
@@ -278,9 +278,9 @@ ncclResult_t ncclAllReduceTwoShotR0(const void* sendbuff, void* recvbuff, size_t
   2. rank i reduce chunk i
   3. rank i broadcast chunk i
 */ 
-NCCL_API(ncclResult_t, ncclAllReduceTwoShotAll, const void* sendbuff, void* recvbuff, size_t count,
+NCCL_API(ncclResult_t, ncclAllReduceTwoShot, const void* sendbuff, void* recvbuff, size_t count,
     ncclDataType_t datatype, ncclRedOp_t op, ncclComm* comm, cudaStream_t stream);
-ncclResult_t ncclAllReduceTwoShotAll(const void* sendbuff, void* recvbuff, size_t count,
+ncclResult_t ncclAllReduceTwoShot(const void* sendbuff, void* recvbuff, size_t count,
     ncclDataType_t datatype, ncclRedOp_t op, ncclComm* comm, cudaStream_t stream) {
 
   size_t chunkCount = DIVUP(count, comm->nRanks);
@@ -334,16 +334,16 @@ ncclResult_t ncclAllReduceOptim(const void* sendbuff, void* recvbuff, size_t cou
     NCCLCHECK(ncclAllReduceOneShot(sendbuff, recvbuff, count, datatype, op, comm, stream));
   }
   else if(count * ncclTypeSize(datatype)< (size_t)1024 * 1024 * 32){
-    NCCLCHECK(ncclAllReduceTwoShotAll(sendbuff, recvbuff, count, datatype, op, comm, stream));
+    NCCLCHECK(ncclAllReduceTwoShot(sendbuff, recvbuff, count, datatype, op, comm, stream));
   }else{
-    NCCLCHECK(ncclAllReduceRingP2P(sendbuff, recvbuff, count, datatype, op, comm, stream));
+    NCCLCHECK(ncclAllReduceRing(sendbuff, recvbuff, count, datatype, op, comm, stream));
   }
   return ncclSuccess;
 }
 
-NCCL_API(ncclResult_t, ncclAllGatherRingP2P, const void* sendbuff, void* recvbuff, size_t sendcount,
+NCCL_API(ncclResult_t, ncclAllGatherRing, const void* sendbuff, void* recvbuff, size_t sendcount,
     ncclDataType_t datatype, ncclComm_t comm, cudaStream_t stream);
-ncclResult_t ncclAllGatherRingP2P(const void* sendbuff, void* recvbuff, size_t sendcount,
+ncclResult_t ncclAllGatherRing(const void* sendbuff, void* recvbuff, size_t sendcount,
     ncclDataType_t datatype, ncclComm_t comm, cudaStream_t stream) {
     int rightRank = (comm->rank + 1) % comm->nRanks;
     int leftRank = (comm->rank - 1 + comm->nRanks) % comm->nRanks;

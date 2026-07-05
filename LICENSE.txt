@@ -2,7 +2,7 @@ BSD 3-Clause License
 
 Copyright (c) 2025, Institute of Computing Technology, Chinese Academy of Sciences
 
-Developers: Xingchen Liu, Haoran Kong, Zheng Wei, Liyang Zhao, Yufan Wang, Jingwu Yang, Dingwen Tao (advisor), Guangming Tan (advisor)
+Developers: Xingchen Liu, Haoran Kong, Zheng Wei, Liyang Zhao, Yufan Wang, Jinwu Yang, Dingwen Tao (advisor), Guangming Tan (advisor)
 
 Redistribution and use in source and binary forms, with or without
 modification, are permitted provided that the following conditions are met:

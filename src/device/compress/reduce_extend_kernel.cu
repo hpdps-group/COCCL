@@ -2,6 +2,7 @@
 #include "nccl.h"
 #include <cuda_fp16.h>
 #include <cuda_runtime.h>
+#include <cuda_bf16.h>
 #include <stdio.h>
 #include <cmath>
 #include <limits>
@@ -238,9 +239,52 @@ __global__ void InitMinMax(void* input, const size_t chunkCount, const size_t nu
     }
 }
 
+template<typename TO, typename FROM>
+__device__ __forceinline__ TO type_cast(FROM val){
+    return type_cast(val);
+}
+
+template<>
+__device__ __forceinline__ float type_cast(float val){
+    return val;
+}
+
+template<>
+__device__ __forceinline__ float type_cast(__half val){
+    return __half2float(val);
+}
+
+template<>
+__device__ __forceinline__ float type_cast(__nv_bfloat16 val){
+    return __bfloat162float(val);
+}
+
+
+template<>
+__device__ __forceinline__ __half type_cast(float val){
+    return __float2half(val);
+}
+
+template<>
+__device__ __forceinline__ __half type_cast(__half val){
+    return val;
+}
+
+template<>
+__device__ __forceinline__ __nv_bfloat16 type_cast(float val){
+    return __float2bfloat16(val);
+}
+
+template<>
+__device__ __forceinline__ __nv_bfloat16 type_cast(__nv_bfloat16 val){
+    return val;
+}
+
+
+
 template<typename T, unsigned int blockDimY>
 __device__ void
-block_y_reduce(volatile T sdata[][blockDimY], unsigned int tidx, unsigned int tidy) {
+block_y_reduce(volatile float sdata[][blockDimY], unsigned int tidx, unsigned int tidy) {
     if (blockDimY >= 32) {
         if (tidy < 16) { sdata[tidx][tidy] = sdata[tidx][tidy] + sdata[tidx][tidy + 16]; }
         __syncthreads();
@@ -276,9 +320,9 @@ __global__ void reduceChunk(const void *input, int chunkCount, int numChunks, vo
     unsigned int idy = blockIdx.y * blockDim.y + threadIdx.y;
 
     // load to shared memory
-    T sum = 0.0;
+    float sum = 0.0;
     for (int i = idy; i < numChunks && idx < chunkCount; i += blockDim.y) {
-        sum = sum + inputbuff[chunkCount * i + idx];
+        sum = sum + type_cast<float>(inputbuff[chunkCount * i + idx]);
     }
 
     sdata[tidx][tidy] = sum;
@@ -288,7 +332,7 @@ __global__ void reduceChunk(const void *input, int chunkCount, int numChunks, vo
 
     // write to global memory
     if (tidy == 0 && idx < chunkCount) {
-        outputbuff[idx] = sdata[tidx][tidy];
+        outputbuff[idx] = type_cast<T>(sdata[tidx][tidy]);
     }
 }
 
@@ -350,6 +394,50 @@ ncclResult_t launchReduceChunk(const void* input, size_t chunkCount, void* outpu
             dim3 grid(DIVUP(chunkCount, 32), 1);
             dim3 block(32, 32);
             reduceChunk<32, 32, float><<<grid, block, 0, stream>>>(input, chunkCount, numChunks, output);
+        }
+    } else if(datatype == ncclDataType_t::ncclFloat16){
+        if (numChunks <= 4) {
+            dim3 grid(DIVUP(chunkCount, 512), 1);
+            dim3 block(512, 2);
+            reduceChunk<512, 2, __half><<<grid, block, 0, stream>>>(input, chunkCount, numChunks, output);
+        } else if (numChunks <= 8) {
+            dim3 grid(DIVUP(chunkCount, 256), 1);
+            dim3 block(256, 4);
+            reduceChunk<256, 4, __half><<<grid, block, 0, stream>>>(input, chunkCount, numChunks, output);
+        } else if (numChunks <= 16) {
+            dim3 grid(DIVUP(chunkCount, 128), 1);
+            dim3 block(128, 8);
+            reduceChunk<128, 8, __half><<<grid, block, 0, stream>>>(input, chunkCount, numChunks, output);
+        } else if (numChunks <= 32) {
+            dim3 grid(DIVUP(chunkCount, 64), 1);
+            dim3 block(64, 16);
+            reduceChunk<64, 16, __half><<<grid, block, 0, stream>>>(input, chunkCount, numChunks, output);
+        } else {
+            dim3 grid(DIVUP(chunkCount, 32), 1);
+            dim3 block(32, 32);
+            reduceChunk<32, 32, __half><<<grid, block, 0, stream>>>(input, chunkCount, numChunks, output);
+        }
+    } else if(datatype == ncclDataType_t::ncclBfloat16){
+        if (numChunks <= 4) {
+            dim3 grid(DIVUP(chunkCount, 512), 1);
+            dim3 block(512, 2);
+            reduceChunk<512, 2, __nv_bfloat16><<<grid, block, 0, stream>>>(input, chunkCount, numChunks, output);
+        } else if (numChunks <= 8) {
+            dim3 grid(DIVUP(chunkCount, 256), 1);
+            dim3 block(256, 4);
+            reduceChunk<256, 4, __nv_bfloat16><<<grid, block, 0, stream>>>(input, chunkCount, numChunks, output);
+        } else if (numChunks <= 16) {
+            dim3 grid(DIVUP(chunkCount, 128), 1);
+            dim3 block(128, 8);
+            reduceChunk<128, 8, __nv_bfloat16><<<grid, block, 0, stream>>>(input, chunkCount, numChunks, output);
+        } else if (numChunks <= 32) {
+            dim3 grid(DIVUP(chunkCount, 64), 1);
+            dim3 block(64, 16);
+            reduceChunk<64, 16, __nv_bfloat16><<<grid, block, 0, stream>>>(input, chunkCount, numChunks, output);
+        } else {
+            dim3 grid(DIVUP(chunkCount, 32), 1);
+            dim3 block(32, 32);
+            reduceChunk<32, 32, __nv_bfloat16><<<grid, block, 0, stream>>>(input, chunkCount, numChunks, output);
         }
     }
     CUDACHECK(cudaGetLastError());

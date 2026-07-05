@@ -40,7 +40,7 @@ export LIBRARY_PATH=$NCCL_HOME/lib:$LIBRARY_PATH
 export C_INCLUDE_PATH=$NCCL_HOME/include:$C_INCLUDE_PATH
 export CPLUS_INCLUDE_PATH=$NCCL_HOME/include:$CPLUS_INCLUDE_PATH
 
-export NCCL_DEBUG=WARN
+export NCCL_DEBUG=WRAN
 export NCCL_DEBUG_FILE=$NCCL_LOG_DIR/ncclcomp.%h.%p
 
 export NCCL_IB_DISABLE=0
@@ -71,3 +71,4 @@ export NCCL_BUFFSIZE=16777216
 cd $LING_PRETRAIN_PATH
 
 bash run_pretrain_4k.sh 1 1 8 200 $LOG_DIR/ling_distributed_Rank${RANK}_coccl_tp1pp1ep8_${BATCH_JOB_ID}.log
+

@@ -28,29 +28,29 @@ testResult_t AllGatherInitData(struct threadArgs* args, ncclDataType_t type, ncc
     int rank = ((args->proc*args->nThreads + args->thread)*args->nGpus + i);
     CUDACHECK(cudaMemset(args->recvbuffs[i], 0, args->expectedBytes));
     void* data = in_place ? ((char*)args->recvbuffs[i])+rank*args->sendBytes : args->sendbuffs[i];
-    // TESTCHECK(InitData(data, sendcount, 0, type, ncclSum, 33*rep + rank, 1, 0));
-    if(type == ncclFloat32){
-      float* hostdata = (float*)malloc(sendcount*wordSize(type));
-      for(int ii=0; ii<sendcount; ii++){
-        //  hostdata[ii] = (float) (rank*sendcount + ii);
-        hostdata[ii] = (float) (rank*sendcount + ii);
-        }
-      CUDACHECK(cudaMemcpy(data, hostdata, sendcount*wordSize(type), cudaMemcpyHostToDevice));
-    } else if(type == ncclFloat16){
-      __half* hostdata = (__half*)malloc(sendcount*wordSize(type));
-      for(int ii=0; ii<sendcount; ii++){
-        //  hostdata[ii] = (float) (rank*sendcount + ii);
-        hostdata[ii] = (__half) (rank*sendcount + ii);
-        }
-      CUDACHECK(cudaMemcpy(data, hostdata, sendcount*wordSize(type), cudaMemcpyHostToDevice));
-    } else if(type == ncclBfloat16){
-      __nv_bfloat16* hostdata = (__nv_bfloat16*)malloc(sendcount*wordSize(type));
-      for(int ii=0; ii<sendcount; ii++){
-        //  hostdata[ii] = (float) (rank*sendcount + ii);
-        hostdata[ii] = (__nv_bfloat16) (rank*sendcount + ii);
-        }
-      CUDACHECK(cudaMemcpy(data, hostdata, sendcount*wordSize(type), cudaMemcpyHostToDevice));
-    }
+    TESTCHECK(InitData(data, sendcount, 0, type, ncclSum, 33*rep + rank, 1, 0));
+    // if(type == ncclFloat32){
+    //   float* hostdata = (float*)malloc(sendcount*wordSize(type));
+    //   for(int ii=0; ii<sendcount; ii++){
+    //     //  hostdata[ii] = (float) (rank*sendcount + ii);
+    //     hostdata[ii] = (float) (rank*sendcount + ii);
+    //     }
+    //   CUDACHECK(cudaMemcpy(data, hostdata, sendcount*wordSize(type), cudaMemcpyHostToDevice));
+    // } else if(type == ncclFloat16){
+    //   __half* hostdata = (__half*)malloc(sendcount*wordSize(type));
+    //   for(int ii=0; ii<sendcount; ii++){
+    //     //  hostdata[ii] = (float) (rank*sendcount + ii);
+    //     hostdata[ii] = __float2half( (float)(rank*sendcount + ii));
+    //     }
+    //   CUDACHECK(cudaMemcpy(data, hostdata, sendcount*wordSize(type), cudaMemcpyHostToDevice));
+    // } else if(type == ncclBfloat16){
+    //   __nv_bfloat16* hostdata = (__nv_bfloat16*)malloc(sendcount*wordSize(type));
+    //   for(int ii=0; ii<sendcount; ii++){
+    //     //  hostdata[ii] = (float) (rank*sendcount + ii);
+    //     hostdata[ii] = __float2bfloat16 ((float)(rank*sendcount + ii));
+    //     }
+    //   CUDACHECK(cudaMemcpy(data, hostdata, sendcount*wordSize(type), cudaMemcpyHostToDevice));
+    // }
     for (int j=0; j<nranks; j++) {
       TESTCHECK(InitData((char*)args->expected[i] + args->sendBytes*j, sendcount, 0, type, ncclSum, 33*rep + j, 1, 0));
     }

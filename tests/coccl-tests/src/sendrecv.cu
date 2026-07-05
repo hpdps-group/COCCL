@@ -52,8 +52,15 @@ testResult_t SendRecvRunColl(void* sendbuff, void* recvbuff, size_t count, ncclD
   int sendPeer = (rank+1) % nRanks;
 
   NCCLCHECK(ncclGroupStart());
+  
   NCCLCHECK(ncclSend(sendbuff, count, type, sendPeer, comm, stream));
   NCCLCHECK(ncclRecv(recvbuff, count, type, recvPeer, comm, stream));
+  // if(rank == 0){
+  //   NCCLCHECK(ncclSend(sendbuff, count, type, sendPeer, comm, stream));
+  // }
+  // else{
+  //   NCCLCHECK(ncclRecv(recvbuff, count, type, recvPeer, comm, stream));
+  // }
   NCCLCHECK(ncclGroupEnd());
   return testSuccess;
 }
