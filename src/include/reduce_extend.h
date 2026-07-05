@@ -10,4 +10,5 @@ ncclResult_t ncclReductionColl(const void* input1, const void* input2, void* out
 ncclResult_t ncclReduceChunk(const void* input, size_t chunkCount, void* output, ncclDataType_t type, int numChunks, 
     cudaStream_t stream);
 
+
 #endif

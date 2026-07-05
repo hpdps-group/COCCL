@@ -23,12 +23,28 @@ testResult_t AlltoAllInitData(struct threadArgs* args, ncclDataType_t type, nccl
     int rank = ((args->proc*args->nThreads + args->thread)*args->nGpus + i);
     CUDACHECK(cudaMemsetAsync(args->recvbuffs[i], 0, args->expectedBytes, args->streams[i]));
     void* data = in_place ? args->recvbuffs[i] : args->sendbuffs[i];
-    //  float* hostdata = (float*)malloc(sendcount*wordSize(type));
-    // for(int ii=0; ii<sendcount; ii++){
-    //   //  hostdata[ii] = (float) (rank*sendcount + ii);
-    //   hostdata[ii] = (float) (rank*sendcount + ii);
-    //   }
-    // CUDACHECK(cudaMemcpy(data, hostdata, sendcount*wordSize(type), cudaMemcpyHostToDevice));
+    // if(type == ncclFloat32){
+    //   float* hostdata = (float*)malloc(sendcount*wordSize(type));
+    //   for(int ii=0; ii<sendcount; ii++){
+    //     //  hostdata[ii] = (float) (rank*sendcount + ii);
+    //     hostdata[ii] = (float) (rank*sendcount + ii);
+    //     }
+    //   CUDACHECK(cudaMemcpy(data, hostdata, sendcount*wordSize(type), cudaMemcpyHostToDevice));
+    // } else if(type == ncclFloat16){
+    //   __half* hostdata = (__half*)malloc(sendcount*wordSize(type));
+    //   for(int ii=0; ii<sendcount; ii++){
+    //     //  hostdata[ii] = (float) (rank*sendcount + ii);
+    //     hostdata[ii] = __float2half( (float)(rank*sendcount + ii));
+    //     }
+    //   CUDACHECK(cudaMemcpy(data, hostdata, sendcount*wordSize(type), cudaMemcpyHostToDevice));
+    // } else if(type == ncclBfloat16){
+    //   __nv_bfloat16* hostdata = (__nv_bfloat16*)malloc(sendcount*wordSize(type));
+    //   for(int ii=0; ii<sendcount; ii++){
+    //     //  hostdata[ii] = (float) (rank*sendcount + ii);
+    //     hostdata[ii] = __float2bfloat16 ((float)(rank*sendcount + ii));
+    //     }
+    //   CUDACHECK(cudaMemcpy(data, hostdata, sendcount*wordSize(type), cudaMemcpyHostToDevice));
+    // }
     TESTCHECK(InitData(data, sendcount, 0, type, ncclSum, 33*rep + rank, 1, 0));
     for (int j=0; j<nranks; j++) {
       size_t partcount = sendcount/nranks;
@@ -64,7 +80,7 @@ testResult_t AlltoAllRunColl(void* sendbuff, void* recvbuff, size_t count, ncclD
   //   NCCLCHECK(ncclRecv(((char*)recvbuff)+r*rankOffset, count, type, r, comm, stream));
   // }
   // NCCLCHECK(ncclGroupEnd());
-  NCCLCHECK(ncclAlltoAllComp(sendbuff, recvbuff, count, type, comm, stream));
+  NCCLCHECK(ncclAllToAllComp(sendbuff, recvbuff, count, type, comm, stream));
   return testSuccess;
 #endif
 }

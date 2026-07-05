@@ -104,6 +104,7 @@ NCCL_PARAM(LocalRegister, "LOCAL_REGISTER", 1);
 
 ncclResult_t ncclRegister(struct ncclComm* comm, void* data, size_t size, void** handle) {
   if (!ncclParamLocalRegister()) return ncclSuccess;
+  INFO(NCCL_INIT, "Registering %p size %zu", data, size);
   struct ncclRegCache* cache = &comm->regCache;
   uintptr_t pageSize = cache->pageSize;
   uintptr_t addr = (uintptr_t)data & -pageSize;

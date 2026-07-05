@@ -26,7 +26,7 @@
 #include <sys/stat.h>
 #include <unistd.h>
 #include "param.h"
-
+#include "compress.h"
 #define STR2(v) #v
 #define STR(v) STR2(v)
 
@@ -291,11 +291,11 @@ ncclResult_t ncclCommEnsureReady(ncclComm_t comm) {
       if (ret == ncclInProgress) ret = ncclInvalidArgument;
       goto exit;
     }
-    /* if there is linked group job, we should complete it. */
-    if (comm->groupJob) {
-      NCCLCHECK(ncclGroupJobComplete(comm->groupJob));
-      comm->groupJob = NULL;
-    }
+    // /* if there is linked group job, we should complete it. */
+    // if (comm->groupJob) {
+    //   NCCLCHECK(ncclGroupJobComplete(comm->groupJob));
+    //   comm->groupJob = NULL;
+    // }
   }
 
 exit:
@@ -1507,6 +1507,10 @@ static ncclResult_t ncclCommInitRankFunc(struct ncclAsyncJob* job_) {
   int cudaDev = job->cudaDev;
   int* parentRanks = NULL;
   int cudaArch;
+  const char* enableComp = getenv("NCCL_ENABLE_COMPRESS");
+
+    // INFO(NCCL_INIT, "NCCL_ENABLE_COMPRESS Not set, defaulting to 1");
+
 
   CUDACHECKGOTO(cudaSetDevice(cudaDev), res, fail);
   CUDACHECKGOTO(cudaDeviceGetAttribute(&archMajor, cudaDevAttrComputeCapabilityMajor, cudaDev), res, fail);
@@ -1552,6 +1556,9 @@ static ncclResult_t ncclCommInitRankFunc(struct ncclAsyncJob* job_) {
     NCCLCHECK(comm->tuner->init(comm->nRanks, comm->nNodes, ncclDebugLog, &comm->tunerContext));
   }
 
+  if (enableComp && strcmp(enableComp, "1") == 0) {
+    NCCLCHECKGOTO(ncclCompressInit(comm), res, fail);
+  }
   // update communicator state
   comm->initState = ncclSuccess;
 
@@ -2126,7 +2133,7 @@ exit:
 fail:
   goto exit;
 }
-
+// extern inline ncclResult_t freeParallelComms();
 NCCL_API(ncclResult_t, ncclCommDestroy, ncclComm_t comm);
 ncclResult_t ncclCommDestroy(ncclComm_t comm) {
   if (comm == NULL) {
@@ -2148,6 +2155,7 @@ ncclResult_t ncclCommDestroy(ncclComm_t comm) {
   }
 
   /* init thread must be joined before we destroy the comm. */
+  // freeParallelComms();
   NCCLCHECK(ncclCommEnsureReady(comm));
 
   NCCLCHECK(commReclaim(comm));
@@ -2283,6 +2291,11 @@ ncclResult_t ncclCommGetAsyncError(ncclComm_t comm, ncclResult_t *asyncError) {
 
   *asyncError = __atomic_load_n(&comm->asyncResult, __ATOMIC_ACQUIRE);
   if (*asyncError == ncclSuccess && comm->proxyState) *asyncError = __atomic_load_n(&comm->proxyState->asyncResult, __ATOMIC_ACQUIRE);
+    /* if there is linked group job, we should complete it. */
+  if (*asyncError == ncclSuccess && comm->groupJob) {
+      NCCLCHECK(ncclGroupJobComplete(comm->groupJob));
+      comm->groupJob = NULL;
+    }
   return ncclSuccess;
 }
 

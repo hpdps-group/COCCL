@@ -18,6 +18,11 @@ OBJDIR := $(BUILDDIR)/obj/device
 
 MANIFEST := $(OBJDIR)/manifest
 DEVGLUE_OBJ  := $(OBJDIR)/device_glue.o
+# SUBDIR := compress/sdp4bit
+# SUBOBJDIR := $(OBJDIR)/$(SUBDIR)
+
+COMPSUBDIR := compress
+COMPSUBOBJDIR := $(OBJDIR)/$(COMPSUBDIR)
 
 INCFLAGS  = -I. -I.. -I$(BUILDDIR)/include -I../include
 NVCUFLAGS += $(INCFLAGS) --compiler-options "-fPIC -fvisibility=hidden"
@@ -46,7 +51,7 @@ define DEPENDS
  echo "$(patsubst %.d,%.o,$1) $1: " $$files > $1
 endef
 
-all: $(MANIFEST)
+all: $(MANIFEST) compress.build
 
 ifeq (1,1)
 # Case if the <gensrc> directory is generated on-demand:
@@ -70,9 +75,20 @@ $(OBJDIR)/gensrc/rules.mk: $(OBJDIR)/gensrc ;
 -include $(OBJDIR)/gensrc/rules.mk
 # "gensrc/rules.mk" populates $(LIB_OBJS_GEN)
 
-# SRCS = common.cu onerank.cu
-SRCS = common.cu onerank.cu compress/compress_kernel.cu compress/reduce_extend_kernel.cu
+#$(SUBOBJDIR):
+#	@mkdir -p $(SUBOBJDIR)
+#	$(MAKE) -C $(SUBDIR) OBJDIR=$(SUBOBJDIR)
 
+
+$(COMPSUBOBJDIR):
+	@mkdir -p $(COMPSUBOBJDIR)
+
+compress.build: | $(COMPSUBOBJDIR)
+	$(MAKE) -C $(COMPSUBDIR) SUBOBJDIR=$(COMPSUBOBJDIR)
+# SRCS = common.cu onerank.cu
+SRCS = common.cu onerank.cu compress/reduce_extend_kernel.cu
+
+#  $(SUBSO)
 LIB_OBJS = $(patsubst %, $(OBJDIR)/%.o, $(SRCS)) $(LIB_OBJS_GEN)
 
 $(OBJDIR)/%.o: % $(OBJDIR)/%.d
@@ -96,6 +112,6 @@ $(MANIFEST): $(LIB_OBJS) $(DEVGLUE_OBJ)
 -include $(wildcard $(OBJDIR)/*.d)
 -include $(wildcard $(OBJDIR)/genobj/*.d)
 
-.PHONY: clean
+.PHONY: clean compress.build
 clean:
 	rm -rf $(OBJDIR)

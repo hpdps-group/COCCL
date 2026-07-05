@@ -29,13 +29,13 @@ testResult_t ReduceScatterInitData(struct threadArgs* args, ncclDataType_t type,
     int rank = ((args->proc*args->nThreads + args->thread)*args->nGpus + i);
     CUDACHECK(cudaMemset(args->recvbuffs[i], 0, args->expectedBytes));
     void* data = in_place ? args->recvbuffs[i] : args->sendbuffs[i];
-    TESTCHECK(InitData(data, sendcount, 0, type, op, rep, nranks, rank));
-    // float* hostdata = (float*)malloc(sendcount*wordSize(type));
-    // for(int ii=0; ii<sendcount; ii++){
-    //   //  hostdata[ii] = (float) (rank*sendcount + ii);
-    //   hostdata[ii] = (float) (rank*sendcount + ii);
-    //   }
-    // CUDACHECK(cudaMemcpy(data, hostdata, sendcount*wordSize(type), cudaMemcpyHostToDevice));
+     TESTCHECK(InitData(data, sendcount, 0, type, op, rep, nranks, rank));
+   // float* hostdata = (float*)malloc(sendcount*wordSize(type));
+    //for(int ii=0; ii<sendcount; ii++){
+      //  hostdata[ii] = (float) (rank*sendcount + ii);
+      //hostdata[ii] = (float) (rank*sendcount + ii);
+      //}
+   // CUDACHECK(cudaMemcpy(data, hostdata, sendcount*wordSize(type), cudaMemcpyHostToDevice));
     CUDACHECK(cudaMemcpy(args->expected[i], args->recvbuffs[i], args->expectedBytes, cudaMemcpyDefault));
     TESTCHECK(InitDataReduce(args->expected[i], recvcount, rank*recvcount, type, op, rep, nranks));
     CUDACHECK(cudaDeviceSynchronize());

@@ -111,6 +111,18 @@ ncclResult_t ncclPreconnectFunc(struct ncclAsyncJob* job_) {
   return ncclSuccess;
 }
 
+// struct ncclCompressJob{
+//   struct ncclAsyncJob base;
+//   struct ncclComm* comm;
+// };
+// ncclResult_t ncclCompressFunc(struct ncclAsyncJob* job_){
+//   struct ncclCompressJob* job = (struct ncclCompressJob*) job_;
+//   struct ncclComm* comm = job->comm;
+//   CUDACHECK(cudaSetDevice(comm->cudaDev));
+//   if (CPU_COUNT(&comm->cpuAffinity)) sched_setaffinity(0, sizeof(cpu_set_t), &comm->cpuAffinity);
+//   NCCLCHECK()
+// }
+
 static ncclResult_t doLaunches(struct ncclComm* head) {
   ncclResult_t result = ncclSuccess;
   struct ncclComm* cliqueComm0 = head->intraComm0;
@@ -123,6 +135,10 @@ static ncclResult_t doLaunches(struct ncclComm* head) {
   do {
     struct ncclComm* comm = cliqueHead;
     bool capturingYes = false, capturingNo = false;
+    /*
+    TODO
+    launch compress kernel
+    */
     do {
       (ncclCudaGraphValid(comm->tasks.capturingGraph) ? capturingYes : capturingNo) = true;
       CUDACHECKGOTO(cudaSetDevice(comm->cudaDev), result, failure);
@@ -292,6 +308,7 @@ static ncclResult_t groupLaunch(struct ncclAsyncJob *job_) {
     } while (comm != nullptr);
   }
 
+
   if (!ncclIntruQueueEmpty(asyncJobsMain)) {
     struct ncclAsyncJob* job = ncclIntruQueueHead(asyncJobsMain);
     do {
@@ -327,9 +344,12 @@ static ncclResult_t groupLaunch(struct ncclAsyncJob *job_) {
         }
 
         job = job->next;
+
+
       } while (job != nullptr);
       // Let preconnect threads progress.
       if (jobsDone == false) usleep(1);
+      
     } while (jobsDone == false);
 
     if (ret != ncclSuccess) goto fail;
@@ -346,6 +366,7 @@ static ncclResult_t groupLaunch(struct ncclAsyncJob *job_) {
     if (job->destructor) job->destructor((void*)job);
   }
 
+
   while (groupCommHeadMain != nullptr) {
     struct ncclComm* comm = groupCommHeadMain;
     struct ncclComm* next = comm->groupNext;
@@ -355,6 +376,7 @@ static ncclResult_t groupLaunch(struct ncclAsyncJob *job_) {
     }
     groupCommHeadMain = next;
   }
+
 
   CUDACHECK(cudaSetDevice(savedDev));
 
@@ -378,6 +400,7 @@ ncclResult_t ncclGroupEndInternal() {
 
   if ((ret = ncclGroupError) != ncclSuccess) goto fail;
 
+
   if (ncclGroupCommHead != nullptr || !ncclIntruQueueEmpty(&ncclAsyncJobs) || ncclGroupCommPreconnectHead != nullptr) {
     ncclGroupJobMain.groupCommHeadPtr = &ncclGroupCommHead;
     ncclGroupJobMain.groupCommPreconnectHeadPtr = &ncclGroupCommPreconnectHead;
@@ -387,6 +410,7 @@ ncclResult_t ncclGroupEndInternal() {
     ncclGroupJobMain.groupBlockingPtr = &ncclGroupBlocking;
     ncclGroupJobMain.initialized = true;
     ncclGroupJobMainPtr = &ncclGroupJobMain;
+
     /* make sure ncclGroupBlocking has been set. */
     assert(ncclGroupBlocking == 0 || ncclGroupBlocking == 1);
     if (ncclGroupBlocking == 0 && (ncclGroupCommPreconnectHead != nullptr || !ncclIntruQueueEmpty(&ncclAsyncJobs))) {
@@ -415,6 +439,7 @@ ncclResult_t ncclGroupEndInternal() {
       ret = ncclInProgress;
     } else {
       /* blocking group */
+
       NCCLCHECKGOTO(groupLaunch(&ncclGroupJobMainPtr->base), ret, fail);
       groupResetJobState(ncclGroupJobMainPtr);
     }

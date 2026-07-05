@@ -928,6 +928,11 @@ static ncclResult_t scheduleP2pTasksToPlan(
       if (send != nullptr || recv != nullptr) {
         char* recvPtr = recv ? (char*)recv->buff : nullptr;
         char* sendPtr = send ? (char*)send->buff : nullptr;
+        /*
+        TODO
+        design a model to estimate the compress rate of different compressor
+        calcP2pCompSize
+        */
         ssize_t recvBytes = recv ? recv->bytes : 0;
         ssize_t sendBytes = send ? send->bytes : 0;
         ssize_t minSize = comm->nNodes > 1 ? stepSize/2 : stepSize/8;

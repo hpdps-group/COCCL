@@ -83,9 +83,11 @@ void ncclDebugInit() {
         mask = NCCL_BOOTSTRAP;
       } else if (strcasecmp(subsys, "REG") == 0) {
         mask = NCCL_REG;
+      } else if (strcasecmp(subsys, "COMPRESS") == 0) {
+        mask = NCCL_COMPRESS;
       } else if (strcasecmp(subsys, "ALL") == 0) {
         mask = NCCL_ALL;
-      }
+      } 
       if (mask) {
         if (invert) ncclDebugMask &= ~mask; else ncclDebugMask |= mask;
       }
