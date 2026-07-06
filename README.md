@@ -224,7 +224,7 @@ export NCCL_COMPRESSORS=taco
 
 ---
 
-## Performance
+## TACO Performance
 
 ### TACO End-to-End Training
 
@@ -249,17 +249,7 @@ export NCCL_COMPRESSORS=taco
 ![Comparison](Comparison.png)
 
 
-## Integrating a Compressor
 
-See:
-
-```bash
-src/device/compress/README.md
-```
-
-TACO serves as a reference implementation for custom compressor integration.
-
----
 
 ## Citation
 
