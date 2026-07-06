@@ -43,13 +43,13 @@ bash build.sh
 Source directory:
 
 ```bash
-coccl-acc/src/device/compress/taco
+src/device/compress/taco
 ```
 
 ### 🔧 Compile Operator Only
 
 ```bash
-cd coccl-acc/src/device/compress/taco
+cd src/device/compress/taco
 make
 ```
 
@@ -60,7 +60,7 @@ make
 Configuration path:
 
 ```bash
-coccl-acc/src/device/compress/configs/taco
+src/device/compress/configs/taco
 ```
 
 ### Key Parameters
@@ -96,10 +96,11 @@ pivotSwap: 0
 
 ## 📂 Training Entry
 
-Training scripts for Qwen2.5 are located at:
+Training scripts for GPT2 and Qwen2.5 are located at:
 
 ```bash
-coccl_scripts/qwen2.5/run_qwen_taco.sh
+examples\training_scripts\GPT2\train_gpt_coccl.sh
+examples\training_scripts\Qwen2.5\train_qwen_coccl.sh
 ```
 
 ## 📈 Comparison Results

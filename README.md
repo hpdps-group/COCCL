@@ -266,4 +266,14 @@ Example scripts are provided for communication benchmarks and end-to-end trainin
   pages={384--397},
   year={2026}
 }
+
+@misc{liu2026taco,
+  title={TACO: Efficient Communication Compression of Intermediate Tensors for Scalable Tensor-Parallel LLM Training},
+  author={Man Liu and Xingchen Liu and Xingjian Tian and Bing Lu and Shengkay Lyu and Shengquan Yin and Wenjing Huang and Zheng Wei and Hairui Zhao and Guangming Tan and Dingwen Tao},
+  year={2026},
+  eprint={2604.24088},
+  archivePrefix={arXiv},
+  primaryClass={cs.DC},
+  url={https://arxiv.org/abs/2604.24088}
+}
 ```
