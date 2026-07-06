@@ -55,7 +55,7 @@ COCCL is compiled and installed in `build/` unless `BUILDDIR` is set.
 After building COCCL, set the required environment variables:
 
 ```shell
-export COCCL_PATH=$PWD
+export COCCL_PATH=<path to coccl>
 export NCCL_HOME=$COCCL_PATH/build
 export LIBRARY_PATH=$NCCL_HOME/lib:$LIBRARY_PATH
 export LD_LIBRARY_PATH=$NCCL_HOME/lib:$LD_LIBRARY_PATH
@@ -161,7 +161,7 @@ To switch from the NCCL library to the COCCL library, follow the steps below:
      If the output points to the COCCL build directory, the replacement has succeeded. For example:
    
      ```bash
-     libnccl.so.2 => <path to coccl>/build/lib/libnccl.so.2
+     libnccl.so.2 => path/to/coccl/build/lib/libnccl.so.2
      ```
    
    - Replace the original NCCL library if `LD_LIBRARY_PATH` does not take effect.
