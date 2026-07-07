@@ -6,13 +6,15 @@ The paper describes this abstraction as UCPM: required `compress`, `decompress`,
 
 ## Built-in compressor examples
 
-COCCL includes three integrated compressors by default. They are both usable compressors and reference examples for adding a new compressor:
+COCCL includes four integrated compressors by default. They are both usable compressors and reference examples for adding a new compressor:
 
 | Compressor | Source directory | Runtime name | Shared library | Exported symbol |
 | --- | --- | --- | --- | --- |
 | SDP4Bit | `src/device/compress/sdp4bit/` | `sdp4bit` | `libsdp4bit.so` | `sdp4bit` |
 | TAHQuant | `src/device/compress/tahquant/` | `tahquant` | `libtahquant.so` | `tahquant` |
 | cuZFP | `src/device/compress/zfp/` | `cuzfp` | `libcuzfp.so` | `cuzfp` |
+| TACO | `src/device/compress/taco/` | `taco` | `libtaco.so` | `taco` |
+
 
 Their config files live under `src/device/compress/configs/` and `src/device/compress/configs_training/`. Use these three directories as examples for the expected source layout, Makefile integration, `ncclCompressor_t` descriptor, config parsing, and runtime naming convention.
 
