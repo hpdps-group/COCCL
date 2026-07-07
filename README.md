@@ -216,13 +216,6 @@ examples/training_scripts/GPT2/train_gpt_coccl.sh
 examples/training_scripts/Qwen2.5/train_qwen_coccl.sh
 ```
 
-Enable TACO:
-
-```bash
-export NCCL_COMPRESSORS=taco
-```
-
----
 
 ## TACO Performance
 
