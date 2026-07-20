@@ -437,11 +437,6 @@ ncclResult_t pncclReduceScatterCompTwoShot(const void* sendbuff, void* recvbuff,
     ncclDataType_t datatype, ncclRedOp_t op, ncclComm* comm, 
     cudaStream_t stream);
 
-ncclResult_t ncclReduceScatterCompTwoShotOverlap(const void* sendbuff, void* recvbuff, size_t recvcount,
-  ncclDataType_t datatype, ncclRedOp_t op, ncclComm* comm, cudaStream_t stream);
-ncclResult_t pncclReduceScatterCompTwoShotOverlap(const void* sendbuff, void* recvbuff, size_t recvcount,
-  ncclDataType_t datatype, ncclRedOp_t op, ncclComm* comm, cudaStream_t stream);
-
 ncclResult_t ncclReduceScatterCompTwoShotTLOverlap(const void* sendbuff, void* recvbuff, size_t recvcount,
   ncclDataType_t datatype, ncclRedOp_t op, ncclComm* comm, cudaStream_t stream);
 ncclResult_t pncclReduceScatterCompTwoShotTLOverlap(const void* sendbuff, void* recvbuff, size_t recvcount,

@@ -6,50 +6,54 @@
 
  #include "argcheck.h" // Need some checks here since we access comm
  #include "collectives.h"
+ #include "coccl_runtime.h"
  #include "enqueue.h"
  #include "nccl.h"
  
- extern size_t CompEnableThreshold;
- extern bool enableAllGatherComp;
  NCCL_API(ncclResult_t, ncclAllGather, const void* sendbuff, void* recvbuff, size_t sendcount,
      ncclDataType_t datatype, ncclComm_t comm, cudaStream_t stream);
  ncclResult_t ncclAllGather(const void* sendbuff, void* recvbuff, size_t sendcount,
      ncclDataType_t datatype, ncclComm_t comm, cudaStream_t stream) {
    
+   size_t msgsize = sendcount * ncclTypeSize(datatype);
+   cocclRuntimeArgs cocclArgs = {
+     sendbuff, recvbuff, sendcount, datatype, ncclSum, 0, ncclFuncAllGather, comm, stream
+   };
+   if (cocclAvailable(&cocclArgs)) {
+     NCCLCHECK(cocclEnqueueCheck(&cocclArgs));
+     return ncclSuccess;
+   }
+
+   // Just pass the size of one message and not the total bytes sent/received.
+   constexpr nvtxPayloadSchemaEntry_t AllGatherSchema[] = {
+     {0, NVTX_PAYLOAD_ENTRY_TYPE_SIZE, "Message size [bytes]"}
+   };
   
-   if(enableAllGatherComp == true && sendcount * ncclTypeSize(datatype) > CompEnableThreshold && comm->nRanks > 1){
-     NCCLCHECK(ncclAllGatherCompOverlap(sendbuff, recvbuff, sendcount, datatype, comm, stream));
-   }
-   else {
-     // Just pass the size of one message and not the total bytes sent/received.
-     constexpr nvtxPayloadSchemaEntry_t AllGatherSchema[] = {
-       {0, NVTX_PAYLOAD_ENTRY_TYPE_SIZE, "Message size [bytes]"}
-     };
-    
-     size_t msgsize = sendcount * ncclTypeSize(datatype);
-     NVTX3_FUNC_WITH_PARAMS(AllGather, AllGatherSchema, msgsize)
+   NVTX3_FUNC_WITH_PARAMS(AllGather, AllGatherSchema, msgsize)
  
-     struct ncclInfo info = { ncclFuncAllGather, "AllGather",
-       sendbuff, recvbuff, sendcount, datatype, ncclSum, 0, comm, stream, /* Args */
-       ALLGATHER_CHUNKSTEPS, ALLGATHER_SLICESTEPS };
-     NCCLCHECK(ncclEnqueueCheck(&info));
-   }
+   struct ncclInfo info = { ncclFuncAllGather, "AllGather",
+     sendbuff, recvbuff, sendcount, datatype, ncclSum, 0, comm, stream, /* Args */
+     ALLGATHER_CHUNKSTEPS, ALLGATHER_SLICESTEPS };
+   NCCLCHECK(ncclEnqueueCheck(&info));
    return ncclSuccess;
  }
  
- extern bool enableAllReduceComp;
  NCCL_API(ncclResult_t, ncclAllReduce, const void* sendbuff, void* recvbuff, size_t count,
      ncclDataType_t datatype, ncclRedOp_t op, ncclComm* comm, cudaStream_t stream);
  ncclResult_t ncclAllReduce(const void* sendbuff, void* recvbuff, size_t count,
      ncclDataType_t datatype, ncclRedOp_t op, ncclComm* comm, cudaStream_t stream) {
+
+    cocclRuntimeArgs cocclArgs = {
+      sendbuff, recvbuff, count, datatype, op, 0, ncclFuncAllReduce, comm, stream
+    };
+    if (cocclAvailable(&cocclArgs)) {
+      NCCLCHECK(cocclEnqueueCheck(&cocclArgs));
+      return ncclSuccess;
+    }
  
-   // if(enableAllGatherComp == true && count * ncclTypeSize(datatype) > 10 * 1024 * 1024){
-   //   NCCLCHECK(ncclAllReduceCompTwoShotAll(sendbuff, recvbuff, count, datatype, op, comm, stream));
-   // }
-   // else {
-     struct NvtxParamsAllReduce {
-       size_t bytes;
-       ncclRedOp_t op;
+    struct NvtxParamsAllReduce {
+      size_t bytes;
+      ncclRedOp_t op;
      };
      // Just pass the size of one message and not the total bytes sent/received.
      static constexpr nvtxPayloadSchemaEntry_t AllReduceSchema[] = {
@@ -59,13 +63,12 @@
      };
      NvtxParamsAllReduce payload{count * ncclTypeSize(datatype), op};
      NVTX3_FUNC_WITH_PARAMS(AllReduce, AllReduceSchema, payload)
-     struct ncclInfo info = { ncclFuncAllReduce, "AllReduce",
-       sendbuff, recvbuff, count, datatype, op, 0, comm, stream, /* Args */
-       ALLREDUCE_CHUNKSTEPS, ALLREDUCE_SLICESTEPS };
-     NCCLCHECK(ncclEnqueueCheck(&info));
-   // }
-   return ncclSuccess;
- }
+    struct ncclInfo info = { ncclFuncAllReduce, "AllReduce",
+      sendbuff, recvbuff, count, datatype, op, 0, comm, stream, /* Args */
+      ALLREDUCE_CHUNKSTEPS, ALLREDUCE_SLICESTEPS };
+    NCCLCHECK(ncclEnqueueCheck(&info));
+  return ncclSuccess;
+}
  
  NCCL_API(ncclResult_t, ncclBroadcast, const void* sendbuff, void* recvbuff, size_t count, ncclDataType_t datatype, int root,
      ncclComm_t comm, cudaStream_t stream);
@@ -122,37 +125,34 @@
    return ncclSuccess;
  }
  
- extern bool enableReduceScatterComp;
  NCCL_API(ncclResult_t, ncclReduceScatter, const void* sendbuff, void* recvbuff, size_t recvcount,
      ncclDataType_t datatype, ncclRedOp_t op, ncclComm* comm, cudaStream_t stream);
  ncclResult_t ncclReduceScatter(const void* sendbuff, void* recvbuff, size_t recvcount,
      ncclDataType_t datatype, ncclRedOp_t op, ncclComm* comm, cudaStream_t stream) {
-   if(enableReduceScatterComp == true && datatype == 7 && recvcount * ncclTypeSize(datatype) > CompEnableThreshold && comm->nRanks > 1){
-     if(comm->nNodes < 2 || comm->localRanks < 2){
-       NCCLCHECK(ncclReduceScatterCompOneShotOverlap(sendbuff,recvbuff, recvcount, datatype, op, comm, stream));
-     }
-     else {
-       NCCLCHECK(ncclReduceScatterCompTwoShotOverlap(sendbuff,recvbuff, recvcount, datatype, op, comm, stream));
-     }
+   size_t msgsize = recvcount * ncclTypeSize(datatype);
+   cocclRuntimeArgs cocclArgs = {
+     sendbuff, recvbuff, recvcount, datatype, op, 0, ncclFuncReduceScatter, comm, stream
+   };
+   if (cocclAvailable(&cocclArgs)) {
+     NCCLCHECK(cocclEnqueueCheck(&cocclArgs));
+     return ncclSuccess;
    }
-   else
-   {
-     struct NvtxParamsReduceScatter {
-       size_t bytes;
-       ncclRedOp_t op;
-     };
-     constexpr nvtxPayloadSchemaEntry_t ReduceScatterSchema[] = {
-       {0, NVTX_PAYLOAD_ENTRY_TYPE_SIZE, "Message size [bytes]"},
-       {0, NVTX_PAYLOAD_ENTRY_NCCL_REDOP, "Reduction operation", nullptr, 0,
-         offsetof(NvtxParamsReduceScatter, op)}
-     };
-     NvtxParamsReduceScatter payload{recvcount * ncclTypeSize(datatype), op};
-     NVTX3_FUNC_WITH_PARAMS(ReduceScatter, ReduceScatterSchema, payload)
-     struct ncclInfo info = { ncclFuncReduceScatter, "ReduceScatter",
-       sendbuff, recvbuff, recvcount, datatype, op, 0, comm, stream, /* Args */
-       REDUCESCATTER_CHUNKSTEPS, REDUCESCATTER_SLICESTEPS };
-     NCCLCHECK(ncclEnqueueCheck(&info));
-   }
+
+   struct NvtxParamsReduceScatter {
+     size_t bytes;
+     ncclRedOp_t op;
+   };
+   constexpr nvtxPayloadSchemaEntry_t ReduceScatterSchema[] = {
+     {0, NVTX_PAYLOAD_ENTRY_TYPE_SIZE, "Message size [bytes]"},
+     {0, NVTX_PAYLOAD_ENTRY_NCCL_REDOP, "Reduction operation", nullptr, 0,
+       offsetof(NvtxParamsReduceScatter, op)}
+   };
+   NvtxParamsReduceScatter payload{msgsize, op};
+   NVTX3_FUNC_WITH_PARAMS(ReduceScatter, ReduceScatterSchema, payload)
+   struct ncclInfo info = { ncclFuncReduceScatter, "ReduceScatter",
+     sendbuff, recvbuff, recvcount, datatype, op, 0, comm, stream, /* Args */
+     REDUCESCATTER_CHUNKSTEPS, REDUCESCATTER_SLICESTEPS };
+   NCCLCHECK(ncclEnqueueCheck(&info));
    return ncclSuccess;
  }
  
@@ -164,40 +164,42 @@
      {0, NVTX_PAYLOAD_ENTRY_TYPE_SIZE, "Bytes"},
      {0, NVTX_PAYLOAD_ENTRY_TYPE_INT, "Peer rank", nullptr, 0, offsetof(NvtxParamsSendRecv, peer)}
  };
- extern bool enableSendRecvComp;
-
  
  NCCL_API(ncclResult_t, ncclSend, const void* sendbuff, size_t count, ncclDataType_t datatype, int peer,
      ncclComm_t comm, cudaStream_t stream);
  ncclResult_t ncclSend(const void* sendbuff, size_t count, ncclDataType_t datatype, int peer,
      ncclComm_t comm, cudaStream_t stream) {
-   NvtxParamsSendRecv payload{count * ncclTypeSize(datatype), peer};
+   size_t msgsize = count * ncclTypeSize(datatype);
+   NvtxParamsSendRecv payload{msgsize, peer};
    NVTX3_FUNC_WITH_PARAMS(Send, SendRecvSchema, payload)
-   if(enableSendRecvComp == true &&  datatype == 9 && count * ncclTypeSize(datatype) > CompEnableThreshold){
-     NCCLCHECK(ncclSendComp(sendbuff, count, datatype, peer, comm, stream));
+   cocclRuntimeArgs cocclArgs = {
+     sendbuff, nullptr, count, datatype, ncclSum, peer, ncclFuncSend, comm, stream
+   };
+   if (cocclAvailable(&cocclArgs)) {
+     NCCLCHECK(cocclEnqueueCheck(&cocclArgs));
      return ncclSuccess;
    }
-   else {
-     NCCLCHECK(ncclSendNaive(sendbuff, count, datatype, peer, comm, stream));
-     return ncclSuccess;
-   }
+   NCCLCHECK(ncclSendNaive(sendbuff, count, datatype, peer, comm, stream));
+   return ncclSuccess;
  }
  
  NCCL_API(ncclResult_t, ncclRecv, void* recvbuff, size_t count, ncclDataType_t datatype, int peer,
      ncclComm_t comm, cudaStream_t stream);
  ncclResult_t ncclRecv(void* recvbuff, size_t count, ncclDataType_t datatype, int peer,
      ncclComm_t comm, cudaStream_t stream) {
-   NvtxParamsSendRecv payload{count * ncclTypeSize(datatype), peer};
+   size_t msgsize = count * ncclTypeSize(datatype);
+   NvtxParamsSendRecv payload{msgsize, peer};
    NVTX3_FUNC_WITH_PARAMS(Recv, SendRecvSchema, payload)
  
-   if(enableSendRecvComp == true && datatype == 9 && count * ncclTypeSize(datatype) > CompEnableThreshold){
-     NCCLCHECK(ncclRecvDecomp(recvbuff, count, datatype, peer, comm, stream));
+   cocclRuntimeArgs cocclArgs = {
+     nullptr, recvbuff, count, datatype, ncclSum, peer, ncclFuncRecv, comm, stream
+   };
+   if (cocclAvailable(&cocclArgs)) {
+     NCCLCHECK(cocclEnqueueCheck(&cocclArgs));
      return ncclSuccess;
    }
-   else {
-     NCCLCHECK(ncclRecvNaive(recvbuff, count, datatype, peer, comm, stream));
-     return ncclSuccess;
-   }
+   NCCLCHECK(ncclRecvNaive(recvbuff, count, datatype, peer, comm, stream));
+   return ncclSuccess;
  }
  NCCL_API(ncclResult_t, ncclSendNaive, const void* sendbuff, size_t count, ncclDataType_t datatype, int peer,
    ncclComm_t comm, cudaStream_t stream);
@@ -229,8 +231,6 @@
    return ret;
  }
  
- 
- extern bool enableAllToAllComp;
  NCCL_API(ncclResult_t, ncclAllToAll, const void* sendbuff, void* recvbuff, size_t sendcount,
      ncclDataType_t datatype, ncclComm_t comm, cudaStream_t stream);
  ncclResult_t  ncclAllToAll(const void* sendbuff, void* recvbuff, size_t sendcount,

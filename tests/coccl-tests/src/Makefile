@@ -68,7 +68,7 @@ else
 .SILENT:
 endif
 
-.PHONY: build clean
+.PHONY: build clean pipeline-layout-test group-deferred-test training-classifier-test
 
 BUILDDIR ?= ../build
 ifneq ($(NCCL_HOME), "")
@@ -99,6 +99,44 @@ reduce_scatter_comp_twoshot_tl_overlap
 BIN_FILES := $(BIN_FILES_LIST:%=${DST_DIR}/%_perf)
 
 build: ${BIN_FILES}
+
+COCCL_LAYOUT_TEST := $(DST_DIR)/coccl_pipeline_layout_test
+COCCL_LAYOUT_SRC := ../../../src/coccl-extend/device/pipeline/coccl_pipeline_layout.cu
+COCCL_LAYOUT_INC := ../../../src/coccl-extend/include
+
+pipeline-layout-test: $(COCCL_LAYOUT_TEST)
+
+COCCL_GROUP_TEST := $(DST_DIR)/coccl_group_deferred_test
+COCCL_TRAINING_TEST := $(DST_DIR)/coccl_training_classifier_test
+
+COCCL_TRAINING_SRC := \
+	../../../src/coccl-extend/training_assist/coccl_training_assist.cc \
+	../../../src/coccl-extend/training_assist/coccl_training_classifier.cc \
+	../../../src/coccl-extend/coccl_comm.cc
+
+group-deferred-test: $(COCCL_GROUP_TEST)
+training-classifier-test: $(COCCL_TRAINING_TEST)
+
+$(COCCL_GROUP_TEST): coccl_group_deferred_test.cc
+	@printf "Linking  %-35s > %s\n" $< $@
+	@mkdir -p ${DST_DIR}
+	$(CXX) $(CXXFLAGS) -I$(CUDA_INC) -I$(NCCL_HOME)/include -o $@ $< \
+		-L$(NCCL_HOME)/lib -lnccl $(LDFLAGS) -pthread
+
+$(COCCL_TRAINING_TEST): coccl_training_classifier_test.cc $(COCCL_TRAINING_SRC)
+	@printf "Linking  %-35s > %s\n" $< $@
+	@mkdir -p ${DST_DIR}
+	$(CXX) $(filter-out -std=c++11,$(CXXFLAGS)) -std=c++17 \
+		-ffunction-sections -fdata-sections -Wl,--gc-sections \
+		-I$(CUDA_INC) -I$(NCCL_HOME)/include -I../../../src/include \
+		-I../../../src/coccl-extend/include -o $@ $^ -pthread
+
+$(COCCL_LAYOUT_TEST): coccl_pipeline_layout_test.cu $(COCCL_LAYOUT_SRC)
+	@printf "Linking  %-35s > %s\n" $< $@
+	@mkdir -p ${DST_DIR}
+	$(NVCC) -o $@ $(NVCUFLAGS) -I$(COCCL_LAYOUT_INC) \
+		-I$(NCCL_HOME)/include -I../../../src/include \
+		$^ -L$(NCCL_HOME)/lib -lnccl -lcudart -lrt
 
 clean:
 	rm -rf ${DST_DIR}

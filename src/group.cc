@@ -5,6 +5,7 @@
  ************************************************************************/
 
 #include "group.h"
+#include "coccl_group.h"
 #include "debug.h"
 #include "enqueue.h"
 #include "transport.h"
@@ -20,6 +21,12 @@ __thread struct ncclGroupJob *ncclGroupJobMainPtr = NULL;
 __thread struct ncclGroupJob ncclGroupJobMain;
 __thread int ncclGroupBlocking = -1; /* default mode */
 __thread bool ncclGroupJobAbortFlag = false;
+
+static bool ncclGroupHasNativePendingWork() {
+  return ncclGroupCommHead != nullptr ||
+         ncclGroupCommPreconnectHead != nullptr ||
+         !ncclIntruQueueEmpty(&ncclAsyncJobs);
+}
 
 void* ncclAsyncJobMain(void* arg);
 
@@ -92,9 +99,21 @@ NCCL_API(ncclResult_t, ncclGroupEnd);
 ncclResult_t ncclGroupEnd() {
   ncclResult_t ret = ncclSuccess;
   NVTX3_FUNC_RANGE_IN(nccl_domain);
+
+  const bool outermost = ncclGroupDepth == 1;
+  if (outermost && cocclGroupHasPending() &&
+      ncclGroupHasNativePendingWork()) {
+    WARN("COCCL does not support mixing deferred COCCL collectives and native NCCL work in one group");
+    if (ncclGroupError == ncclSuccess) ncclGroupError = ncclInvalidUsage;
+  }
+
   NCCLCHECKGOTO(ncclGroupEndInternal(), ret, exit);
+  if (ret == ncclSuccess && outermost && cocclGroupHasPending()) {
+    NCCLCHECKGOTO(cocclGroupDrain(), ret, exit);
+  }
   TRACE_CALL("ncclGroupEnd()");
 exit:
+  if (ret != ncclSuccess) cocclGroupAbort();
   return ret;
 }
 
