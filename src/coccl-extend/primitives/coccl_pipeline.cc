@@ -11,6 +11,7 @@
 namespace {
 
 constexpr int kMaxPipelineStages = 8;
+constexpr int kPipelineTempSlots = 2;
 constexpr size_t kPipelineBufferAlignment = 256;
 
 struct cocclPipelineResources {
@@ -37,7 +38,7 @@ struct cocclPipelinePlan {
   int inputStagingTemp;
   int outputStagingTemp;
   int stageOutputTemp[kMaxPipelineStages];
-  cocclPipelineTempPlan temps[kMaxPipelineStages];
+  cocclPipelineTempPlan temps[kPipelineTempSlots];
   size_t finalChunks;
   size_t sliceBytes;
   size_t workspaceBytes;
@@ -89,6 +90,31 @@ bool cocclStageCreatesTemp(cocclPipelineStageKind kind) {
       kind == cocclPipelineStageDecompReduceComp;
 }
 
+ncclResult_t cocclAssignPipelineTemp(cocclPipelinePlan* plan,
+                                     size_t rawSliceBytes,
+                                     size_t logicalChunks, int* nextTemp,
+                                     int* assignedTemp) {
+  if (plan == nullptr || nextTemp == nullptr || assignedTemp == nullptr ||
+      *nextTemp < 0 || *nextTemp >= kPipelineTempSlots) {
+    return ncclInvalidArgument;
+  }
+
+  size_t capacity = 0;
+  if (!cocclPipelineEncodedCapacity(rawSliceBytes, logicalChunks,
+                                    &capacity)) {
+    return ncclInvalidArgument;
+  }
+
+  const int temp = *nextTemp;
+  if (capacity > plan->temps[temp].bytes) {
+    plan->temps[temp].bytes = capacity;
+  }
+  if (plan->tempCount < temp + 1) plan->tempCount = temp + 1;
+  *assignedTemp = temp;
+  *nextTemp = (temp + 1) % kPipelineTempSlots;
+  return ncclSuccess;
+}
+
 ncclResult_t cocclValidatePipelineSpec(const cocclPipelineSpec* spec) {
   if (spec == nullptr || spec->name == nullptr || spec->input == nullptr ||
       spec->output == nullptr || spec->ownerComm == nullptr ||
@@ -132,62 +158,54 @@ ncclResult_t cocclValidatePipelineSpec(const cocclPipelineSpec* spec) {
 ncclResult_t cocclBuildPipelinePlan(cocclPipelineContext* ctx) {
   const auto* spec = ctx->spec;
   auto* plan = &ctx->plan;
-  size_t logicalChunks = spec->inputChunks;
-  int currentTemp = -1;
+  *plan = {};
+  for (int i = 0; i < kMaxPipelineStages; ++i) {
+    plan->stageOutputTemp[i] = -1;
+  }
   plan->inputStagingTemp = -1;
   plan->outputStagingTemp = -1;
 
+  size_t stageOutputChunks[kMaxPipelineStages] = {};
+  size_t logicalChunks = spec->inputChunks;
   for (int stageIndex = 0; stageIndex < spec->stageCount; ++stageIndex) {
     const auto& stage = spec->stages[stageIndex];
-    size_t outputChunks = 0;
     NCCLCHECK(cocclPipelineStageOutputChunks(stage, logicalChunks,
-                                             &outputChunks));
-    logicalChunks = outputChunks;
-
-    bool finalStage = stageIndex + 1 == spec->stageCount;
-    if (finalStage) {
-      plan->stageOutputTemp[stageIndex] = -1;
-    } else if (cocclStageCreatesTemp(stage.kind)) {
-      if (plan->tempCount >= kMaxPipelineStages) return ncclInvalidArgument;
-      currentTemp = plan->tempCount++;
-      size_t capacity = 0;
-      if (!cocclPipelineEncodedCapacity(
-              ctx->rawSliceBytes, logicalChunks, &capacity)) {
-        return ncclInvalidArgument;
-      }
-      plan->temps[currentTemp].bytes = capacity;
-      plan->stageOutputTemp[stageIndex] = currentTemp;
-    } else {
-      return ncclInvalidArgument;
-    }
+                                             &stageOutputChunks[stageIndex]));
+    logicalChunks = stageOutputChunks[stageIndex];
   }
-
   plan->finalChunks = logicalChunks;
+
+  // The pipeline is a linear chain. A stage consumes the previous logical
+  // buffer before the following stage may overwrite it, so alternating two
+  // physical slots keeps every stage non-in-place while reusing dead inputs.
+  int nextTemp = 0;
   // User collective buffers are chunk-major. Overlapped slices are packed
   // into a contiguous edge before Compress and scattered back after the final
   // stage, keeping this layout detail out of primitive flow descriptions.
   if (ctx->depth > 1 && spec->inputChunks > 1) {
-    if (plan->tempCount >= kMaxPipelineStages) return ncclInvalidArgument;
-    plan->inputStagingTemp = plan->tempCount++;
-    size_t capacity = 0;
-    if (!cocclCheckedMultiply(ctx->rawSliceBytes, spec->inputChunks,
-                              &capacity) ||
-        !cocclAlignPipelineBytes(capacity, &capacity)) {
+    NCCLCHECK(cocclAssignPipelineTemp(
+        plan, ctx->rawSliceBytes, spec->inputChunks, &nextTemp,
+        &plan->inputStagingTemp));
+  }
+
+  for (int stageIndex = 0; stageIndex < spec->stageCount; ++stageIndex) {
+    const bool finalStage = stageIndex + 1 == spec->stageCount;
+    if (finalStage) {
+      if (ctx->depth > 1 && plan->finalChunks > 1) {
+        NCCLCHECK(cocclAssignPipelineTemp(
+            plan, ctx->rawSliceBytes, stageOutputChunks[stageIndex],
+            &nextTemp, &plan->outputStagingTemp));
+      }
+      continue;
+    }
+    if (!cocclStageCreatesTemp(spec->stages[stageIndex].kind)) {
       return ncclInvalidArgument;
     }
-    plan->temps[plan->inputStagingTemp].bytes = capacity;
+    NCCLCHECK(cocclAssignPipelineTemp(
+        plan, ctx->rawSliceBytes, stageOutputChunks[stageIndex], &nextTemp,
+        &plan->stageOutputTemp[stageIndex]));
   }
-  if (ctx->depth > 1 && plan->finalChunks > 1) {
-    if (plan->tempCount >= kMaxPipelineStages) return ncclInvalidArgument;
-    plan->outputStagingTemp = plan->tempCount++;
-    size_t capacity = 0;
-    if (!cocclCheckedMultiply(ctx->rawSliceBytes, plan->finalChunks,
-                              &capacity) ||
-        !cocclAlignPipelineBytes(capacity, &capacity)) {
-      return ncclInvalidArgument;
-    }
-    plan->temps[plan->outputStagingTemp].bytes = capacity;
-  }
+
   plan->sliceBytes = 0;
   for (int i = 0; i < plan->tempCount; ++i) {
     plan->temps[i].offset = plan->sliceBytes;
@@ -408,9 +426,11 @@ ncclResult_t cocclRunPipelineStage(cocclPipelineContext* ctx,
                             &outputCapacityBytes)) {
     return ncclInvalidArgument;
   }
-  if (!finalStage) {
-    int outputTemp = ctx->plan.stageOutputTemp[stageIndex];
-    if (outputTemp < 0 || outputTemp >= ctx->plan.tempCount) {
+  const int outputTemp = finalStage
+      ? ctx->plan.outputStagingTemp
+      : ctx->plan.stageOutputTemp[stageIndex];
+  if (outputTemp >= 0) {
+    if (outputTemp >= ctx->plan.tempCount) {
       return ncclInvalidArgument;
     }
     // Physical temps include alignment padding. Compressors only see the
@@ -418,6 +438,8 @@ ncclResult_t cocclRunPipelineStage(cocclPipelineContext* ctx,
     if (outputCapacityBytes > ctx->plan.temps[outputTemp].bytes) {
       return ncclInternalError;
     }
+  } else if (!finalStage) {
+    return ncclInvalidArgument;
   }
   NCCLCHECK(cocclExecutePipelineStage(
       &ctx->stageContext, &stage, edge, outputPtr, outputCapacityBytes,
