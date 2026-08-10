@@ -1,10 +1,10 @@
 
-#include "coll_extend_p2p.h"
+#include "primitives/coll_extend_p2p.h"
 #include "nccl.h"
 #include "argcheck.h"
 #include "enqueue.h"
-#include "compress.h"
-#include "reduce_extend.h"
+#include "compression/compress.h"
+#include "compression/reduce_extend.h"
 
 // P2P helper collectives used by COCCL experiments. The compressed primitive
 // wrappers call the lower-level NCCL enqueue path directly where possible; these
@@ -290,7 +290,8 @@ ncclResult_t ncclAllReduceTwoShot(const void* sendbuff, void* recvbuff, size_t c
   // void* recvTempbuff = nullptr;
   // CUDACHECK(cudaMallocAsync((void**)&recvTempbuff, comm->nRanks * chunkCount * ncclTypeSize(datatype), stream));
   // NCCLCHECK(ncclAlltoAll(sendbuff, recvTempbuff, chunkCount, datatype, comm, stream));
-  NCCLCHECK(ncclAllToAll(sendbuff, recvbuff, chunkCount, datatype, comm, stream));
+  NCCLCHECK(ncclAllToAllNaive(
+      sendbuff, recvbuff, chunkCount, datatype, comm, stream));
 
   // reduce
   // NCCLCHECK(ncclReduceChunk(recvTempbuff, chunkCount, recvTempbuff, datatype, comm->nRanks, stream));

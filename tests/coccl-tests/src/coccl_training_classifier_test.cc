@@ -1,10 +1,10 @@
-#include "coccl_training_assist.h"
-#include "coccl_training_classifier.h"
-#include "coccl_comm.h"
-#include "coccl_runtime.h"
+#include "training/coccl_training_assist.h"
+#include "training/coccl_training_classifier.h"
+#include "runtime/coccl_comm.h"
+#include "config/coccl_config.h"
+#include "runtime/coccl_runtime.h"
 #include "comm.h"
 #include "debug.h"
-#include "param.h"
 
 #include <stdarg.h>
 #include <stdint.h>
@@ -14,9 +14,8 @@
 
 #include <vector>
 
-// training_assist is compiled directly into this host-only test. Runtime
-// logging and NCCL_PARAM loading are irrelevant to the pure trace classifier,
-// so small stubs keep the test independent of CUDA devices and libnccl.so.
+// training_assist is compiled directly into this host-only test. A logging
+// stub keeps the test independent of CUDA devices and libnccl.so.
 void ncclDebugLog(ncclDebugLogLevel, unsigned long, const char*, int,
                   const char*, ...) {}
 thread_local int ncclDebugNoWarn = 0;
@@ -24,11 +23,6 @@ thread_local int ncclDebugNoWarn = 0;
 // coccl_comm.cc's detached cleanup references the NCCL split-communicator
 // destroy entry point. This host-only test never creates a split communicator.
 ncclResult_t ncclCommDestroy(ncclComm_t) { return ncclSuccess; }
-
-void ncclLoadParam(const char* env, int64_t defaultValue, int64_t,
-                   int64_t* cache) {
-  *cache = strcmp(env, "NCCL_COCCL_TRAINING_MODE") == 0 ? 1 : defaultValue;
-}
 
 namespace {
 
@@ -306,30 +300,22 @@ static int testNodeLocalDdpTail() {
                     "node-local TP");
 }
 
-struct ChainVisitResult {
-  ncclCompressor_t* expected = nullptr;
-  int calls = 0;
-  bool matched = true;
-};
-
-static ncclResult_t recordVisitedCompressor(
-    ncclCompressor_t* compressor, void*, void* context) {
-  ChainVisitResult* result = static_cast<ChainVisitResult*>(context);
-  result->calls++;
-  result->matched = result->matched && compressor == result->expected;
-  return ncclSuccess;
+static cocclCompressorHandle makeTestCompressorHandle(const void* identity) {
+  cocclCompressorHandle handle;
+  handle.state = std::shared_ptr<cocclCompressorRuntimeState>(
+      reinterpret_cast<cocclCompressorRuntimeState*>(
+          const_cast<void*>(identity)),
+      [](cocclCompressorRuntimeState*) {});
+  return handle;
 }
 
-static int expectVisitedCompressor(
-    ncclComm_t comm, ncclCommOp_t op, ncclCompressor_t* compressor,
-    const char* scenario) {
-  ChainVisitResult result;
-  result.expected = compressor;
-  if (cocclVisitCompressorChain(comm, op, false,
-                                recordVisitedCompressor,
-                                &result) != ncclSuccess ||
-      result.calls != 1 || !result.matched) {
-    fprintf(stderr, "%s: selected an unexpected compressor chain\n", scenario);
+static int expectConfiguredCompressor(
+    ncclComm_t comm, cocclPolicyKey policy,
+    const cocclCompressorHandle& expected, const char* scenario) {
+  cocclCompressorHandle actual;
+  if (cocclCommGetCompressor(comm, policy, &actual) != ncclSuccess ||
+      actual.state.get() != expected.state.get()) {
+    fprintf(stderr, "%s: selected an unexpected compressor\n", scenario);
     return 1;
   }
   return 0;
@@ -343,10 +329,12 @@ static int testRoleSpecificCompressorSelection() {
   comm.localRanks = 4;
   comm.commHash = 0x1234;
 
-  ncclCompressor_t defaultCompressor = {};
-  defaultCompressor.name = "default";
-  ncclCompressor_t dpCompressor = {};
-  dpCompressor.name = "dp";
+  int dpCompressorIdentity = 0;
+  int dpAllGatherCompressorIdentity = 0;
+  const cocclCompressorHandle dpCompressor =
+      makeTestCompressorHandle(&dpCompressorIdentity);
+  const cocclCompressorHandle dpAllGatherCompressor =
+      makeTestCompressorHandle(&dpAllGatherCompressorIdentity);
 
   // The assist registry is intentionally independent from cocclComm. Register
   // twice to verify idempotence before creating the compressor sidecar.
@@ -359,49 +347,42 @@ static int testRoleSpecificCompressorSelection() {
   }
 
   if (cocclCommCreate(&comm) != ncclSuccess ||
-      cocclCommAppendDefaultCompressor(
-          &comm, &defaultCompressor, nullptr) != ncclSuccess) {
-    return 1;
-  }
-  if (expectVisitedCompressor(&comm, ReduceScatter, &defaultCompressor,
-                              "pre-commit autotune chain")) {
-    return 1;
-  }
-
-  cocclRuntimeCommConfig config = {};
-  config.enabled = true;
-  config.enableDataParallelComp = true;
-  config.enableAllGatherComp = true;
-  config.enableAllReduceComp = true;
-  config.enableReduceScatterComp = true;
-  if (cocclCommSetConfig(&comm, &config) != ncclSuccess ||
-      cocclCommResetTrainingRoleChain(
+      cocclCommSetCompressorPolicy(
           &comm, cocclTrainingRoleDataParallel,
-          ReduceScatter) != ncclSuccess ||
-      cocclCommAppendTrainingRoleCompressor(
-          &comm, cocclTrainingRoleDataParallel, ReduceScatter,
-          &dpCompressor, nullptr) != ncclSuccess ||
-      cocclCommSetTrainingCompressionThreshold(
-          &comm, cocclTrainingRoleDataParallel, ReduceScatter,
-          1024) != ncclSuccess) {
+          cocclDefaultPolicy(cocclOperation::ReduceScatter),
+          1024, dpCompressor) != ncclSuccess ||
+      cocclCommSetCompressorPolicy(
+          &comm, cocclTrainingRoleDataParallel,
+          cocclDefaultPolicy(cocclOperation::AllGather),
+          0, dpAllGatherCompressor) != ncclSuccess) {
     return 1;
   }
 
-  ChainVisitResult unclassifiedVisit;
-  unclassifiedVisit.expected = &defaultCompressor;
+  cocclCompressorHandle selected;
+  if (cocclCommGetCompressor(
+          &comm, cocclDefaultPolicy(cocclOperation::ReduceScatter),
+          &selected) !=
+          ncclInvalidUsage ||
+      selected || cocclCommCommit(&comm) != ncclSuccess) {
+    fprintf(stderr, "pre-commit compressor was executable\n");
+    return 1;
+  }
+
   if (cocclTrainingAssistQuery(&comm, &classification) ||
-      cocclVisitCompressorChain(&comm, ReduceScatter, false,
-                                recordVisitedCompressor,
-                                &unclassifiedVisit) != ncclInvalidUsage ||
-      unclassifiedVisit.calls != 0) {
+      cocclCommGetCompressor(
+          &comm, cocclDefaultPolicy(cocclOperation::ReduceScatter),
+          &selected) !=
+          ncclInvalidUsage ||
+      selected) {
     fprintf(stderr, "unclassified training comm was allowed to compress\n");
     return 1;
   }
 
-  cocclRuntimeArgs args = {};
+  cocclInfo args = {};
   args.count = 64;
   args.datatype = ncclFloat32;
   args.func = ncclFuncReduceScatter;
+  args.operation = cocclOperation::ReduceScatter;
   args.comm = &comm;
   // Eight events per iteration match the runtime detector's minimum complete
   // schedule. Ten repetitions commit the cross-node communicator as DP.
@@ -416,34 +397,33 @@ static int testRoleSpecificCompressorSelection() {
     fprintf(stderr, "role-specific chain test did not classify DP\n");
     return 1;
   }
-  if (!cocclCommRoleAllowsCompression(
-          &comm, classification.role, ReduceScatter) ||
-      cocclCommRoleAllowsCompression(
-          &comm, classification.role, SendRecv)) {
-    fprintf(stderr, "classified DP comm has incorrect operation permissions\n");
-    return 1;
-  }
   if (!cocclCommShouldCompress(
-          &comm, ReduceScatter, classification.role, 1025,
+          &comm, classification.role,
+          cocclDefaultPolicy(cocclOperation::ReduceScatter), 1025,
           ncclFloat16, ncclSum) ||
       !cocclCommShouldCompress(
-          &comm, ReduceScatter, classification.role, 1025,
+          &comm, classification.role,
+          cocclDefaultPolicy(cocclOperation::ReduceScatter), 1025,
           ncclFloat32, ncclSum) ||
       cocclCommShouldCompress(
-          &comm, ReduceScatter, classification.role, 1024,
+          &comm, classification.role,
+          cocclDefaultPolicy(cocclOperation::ReduceScatter), 1024,
           ncclFloat32, ncclSum) ||
       cocclCommShouldCompress(
-          &comm, ReduceScatter, classification.role, 2048,
+          &comm, classification.role,
+          cocclDefaultPolicy(cocclOperation::ReduceScatter), 2048,
           ncclFloat64, ncclSum) ||
       cocclCommShouldCompress(
-          &comm, ReduceScatter, classification.role, 2048,
+          &comm, classification.role,
+          cocclDefaultPolicy(cocclOperation::ReduceScatter), 2048,
           ncclFloat32, ncclProd)) {
     fprintf(stderr, "unified compression predicate has incorrect threshold, datatype, or reduction-op behavior\n");
     return 1;
   }
 #if defined(__CUDA_BF16_TYPES_EXIST__)
   if (!cocclCommShouldCompress(
-          &comm, ReduceScatter, classification.role, 1025,
+          &comm, classification.role,
+          cocclDefaultPolicy(cocclOperation::ReduceScatter), 1025,
           ncclBfloat16, ncclSum)) {
     fprintf(stderr, "unified compression predicate rejected BF16\n");
     return 1;
@@ -451,37 +431,42 @@ static int testRoleSpecificCompressorSelection() {
 #endif
   comm.nRanks = 1;
   bool compressedSingleRank = cocclCommShouldCompress(
-      &comm, ReduceScatter, classification.role, 2048,
+      &comm, classification.role,
+      cocclDefaultPolicy(cocclOperation::ReduceScatter), 2048,
       ncclFloat32, ncclSum);
   comm.nRanks = 8;
   if (compressedSingleRank) {
     fprintf(stderr, "unified compression predicate accepted one rank\n");
     return 1;
   }
-  int result = expectVisitedCompressor(&comm, ReduceScatter, &dpCompressor,
-                                       "classified DP chain");
-  ChainVisitResult missingRoleOpVisit;
-  missingRoleOpVisit.expected = &defaultCompressor;
+  int result = expectConfiguredCompressor(
+      &comm, cocclDefaultPolicy(cocclOperation::ReduceScatter),
+      dpCompressor, "classified DP policy");
   if (result == 0 &&
-      (cocclCommRoleAllowsCompression(
-           &comm, classification.role, AllGather) ||
-       cocclVisitCompressorChain(
-           &comm, AllGather, false, recordVisitedCompressor,
-           &missingRoleOpVisit) != ncclInvalidUsage ||
-       missingRoleOpVisit.calls != 0)) {
-    fprintf(stderr, "missing role/op chain was allowed to use the default compressor\n");
+      (!cocclCommShouldCompress(
+           &comm, classification.role,
+           cocclDefaultPolicy(cocclOperation::AllGather), 1,
+           ncclFloat32, ncclSum) ||
+       expectConfiguredCompressor(
+           &comm, cocclDefaultPolicy(cocclOperation::AllGather),
+           dpAllGatherCompressor,
+           "zero-threshold DP AllGather policy"))) {
+    fprintf(stderr, "zero-threshold role/op policy was not enabled\n");
     result = 1;
   }
-
-  config.enableDataParallelComp = false;
-  if (cocclCommSetConfig(&comm, &config) != ncclSuccess ||
-      cocclCommRoleAllowsCompression(
-          &comm, classification.role, ReduceScatter) ||
-      cocclVisitCompressorChain(&comm, ReduceScatter, false,
-                                recordVisitedCompressor,
-                                &unclassifiedVisit) != ncclInvalidUsage) {
-    fprintf(stderr, "disabled DP role was still allowed to compress\n");
-    return 1;
+  selected = {};
+  if (result == 0 &&
+      (cocclCommShouldCompress(
+           &comm, classification.role,
+           cocclDefaultPolicy(cocclOperation::AllReduce), 2048,
+           ncclFloat32, ncclSum) ||
+       cocclCommGetCompressor(
+           &comm, cocclDefaultPolicy(cocclOperation::AllReduce),
+           &selected) !=
+           ncclInvalidUsage ||
+       selected)) {
+    fprintf(stderr, "missing role/op policy was allowed to compress\n");
+    result = 1;
   }
   cocclTrainingAssistUnregister(&comm);
   cocclTrainingAssistUnregister(&comm);
@@ -513,10 +498,58 @@ static int testAmbiguousConstantCollective() {
                     "ambiguous constant collective");
 }
 
+static int testOperationDescriptors() {
+  for (int value = 0; value < (int)cocclOperation::Count; ++value) {
+    const cocclOperation operation = (cocclOperation)value;
+    const cocclOperationDescriptor* descriptor =
+        cocclGetOperationDescriptor(operation);
+    if (descriptor == nullptr || descriptor->operation != operation ||
+        descriptor->name == nullptr ||
+        !cocclOperationSupportsPolicy(
+            descriptor, cocclPolicyVariant::Default)) {
+      fprintf(stderr, "operation %d has an incomplete descriptor\n", value);
+      return 1;
+    }
+  }
+  const cocclOperationDescriptor* allReduce =
+      cocclGetOperationDescriptor(cocclOperation::AllReduce);
+  const cocclOperationDescriptor* reduceScatter =
+      cocclGetOperationDescriptor(cocclOperation::ReduceScatter);
+  const cocclOperationDescriptor* sendRecv =
+      cocclGetOperationDescriptor(cocclOperation::SendRecv);
+  if (cocclGetOperationDescriptor(cocclOperation::Count) != nullptr ||
+      !cocclOperationHasTrait(allReduce, cocclOperationTraitReduction) ||
+      !cocclOperationHasTrait(
+          allReduce, cocclOperationTraitCountDivisibleByRanks) ||
+      !cocclOperationSupportsPolicy(
+          allReduce, cocclPolicyVariant::Hierarchical) ||
+      !cocclOperationHasTrait(
+          reduceScatter, cocclOperationTraitReduction) ||
+      !cocclOperationHasTrait(
+          reduceScatter, cocclOperationTraitHierarchicalPolicy) ||
+      cocclOperationHasTrait(sendRecv, cocclOperationTraitGrouped) ||
+      !cocclOperationSupportsPolicy(
+          sendRecv, cocclPolicyVariant::Forward) ||
+      cocclOperationSupportsPolicy(
+          sendRecv, cocclPolicyVariant::Hierarchical)) {
+    fprintf(stderr, "operation descriptor semantics are inconsistent\n");
+    return 1;
+  }
+  return 0;
+}
+
 }  // namespace
 
 int main() {
-  if (testIterationDetection() ||
+  if (setenv("COCCL_ENABLE", "1", 1) != 0 ||
+      setenv("COCCL_CONFIG_FILE", COCCL_TEST_CONFIG_FILE, 1) != 0 ||
+      !cocclConfigInitialize() ||
+      cocclGetConfig().runtime.mode != cocclRuntimeMode::Training) {
+    fprintf(stderr, "failed to load the training test configuration\n");
+    return 1;
+  }
+  if (testOperationDescriptors() ||
+      testIterationDetection() ||
       testCrossNodeDpAndTp() ||
       testPipelineParallel() ||
       testOverlapDp() ||

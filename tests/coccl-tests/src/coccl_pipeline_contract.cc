@@ -1,4 +1,4 @@
-#include "coccl_pipeline.h"
+#include "pipeline/coccl_pipeline.h"
 
 // Compile-only contract for the COCCL-private linear pipeline API. Runtime
 // behavior is exercised by the collective-specific overlap performance tests.
@@ -16,6 +16,6 @@ void cocclPipelineContract(const void* input, void* output, ncclComm_t comm,
   };
   cocclPipelineSpec spec = {
       "contract", input, output, 1024, 16, ncclFloat32, comm,
-      ncclCommOp_t::ReduceScatter_Inter, stream, stages, 7};
+      cocclCompressorHandle{}, stream, stages, 7};
   (void)cocclRunPipeline(&spec);
 }

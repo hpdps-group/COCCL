@@ -21,24 +21,8 @@ export NCCL_SOCKET_IFNAME=bond0
 export NCCL_IB_TIMEOUT=23
 export NCCL_IB_RETRY_CNT=13
 
-export NCCL_ENABLE_COMPRESS=1
-export NCCL_COMPRESSORS=sdp4bit,tahquant
-export NCCL_COCCL_TRAINING_MODE=1
-# Training mode ignores all primitive-level enable and compressor selections.
-export NCCL_ENABLE_DP_COMPRESS=1
-export NCCL_ENABLE_TP_COMPRESS=1
-export NCCL_ENABLE_PP_COMPRESS=1
-export NCCL_DP_ALLGATHER_COMPRESSORS=sdp4bit
-export NCCL_DP_REDUCESCATTER_COMPRESSORS=sdp4bit
-export NCCL_DP_ALLREDUCE_COMPRESSORS=sdp4bit
-export NCCL_TP_ALLGATHER_COMPRESSORS=sdp4bit
-export NCCL_TP_REDUCESCATTER_COMPRESSORS=sdp4bit
-export NCCL_TP_ALLREDUCE_COMPRESSORS=sdp4bit
-export NCCL_PP_SENDRECV_FWD_COMPRESSORS=tahquant
-export NCCL_PP_SENDRECV_BWD_COMPRESSORS=tahquant
-export NCCL_COMPRESS_ENABLE_THRESHOLD=10485760 # 10MB
-export NCCL_COMPRESSORS_CONFIG_PATH=$COCCL_PATH/src/coccl-extend/compressor_plugin/configs_training
-export NCCL_COMPRESSORS_LIB_PATH=$COCCL_PATH/build/obj/coccl-extend/compressor_plugin/libcompress
+export COCCL_ENABLE=1
+export COCCL_CONFIG_FILE=$COCCL_PATH/src/coccl-extend/configs/training.toml
 export NCCL_LOCAL_REGISTER=0
 export NCCL_CHECKS_DISABLE=1
 export NCCL_BUFFSIZE=33554432

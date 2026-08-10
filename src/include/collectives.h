@@ -45,6 +45,12 @@ inline int ncclTypeSize(ncclDataType_t type) {
   }
 }
 
+// Internal point-to-point implementation used by COCCL pipeline stages. It
+// bypasses public runtime routing and therefore cannot recurse into COCCL.
+ncclResult_t ncclAllToAllNaive(const void* sendbuff, void* recvbuff,
+                               size_t sendcount, ncclDataType_t datatype,
+                               ncclComm_t comm, cudaStream_t stream);
+
 #include <sys/types.h>
 
 #define NCCL_MODE_NORMAL 0

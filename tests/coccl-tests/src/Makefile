@@ -68,7 +68,9 @@ else
 .SILENT:
 endif
 
-.PHONY: build clean pipeline-layout-test group-deferred-test training-classifier-test
+.PHONY: build clean pipeline-layout-test group-deferred-test \
+	training-classifier-test config-reader-test compressor-sdk-test \
+	autotune-selector-test pipeline-stage-test
 
 BUILDDIR ?= ../build
 ifneq ($(NCCL_HOME), "")
@@ -108,14 +110,35 @@ pipeline-layout-test: $(COCCL_LAYOUT_TEST)
 
 COCCL_GROUP_TEST := $(DST_DIR)/coccl_group_deferred_test
 COCCL_TRAINING_TEST := $(DST_DIR)/coccl_training_classifier_test
+COCCL_CONFIG_READER_TEST := $(DST_DIR)/coccl_config_reader_test
+COCCL_COMPRESSOR_SDK_TEST := $(DST_DIR)/coccl_compressor_sdk_test
+COCCL_AUTOTUNE_SELECTOR_TEST := $(DST_DIR)/coccl_autotune_selector_test
+COCCL_PIPELINE_STAGE_TEST := $(DST_DIR)/coccl_pipeline_stage_test
+COCCL_PIPELINE_STAGE_SRC := \
+	../../../src/coccl-extend/primitives/coccl_pipeline_stage.cc
+COCCL_AUTOTUNE_COST_MODEL_SRC := \
+	../../../src/coccl-extend/tuning/coccl_autotune_cost_model.cc
+COCCL_AUTOTUNE_INTERNAL_HEADER := \
+	../../../src/coccl-extend/tuning/coccl_autotune_internal.h
+COCCL_COMPRESSOR_SDK_HEADERS := \
+	../../../src/coccl-extend/include/compressor_plugin/compressor_plugin.h \
+	../../../src/coccl-extend/include/compressor_plugin/detail/compressor_abi.h
 
 COCCL_TRAINING_SRC := \
+	../../../src/coccl-extend/param/coccl_config.cc \
+	../../../src/coccl-extend/debug/coccl_config_format.cc \
+	../../../src/coccl-extend/debug/coccl_config_log.cc \
 	../../../src/coccl-extend/training_assist/coccl_training_assist.cc \
 	../../../src/coccl-extend/training_assist/coccl_training_classifier.cc \
+	../../../src/coccl-extend/coccl_operation.cc \
 	../../../src/coccl-extend/coccl_comm.cc
 
 group-deferred-test: $(COCCL_GROUP_TEST)
 training-classifier-test: $(COCCL_TRAINING_TEST)
+config-reader-test: $(COCCL_CONFIG_READER_TEST)
+compressor-sdk-test: $(COCCL_COMPRESSOR_SDK_TEST)
+autotune-selector-test: $(COCCL_AUTOTUNE_SELECTOR_TEST)
+pipeline-stage-test: $(COCCL_PIPELINE_STAGE_TEST)
 
 $(COCCL_GROUP_TEST): coccl_group_deferred_test.cc
 	@printf "Linking  %-35s > %s\n" $< $@
@@ -129,7 +152,44 @@ $(COCCL_TRAINING_TEST): coccl_training_classifier_test.cc $(COCCL_TRAINING_SRC)
 	$(CXX) $(filter-out -std=c++11,$(CXXFLAGS)) -std=c++17 \
 		-ffunction-sections -fdata-sections -Wl,--gc-sections \
 		-I$(CUDA_INC) -I$(NCCL_HOME)/include -I../../../src/include \
-		-I../../../src/coccl-extend/include -o $@ $^ -pthread
+		-I../../../src/coccl-extend/include \
+		-DCOCCL_TEST_CONFIG_FILE=\"$(abspath ../../../src/coccl-extend/configs/training.toml)\" \
+		-o $@ $^ -pthread
+
+$(COCCL_CONFIG_READER_TEST): coccl_config_reader_test.cc \
+	$(COCCL_COMPRESSOR_SDK_HEADERS)
+	@printf "Linking  %-35s > %s\n" $< $@
+	@mkdir -p ${DST_DIR}
+	$(CXX) $(filter-out -std=c++11,$(CXXFLAGS)) -std=c++17 \
+		-I$(CUDA_INC) -I$(NCCL_HOME)/include \
+		-I../../../src/coccl-extend/include -o $@ $<
+
+$(COCCL_COMPRESSOR_SDK_TEST): coccl_compressor_sdk_test.cc \
+	$(COCCL_COMPRESSOR_SDK_HEADERS)
+	@printf "Linking  %-35s > %s\n" $< $@
+	@mkdir -p ${DST_DIR}
+	$(CXX) $(filter-out -std=c++11,$(CXXFLAGS)) -std=c++17 \
+		-I$(CUDA_INC) -I$(NCCL_HOME)/include \
+		-I../../../src/coccl-extend/include -o $@ $<
+
+$(COCCL_AUTOTUNE_SELECTOR_TEST): coccl_autotune_selector_test.cc \
+	$(COCCL_AUTOTUNE_COST_MODEL_SRC) $(COCCL_AUTOTUNE_INTERNAL_HEADER)
+	@printf "Linking  %-35s > %s\n" $< $@
+	@mkdir -p ${DST_DIR}
+	$(CXX) $(filter-out -std=c++11,$(CXXFLAGS)) -std=c++17 \
+		-I$(CUDA_INC) -I$(NCCL_HOME)/include -I../../../src/include \
+		-I../../../src/coccl-extend/include \
+		-I../../../src/coccl-extend -o $@ $< \
+		$(COCCL_AUTOTUNE_COST_MODEL_SRC)
+
+$(COCCL_PIPELINE_STAGE_TEST): coccl_pipeline_stage_test.cc \
+	$(COCCL_PIPELINE_STAGE_SRC)
+	@printf "Linking  %-35s > %s\n" $< $@
+	@mkdir -p ${DST_DIR}
+	$(CXX) $(filter-out -std=c++11,$(CXXFLAGS)) -std=c++17 \
+		-ffunction-sections -fdata-sections -Wl,--gc-sections \
+		-I$(CUDA_INC) -I$(NCCL_HOME)/include -I../../../src/include \
+		-I../../../src/coccl-extend/include -o $@ $^
 
 $(COCCL_LAYOUT_TEST): coccl_pipeline_layout_test.cu $(COCCL_LAYOUT_SRC)
 	@printf "Linking  %-35s > %s\n" $< $@

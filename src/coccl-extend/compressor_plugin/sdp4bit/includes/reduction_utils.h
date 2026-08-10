@@ -17,6 +17,9 @@ enum class ROpType {
     // Addition
     Add,
 
+    // Element-wise subtraction; not valid for warp/block reductions.
+    Sub,
+
     // Maximum reduction
     Max,
 
@@ -160,6 +163,12 @@ DS_D_INLINE float element<ROpType::Add>(const float lhs, const float rhs)
 }
 
 template <>
+DS_D_INLINE float element<ROpType::Sub>(const float lhs, const float rhs)
+{
+    return lhs - rhs;
+}
+
+template <>
 DS_D_INLINE float element<ROpType::Max>(const float lhs, const float rhs)
 {
     return fmaxf(lhs, rhs);
@@ -176,6 +185,12 @@ template <>
 DS_D_INLINE __half element<ROpType::Add>(const __half lhs, const __half rhs)
 {
     return lhs + rhs;
+}
+
+template <>
+DS_D_INLINE __half element<ROpType::Sub>(const __half lhs, const __half rhs)
+{
+    return lhs - rhs;
 }
 
 template <>
@@ -372,6 +387,12 @@ template <>
 DS_D_INLINE __nv_bfloat16 element<ROpType::Add>(const __nv_bfloat16 lhs, const __nv_bfloat16 rhs)
 {
     return lhs + rhs;
+}
+
+template <>
+DS_D_INLINE __nv_bfloat16 element<ROpType::Sub>(const __nv_bfloat16 lhs, const __nv_bfloat16 rhs)
+{
+    return lhs - rhs;
 }
 
 template <>

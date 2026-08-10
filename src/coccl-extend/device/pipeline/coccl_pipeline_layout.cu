@@ -1,4 +1,4 @@
-#include "coccl_pipeline_layout.h"
+#include "pipeline/coccl_pipeline_layout.h"
 
 #include <cuda_runtime.h>
 

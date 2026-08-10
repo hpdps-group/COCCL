@@ -21,8 +21,50 @@ export NCCL_HOME=$COCCL_PATH/build
 export LD_LIBRARY_PATH=$NCCL_HOME/lib:$LD_LIBRARY_PATH
 export C_INCLUDE_PATH=$NCCL_HOME/include:$C_INCLUDE_PATH
 export CPLUS_INCLUDE_PATH=$NCCL_HOME/include:$CPLUS_INCLUDE_PATH
-export NCCL_COMPRESSORS_CONFIG_PATH=$COCCL_PATH/src/device/compress/configs
-export NCCL_COMPRESSORS_LIB_PATH=$COCCL_PATH/build/obj/device/compress/libcompress
+COCCL_CONFIG_DIR=${TMPDIR:-/tmp}/coccl-benchmark-configs-$$
+mkdir -p "$COCCL_CONFIG_DIR"
+trap 'rm -rf "$COCCL_CONFIG_DIR"' EXIT
+
+write_coccl_config() {
+  local compressor=$1
+  local depth=$2
+  COCCL_CONFIG_FILE=$COCCL_CONFIG_DIR/${compressor}-depth-${depth}.toml
+  if [[ -f "$COCCL_CONFIG_FILE" ]]; then
+    return
+  fi
+  cat >"$COCCL_CONFIG_FILE" <<EOF
+schema_version = 2
+
+[runtime]
+mode = "normal"
+compression_threshold_bytes = 8388608
+
+[compressor_plugins]
+compressors = ["$compressor"]
+library_path = "$COCCL_PATH/build/obj/coccl-extend/compressor_plugin/libcompress"
+
+[pipeline]
+depth = $depth
+
+[autotune]
+enabled = false
+
+[normal.all_gather]
+compressor = "$compressor"
+
+[normal.reduce_scatter]
+compressor = "$compressor"
+
+[normal.all_reduce]
+compressor = "$compressor"
+
+[normal.all_to_all]
+compressor = "$compressor"
+
+[normal.sendrecv]
+compressor = "$compressor"
+EOF
+}
 
 export MPI_HOME=$MPI_PATH
 export PATH=$MPI_HOME/bin:$PATH
@@ -46,55 +88,27 @@ mpirun  -np $gpus \
         -x NCCL_DEBUG=WRAN \
         -x NCCL_DEBUG_FILE=ncclcomp.%h \
         -x NCCL_BUFFSIZE=16777216 \
-        -x NCCL_ENABLE_COMPRESS=1 \
-        -x NCCL_COMPRESSORS=sdp4bit \
-        -x NCCL_ENABLE_ALLTOALL_COMPRESS=1 \
-        -x NCCL_ALLTOALL_COMPRESSORS=sdp4bit \
-        -x NCCL_ENABLE_ALLREDUCE_COMPRESS=1 \
-        -x NCCL_ALLREDUCE_COMPRESSORS=sdp4bit \
-        -x NCCL_ALLREDUCE_INTER_COMPRESSORS=sdp4bit \
-        -x NCCL_ENABLE_ALLGATHER_COMPRESS=1 \
-        -x NCCL_ALLGATHER_COMPRESSORS=sdp4bit \
-        -x NCCL_ALLGATHER_INTER_COMPRESSORS=sdp4bit \
-        -x NCCL_ENABLE_REDUCESCATTER_COMPRESS=1 \
-        -x NCCL_REDUCESCATTER_COMPRESSORS=sdp4bit \
-        -x NCCL_REDUCESCATTER_INTER_COMPRESSORS=sdp4bit \
+        -x COCCL_ENABLE=0 \
         -x NCCL_LOCAL_REGISTER=1 \
-        -x NCCL_PIPELINE_DEPTH=1 \
-        -x NCCL_COMPRESSORS_CONFIG_PATH=${NCCL_COMPRESSORS_CONFIG_PATH} \
-        -x NCCL_COMPRESSORS_LIB_PATH=${NCCL_COMPRESSORS_LIB_PATH} \
        $COCCL_PATH/tests/coccl-tests/build/alltoall_p2p_perf -b 1MB -e 8G -f 2 -t 1 -g 1 -w 50 -n 100 -c 0
 done
 
 
 for comp in "${COMPRESSORS[@]}"; do
   echo "================= Running tests with compressor: $comp ================="
-  for ((pipe=1;pipe<=8;pipe=pipe*2))do
+  for ((pipe=1;pipe<=8;pipe=pipe*2)); do
    for ((i=0; i<1; i++)); do
     echo "------------------------------------------------------alltoall comp $gpus H800 GPUs pipe $pipe [compressor=$comp]------------------------------------------------------"
+    write_coccl_config "$comp" "$pipe"
 
     mpirun -np $gpus \
            -x LD_LIBRARY_PATH=$CUDA_HOME/lib64:$NCCL_HOME/lib:$MPI_HOME/lib \
            -x NCCL_DEBUG=WRAN \
            -x NCCL_DEBUG_FILE=ncclcomp.%h \
            -x NCCL_BUFFSIZE=16777216 \
-           -x NCCL_ENABLE_COMPRESS=1 \
-           -x NCCL_COMPRESSORS=$comp \
-           -x NCCL_ENABLE_ALLTOALL_COMPRESS=1 \
-           -x NCCL_ALLTOALL_COMPRESSORS=$comp \
-           -x NCCL_ENABLE_ALLREDUCE_COMPRESS=1 \
-           -x NCCL_ALLREDUCE_COMPRESSORS=$comp \
-           -x NCCL_ALLREDUCE_INTER_COMPRESSORS=$comp \
-           -x NCCL_ENABLE_ALLGATHER_COMPRESS=1 \
-           -x NCCL_ALLGATHER_COMPRESSORS=$comp \
-           -x NCCL_ALLGATHER_INTER_COMPRESSORS=$comp \
-           -x NCCL_ENABLE_REDUCESCATTER_COMPRESS=1 \
-           -x NCCL_REDUCESCATTER_COMPRESSORS=$comp \
-           -x NCCL_REDUCESCATTER_INTER_COMPRESSORS=$comp \
+           -x COCCL_ENABLE=1 \
+           -x COCCL_CONFIG_FILE=${COCCL_CONFIG_FILE} \
            -x NCCL_LOCAL_REGISTER=1 \
-           -x NCCL_PIPELINE_DEPTH=$pipe \
-           -x NCCL_COMPRESSORS_CONFIG_PATH=${NCCL_COMPRESSORS_CONFIG_PATH} \
-           -x NCCL_COMPRESSORS_LIB_PATH=${NCCL_COMPRESSORS_LIB_PATH} \
            $COCCL_PATH/tests/coccl-tests/build/alltoall_comp_overlap_perf -b 1MB -e 8G -f 2 -t 1 -g 1 -w 50 -n 100 -c 0
   done 
  done
@@ -113,55 +127,27 @@ mpirun  -np $gpus \
         -x NCCL_DEBUG=WRAN \
         -x NCCL_DEBUG_FILE=ncclcomp.%h \
         -x NCCL_BUFFSIZE=16777216 \
-        -x NCCL_ENABLE_COMPRESS=1 \
-        -x NCCL_COMPRESSORS=sdp4bit \
-        -x NCCL_ENABLE_ALLTOALL_COMPRESS=1 \
-        -x NCCL_ALLTOALL_COMPRESSORS=sdp4bit \
-        -x NCCL_ENABLE_ALLREDUCE_COMPRESS=1 \
-        -x NCCL_ALLREDUCE_COMPRESSORS=sdp4bit \
-        -x NCCL_ALLREDUCE_INTER_COMPRESSORS=sdp4bit \
-        -x NCCL_ENABLE_ALLGATHER_COMPRESS=1 \
-        -x NCCL_ALLGATHER_COMPRESSORS=sdp4bit \
-        -x NCCL_ALLGATHER_INTER_COMPRESSORS=sdp4bit \
-        -x NCCL_ENABLE_REDUCESCATTER_COMPRESS=1 \
-        -x NCCL_REDUCESCATTER_COMPRESSORS=sdp4bit \
-        -x NCCL_REDUCESCATTER_INTER_COMPRESSORS=sdp4bit \
+        -x COCCL_ENABLE=0 \
         -x NCCL_LOCAL_REGISTER=1 \
-        -x NCCL_PIPELINE_SIZE=1 \
-        -x NCCL_COMPRESSORS_CONFIG_PATH=${NCCL_COMPRESSORS_CONFIG_PATH} \
-        -x NCCL_COMPRESSORS_LIB_PATH=${NCCL_COMPRESSORS_LIB_PATH} \
        $COCCL_PATH/tests/coccl-tests/build/all_gather_perf -b 1MB -e 8G -f 2 -t 1 -g 1 -w 50 -n 100 -c 0
 done
 
 echo ' '
 for comp in "${COMPRESSORS[@]}"; do
   echo "================= Running allgather with compressor: $comp ================="
-for ((pipe=1;pipe<=8;pipe=pipe*2))do
+for ((pipe=1;pipe<=8;pipe=pipe*2)); do
   for ((i=0; i<1; i++)); do
     echo "------------------------------------------------------allgather comp $gpus H800 GPUs pipe $pipe [compressor=$comp]------------------------------------------------------"
+    write_coccl_config "$comp" "$pipe"
 
     mpirun -np $gpus \
            -x LD_LIBRARY_PATH=$CUDA_HOME/lib64:$NCCL_HOME/lib:$MPI_HOME/lib \
            -x NCCL_DEBUG=WRAN \
            -x NCCL_DEBUG_FILE=ncclcomp.%h \
            -x NCCL_BUFFSIZE=16777216 \
-           -x NCCL_ENABLE_COMPRESS=1 \
-           -x NCCL_COMPRESSORS=$comp \
-           -x NCCL_ENABLE_ALLTOALL_COMPRESS=1 \
-           -x NCCL_ALLTOALL_COMPRESSORS=$comp \
-           -x NCCL_ENABLE_ALLREDUCE_COMPRESS=1 \
-           -x NCCL_ALLREDUCE_COMPRESSORS=$comp \
-           -x NCCL_ALLREDUCE_INTER_COMPRESSORS=$comp \
-           -x NCCL_ENABLE_ALLGATHER_COMPRESS=1 \
-           -x NCCL_ALLGATHER_COMPRESSORS=$comp \
-           -x NCCL_ALLGATHER_INTER_COMPRESSORS=$comp \
-           -x NCCL_ENABLE_REDUCESCATTER_COMPRESS=1 \
-           -x NCCL_REDUCESCATTER_COMPRESSORS=$comp \
-           -x NCCL_REDUCESCATTER_INTER_COMPRESSORS=$comp \
+           -x COCCL_ENABLE=1 \
+           -x COCCL_CONFIG_FILE=${COCCL_CONFIG_FILE} \
            -x NCCL_LOCAL_REGISTER=1 \
-           -x NCCL_PIPELINE_DEPTH=$pipe \
-           -x NCCL_COMPRESSORS_CONFIG_PATH=${NCCL_COMPRESSORS_CONFIG_PATH} \
-           -x NCCL_COMPRESSORS_LIB_PATH=${NCCL_COMPRESSORS_LIB_PATH} \
            $COCCL_PATH/tests/coccl-tests/build/all_gather_comp_overlap_perf -b 1MB -e 8G -f 2 -t 1 -g 1 -w 50 -n 100 -c 0
   done
 done
@@ -179,23 +165,8 @@ mpirun  -np $gpus \
         -x NCCL_DEBUG=WRAN \
         -x NCCL_DEBUG_FILE=ncclcomp.%h \
         -x NCCL_BUFFSIZE=16777216 \
-        -x NCCL_ENABLE_COMPRESS=1 \
-        -x NCCL_COMPRESSORS=sdp4bit \
-        -x NCCL_ENABLE_ALLTOALL_COMPRESS=1 \
-        -x NCCL_ALLTOALL_COMPRESSORS=sdp4bit \
-        -x NCCL_ENABLE_ALLREDUCE_COMPRESS=1 \
-        -x NCCL_ALLREDUCE_COMPRESSORS=sdp4bit \
-        -x NCCL_ALLREDUCE_INTER_COMPRESSORS=sdp4bit \
-        -x NCCL_ENABLE_ALLGATHER_COMPRESS=1 \
-        -x NCCL_ALLGATHER_COMPRESSORS=sdp4bit \
-        -x NCCL_ALLGATHER_INTER_COMPRESSORS=sdp4bit \
-        -x NCCL_ENABLE_REDUCESCATTER_COMPRESS=1 \
-        -x NCCL_REDUCESCATTER_COMPRESSORS=sdp4bit \
-        -x NCCL_REDUCESCATTER_INTER_COMPRESSORS=sdp4bit \
+        -x COCCL_ENABLE=0 \
         -x NCCL_LOCAL_REGISTER=1 \
-        -x NCCL_PIPELINE_SIZE=1 \
-        -x NCCL_COMPRESSORS_CONFIG_PATH=${NCCL_COMPRESSORS_CONFIG_PATH} \
-        -x NCCL_COMPRESSORS_LIB_PATH=${NCCL_COMPRESSORS_LIB_PATH} \
        $COCCL_PATH/tests/coccl-tests/build/reduce_scatter_perf -b 1MB -e 8G -f 2 -t 1 -g 1 -w 50 -n 100 -c 0
 done
 echo ' '
@@ -204,90 +175,51 @@ echo "================= Running reduce_scatter with compressor: $comp ==========
 for ((i=0; i<1;i++))
 do
 echo "------------------------------------------------------reducescatter comp ring $gpus H800 GPUs[compressor=$comp]------------------------------------------------------"
+write_coccl_config "$comp" 1
 mpirun  -np $gpus \
         -x LD_LIBRARY_PATH=$CUDA_HOME/lib64:$NCCL_HOME/lib:$MPI_HOME/lib \
         -x NCCL_DEBUG=WRAN \
         -x NCCL_DEBUG_FILE=ncclcomp.%h \
         -x NCCL_BUFFSIZE=16777216 \
-        -x NCCL_ENABLE_COMPRESS=1 \
-        -x NCCL_COMPRESSORS=$comp \
-        -x NCCL_ENABLE_ALLTOALL_COMPRESS=1 \
-        -x NCCL_ALLTOALL_COMPRESSORS=$comp \
-        -x NCCL_ENABLE_ALLREDUCE_COMPRESS=1 \
-        -x NCCL_ALLREDUCE_COMPRESSORS=$comp \
-        -x NCCL_ALLREDUCE_INTER_COMPRESSORS=$comp \
-        -x NCCL_ENABLE_ALLGATHER_COMPRESS=1 \
-        -x NCCL_ALLGATHER_COMPRESSORS=$comp \
-        -x NCCL_ALLGATHER_INTER_COMPRESSORS=$comp \
-        -x NCCL_ENABLE_REDUCESCATTER_COMPRESS=1 \
-        -x NCCL_REDUCESCATTER_COMPRESSORS=$comp \
-        -x NCCL_REDUCESCATTER_INTER_COMPRESSORS=$comp \
+        -x COCCL_ENABLE=1 \
+        -x COCCL_CONFIG_FILE=${COCCL_CONFIG_FILE} \
         -x NCCL_LOCAL_REGISTER=1 \
-        -x NCCL_PIPELINE_SIZE=1 \
-        -x NCCL_COMPRESSORS_CONFIG_PATH=${NCCL_COMPRESSORS_CONFIG_PATH} \
-        -x NCCL_COMPRESSORS_LIB_PATH=${NCCL_COMPRESSORS_LIB_PATH} \
         $COCCL_PATH/tests/coccl-tests/build/reduce_scatter_comp_perf -b 1MB -e 8G -f 2 -t 1 -g 1 -w 50 -n 100 -c 0
 done
 
 echo ' '
 
-for ((pipe=1;pipe<=8;pipe=pipe*2))do
+for ((pipe=1;pipe<=8;pipe=pipe*2)); do
 for ((i=0; i<1;i++))
 do
 echo "------------------------------------------------------reducescatter comp oneshot $gpus H800 GPUs pipe $pipe [compressor=$comp]------------------------------------------------------"
+write_coccl_config "$comp" "$pipe"
 mpirun  -np $gpus \
         -x LD_LIBRARY_PATH=$CUDA_HOME/lib64:$NCCL_HOME/lib:$MPI_HOME/lib \
         -x NCCL_DEBUG=WRAN \
         -x NCCL_DEBUG_FILE=ncclcomp.%h \
         -x NCCL_BUFFSIZE=16777216 \
-        -x NCCL_ENABLE_COMPRESS=1 \
-        -x NCCL_COMPRESSORS=$comp \
-        -x NCCL_ENABLE_ALLTOALL_COMPRESS=1 \
-        -x NCCL_ALLTOALL_COMPRESSORS=$comp \
-        -x NCCL_ENABLE_ALLREDUCE_COMPRESS=1 \
-        -x NCCL_ALLREDUCE_COMPRESSORS=$comp \
-        -x NCCL_ALLREDUCE_INTER_COMPRESSORS=$comp \
-        -x NCCL_ENABLE_ALLGATHER_COMPRESS=1 \
-        -x NCCL_ALLGATHER_COMPRESSORS=$comp \
-        -x NCCL_ALLGATHER_INTER_COMPRESSORS=$comp \
-        -x NCCL_ENABLE_REDUCESCATTER_COMPRESS=1 \
-        -x NCCL_REDUCESCATTER_COMPRESSORS=$comp \
-        -x NCCL_REDUCESCATTER_INTER_COMPRESSORS=$comp \
+        -x COCCL_ENABLE=1 \
+        -x COCCL_CONFIG_FILE=${COCCL_CONFIG_FILE} \
         -x NCCL_LOCAL_REGISTER=1 \
-        -x NCCL_PIPELINE_DEPTH=$pipe \
-        -x NCCL_COMPRESSORS_CONFIG_PATH=${NCCL_COMPRESSORS_CONFIG_PATH} \
-        -x NCCL_COMPRESSORS_LIB_PATH=${NCCL_COMPRESSORS_LIB_PATH} \
         $COCCL_PATH/tests/coccl-tests/build/reduce_scatter_comp_oneshot_overlap_perf -b 1MB -e 8G -f 2 -t 1 -g 1 -w 50 -n 100 -c 0
 done
 done
 
 echo ' '
-for ((pipe=1;pipe<=8;pipe=pipe*2))do
+for ((pipe=1;pipe<=8;pipe=pipe*2)); do
 for ((i=0; i<1;i++))
 do
 echo "------------------------------------------------------reducescatter comp twoshot new overlap  $gpus H800 GPUs pipe $pipe [compressor=$comp]------------------------------------------------------"
+write_coccl_config "$comp" "$pipe"
 mpirun  -np $gpus \
         -x LD_LIBRARY_PATH=$CUDA_HOME/lib64:$NCCL_HOME/lib:$MPI_HOME/lib \
         -x NCCL_DEBUG=WRAN \
         -x NCCL_DEBUG_FILE=ncclcomp.%h \
         -x NCCL_BUFFSIZE=16777216 \
-        -x NCCL_ENABLE_COMPRESS=1 \
-        -x NCCL_COMPRESSORS=$comp \
-        -x NCCL_ENABLE_ALLTOALL_COMPRESS=1 \
-        -x NCCL_ALLTOALL_COMPRESSORS=$comp \
-        -x NCCL_ENABLE_ALLREDUCE_COMPRESS=1 \
-        -x NCCL_ALLREDUCE_COMPRESSORS=$comp \
-        -x NCCL_ALLREDUCE_INTER_COMPRESSORS=$comp \
-        -x NCCL_ENABLE_ALLGATHER_COMPRESS=1 \
-        -x NCCL_ALLGATHER_COMPRESSORS=$comp \
-        -x NCCL_ALLGATHER_INTER_COMPRESSORS=$comp \
-        -x NCCL_ENABLE_REDUCESCATTER_COMPRESS=1 \
-        -x NCCL_REDUCESCATTER_COMPRESSORS=$comp \
-        -x NCCL_REDUCESCATTER_INTER_COMPRESSORS=$comp \
+        -x COCCL_ENABLE=1 \
+        -x COCCL_CONFIG_FILE=${COCCL_CONFIG_FILE} \
         -x NCCL_LOCAL_REGISTER=1 \
-        -x NCCL_PIPELINE_DEPTH=$pipe \
-        -x NCCL_COMPRESSORS_CONFIG_PATH=${NCCL_COMPRESSORS_CONFIG_PATH} \
-        -x NCCL_COMPRESSORS_LIB_PATH=${NCCL_COMPRESSORS_LIB_PATH} \
         $COCCL_PATH/tests/coccl-tests/build/reduce_scatter_comp_twoshot_tl_overlap_perf -b 1MB -e 8G -f 2 -t 1 -g 1 -w 50 -n 100 -c 0
 done
 done
@@ -306,23 +238,8 @@ mpirun  -np $gpus \
         -x NCCL_DEBUG=WRAN \
         -x NCCL_DEBUG_FILE=ncclcomp.%h \
         -x NCCL_BUFFSIZE=16777216 \
-        -x NCCL_ENABLE_COMPRESS=1 \
-        -x NCCL_COMPRESSORS=sdp4bit \
-        -x NCCL_ENABLE_ALLTOALL_COMPRESS=1 \
-        -x NCCL_ALLTOALL_COMPRESSORS=sdp4bit \
-        -x NCCL_ENABLE_ALLREDUCE_COMPRESS=1 \
-        -x NCCL_ALLREDUCE_COMPRESSORS=sdp4bit \
-        -x NCCL_ALLREDUCE_INTER_COMPRESSORS=sdp4bit \
-        -x NCCL_ENABLE_ALLGATHER_COMPRESS=1 \
-        -x NCCL_ALLGATHER_COMPRESSORS=sdp4bit \
-        -x NCCL_ALLGATHER_INTER_COMPRESSORS=sdp4bit \
-        -x NCCL_ENABLE_REDUCESCATTER_COMPRESS=1 \
-        -x NCCL_REDUCESCATTER_COMPRESSORS=sdp4bit \
-        -x NCCL_REDUCESCATTER_INTER_COMPRESSORS=sdp4bit \
+        -x COCCL_ENABLE=0 \
         -x NCCL_LOCAL_REGISTER=1 \
-        -x NCCL_PIPELINE_SIZE=1 \
-        -x NCCL_COMPRESSORS_CONFIG_PATH=${NCCL_COMPRESSORS_CONFIG_PATH} \
-        -x NCCL_COMPRESSORS_LIB_PATH=${NCCL_COMPRESSORS_LIB_PATH} \
        $COCCL_PATH/tests/coccl-tests/build/all_reduce_perf -b 4KB -e 8G -f 2 -t 1 -g 1 -w 50 -n 100 -c 0
 done
 echo ' '
@@ -332,28 +249,15 @@ echo "================= Running allreduce with compressor: $comp ===============
 for ((i=0; i<1;i++))
 do
 echo "------------------------------------------------------allreduce comp ring $gpus H800 GPUs[compressor=$comp]------------------------------------------------------"
+write_coccl_config "$comp" 1
 mpirun  -np $gpus \
         -x LD_LIBRARY_PATH=$CUDA_HOME/lib64:$NCCL_HOME/lib:$MPI_HOME/lib \
         -x NCCL_DEBUG=WRAN \
         -x NCCL_DEBUG_FILE=ncclcomp.%h \
         -x NCCL_BUFFSIZE=16777216 \
-        -x NCCL_ENABLE_COMPRESS=1 \
-        -x NCCL_COMPRESSORS=$comp \
-        -x NCCL_ENABLE_ALLTOALL_COMPRESS=1 \
-        -x NCCL_ALLTOALL_COMPRESSORS=$comp \
-        -x NCCL_ENABLE_ALLREDUCE_COMPRESS=1 \
-        -x NCCL_ALLREDUCE_COMPRESSORS=$comp \
-        -x NCCL_ALLREDUCE_INTER_COMPRESSORS=$comp \
-        -x NCCL_ENABLE_ALLGATHER_COMPRESS=1 \
-        -x NCCL_ALLGATHER_COMPRESSORS=$comp \
-        -x NCCL_ALLGATHER_INTER_COMPRESSORS=$comp \
-        -x NCCL_ENABLE_REDUCESCATTER_COMPRESS=1 \
-        -x NCCL_REDUCESCATTER_COMPRESSORS=$comp \
-        -x NCCL_REDUCESCATTER_INTER_COMPRESSORS=$comp \
+        -x COCCL_ENABLE=1 \
+        -x COCCL_CONFIG_FILE=${COCCL_CONFIG_FILE} \
         -x NCCL_LOCAL_REGISTER=1 \
-        -x NCCL_PIPELINE_SIZE=1 \
-        -x NCCL_COMPRESSORS_CONFIG_PATH=${NCCL_COMPRESSORS_CONFIG_PATH} \
-        -x NCCL_COMPRESSORS_LIB_PATH=${NCCL_COMPRESSORS_LIB_PATH} \
        $COCCL_PATH/tests/coccl-tests/build/all_reduce_comp_ring_perf -b 1MB -e 8G -f 2 -t 1 -g 1 -w 50 -n 100 -c 0
 done
 echo ' '
@@ -361,87 +265,48 @@ echo ' '
 for ((i=0; i<1;i++))
 do
 echo "------------------------------------------------------allreduce comp oneshot $gpus H800 GPUs[compressor=$comp]------------------------------------------------------"
+write_coccl_config "$comp" 1
 mpirun  -np $gpus \
         -x LD_LIBRARY_PATH=$CUDA_HOME/lib64:$NCCL_HOME/lib:$MPI_HOME/lib \
         -x NCCL_DEBUG=WRAN \
         -x NCCL_DEBUG_FILE=ncclcomp.%h \
         -x NCCL_BUFFSIZE=16777216 \
-        -x NCCL_ENABLE_COMPRESS=1 \
-        -x NCCL_COMPRESSORS=$comp \
-        -x NCCL_ENABLE_ALLTOALL_COMPRESS=1 \
-        -x NCCL_ALLTOALL_COMPRESSORS=$comp \
-        -x NCCL_ENABLE_ALLREDUCE_COMPRESS=1 \
-        -x NCCL_ALLREDUCE_COMPRESSORS=$comp \
-        -x NCCL_ALLREDUCE_INTER_COMPRESSORS=$comp \
-        -x NCCL_ENABLE_ALLGATHER_COMPRESS=1 \
-        -x NCCL_ALLGATHER_COMPRESSORS=$comp \
-        -x NCCL_ALLGATHER_INTER_COMPRESSORS=$comp \
-        -x NCCL_ENABLE_REDUCESCATTER_COMPRESS=1 \
-        -x NCCL_REDUCESCATTER_COMPRESSORS=$comp \
-        -x NCCL_REDUCESCATTER_INTER_COMPRESSORS=$comp \
+        -x COCCL_ENABLE=1 \
+        -x COCCL_CONFIG_FILE=${COCCL_CONFIG_FILE} \
         -x NCCL_LOCAL_REGISTER=1 \
-        -x NCCL_PIPELINE_SIZE=1 \
-        -x NCCL_COMPRESSORS_CONFIG_PATH=${NCCL_COMPRESSORS_CONFIG_PATH} \
-        -x NCCL_COMPRESSORS_LIB_PATH=${NCCL_COMPRESSORS_LIB_PATH} \
        $COCCL_PATH/tests/coccl-tests/build/all_reduce_comp_oneshot_perf -b 4KB -e 32M -f 2 -t 1 -g 1 -w 50 -n 100 -c 0
 done
 echo ' '
-for ((pipe=1;pipe<=8;pipe=pipe*2))do
+for ((pipe=1;pipe<=8;pipe=pipe*2)); do
 for ((i=0; i<1;i++))
 do
 echo "------------------------------------------------------allreduce comp twoshot $gpus H800 GPUs pipe $pipe [compressor=$comp]------------------------------------------------------"
+write_coccl_config "$comp" "$pipe"
 mpirun  -np $gpus \
         -x LD_LIBRARY_PATH=$CUDA_HOME/lib64:$NCCL_HOME/lib:$MPI_HOME/lib \
         -x NCCL_DEBUG=WRAN \
         -x NCCL_DEBUG_FILE=ncclcomp.%h \
         -x NCCL_BUFFSIZE=16777216 \
-        -x NCCL_ENABLE_COMPRESS=1 \
-        -x NCCL_COMPRESSORS=$comp \
-        -x NCCL_ENABLE_ALLTOALL_COMPRESS=1 \
-        -x NCCL_ALLTOALL_COMPRESSORS=$comp \
-        -x NCCL_ENABLE_ALLREDUCE_COMPRESS=1 \
-        -x NCCL_ALLREDUCE_COMPRESSORS=$comp \
-        -x NCCL_ALLREDUCE_INTER_COMPRESSORS=$comp \
-        -x NCCL_ENABLE_ALLGATHER_COMPRESS=1 \
-        -x NCCL_ALLGATHER_COMPRESSORS=$comp \
-        -x NCCL_ALLGATHER_INTER_COMPRESSORS=$comp \
-        -x NCCL_ENABLE_REDUCESCATTER_COMPRESS=1 \
-        -x NCCL_REDUCESCATTER_COMPRESSORS=$comp \
-        -x NCCL_REDUCESCATTER_INTER_COMPRESSORS=$comp \
+        -x COCCL_ENABLE=1 \
+        -x COCCL_CONFIG_FILE=${COCCL_CONFIG_FILE} \
         -x NCCL_LOCAL_REGISTER=1 \
-        -x NCCL_PIPELINE_DEPTH=$pipe \
-        -x NCCL_COMPRESSORS_CONFIG_PATH=${NCCL_COMPRESSORS_CONFIG_PATH} \
-        -x NCCL_COMPRESSORS_LIB_PATH=${NCCL_COMPRESSORS_LIB_PATH} \
        $COCCL_PATH/tests/coccl-tests/build/all_reduce_comp_twoshot_overlap_perf -b 1MB -e 8G -f 2 -t 1 -g 1 -w 50 -n 100 -c 0
 done
 done
 echo ' '
-for ((pipe=1;pipe<=8;pipe=pipe*2))do
+for ((pipe=1;pipe<=8;pipe=pipe*2)); do
 for ((i=0; i<1;i++))
 do
 echo "------------------------------------------------------allreduce comp tripleshot overlap $gpus H800 GPUs pipe $pipe [compressor=$comp]------------------------------------------------------"
+write_coccl_config "$comp" "$pipe"
 mpirun  -np $gpus \
         -x LD_LIBRARY_PATH=$CUDA_HOME/lib64:$NCCL_HOME/lib:$MPI_HOME/lib \
         -x NCCL_DEBUG=WRAN \
         -x NCCL_DEBUG_FILE=ncclcomp.%h \
         -x NCCL_BUFFSIZE=16777216 \
-        -x NCCL_ENABLE_COMPRESS=1 \
-        -x NCCL_COMPRESSORS=$comp \
-        -x NCCL_ENABLE_ALLTOALL_COMPRESS=1 \
-        -x NCCL_ALLTOALL_COMPRESSORS=$comp \
-        -x NCCL_ENABLE_ALLREDUCE_COMPRESS=1 \
-        -x NCCL_ALLREDUCE_COMPRESSORS=$comp \
-        -x NCCL_ALLREDUCE_INTER_COMPRESSORS=$comp \
-        -x NCCL_ENABLE_ALLGATHER_COMPRESS=1 \
-        -x NCCL_ALLGATHER_COMPRESSORS=$comp \
-        -x NCCL_ALLGATHER_INTER_COMPRESSORS=$comp \
-        -x NCCL_ENABLE_REDUCESCATTER_COMPRESS=1 \
-        -x NCCL_REDUCESCATTER_COMPRESSORS=$comp \
-        -x NCCL_REDUCESCATTER_INTER_COMPRESSORS=$comp \
+        -x COCCL_ENABLE=1 \
+        -x COCCL_CONFIG_FILE=${COCCL_CONFIG_FILE} \
         -x NCCL_LOCAL_REGISTER=1 \
-        -x NCCL_PIPELINE_DEPTH=$pipe \
-        -x NCCL_COMPRESSORS_CONFIG_PATH=${NCCL_COMPRESSORS_CONFIG_PATH} \
-        -x NCCL_COMPRESSORS_LIB_PATH=${NCCL_COMPRESSORS_LIB_PATH} \
        $COCCL_PATH/tests/coccl-tests/build/all_reduce_comp_tripleshot_tl_overlap_perf -b 1MB -e 8G -f 2 -t 1 -g 1 -w 50 -n 100 -c 0
 done
 done

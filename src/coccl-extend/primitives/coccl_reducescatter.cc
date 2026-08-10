@@ -1,33 +1,28 @@
-#include "coccl_primitives_internal.h"
+#include "primitives/coccl_primitives_internal.h"
 
-NCCL_API(ncclResult_t, ncclReduceScatterCompOneShotOverlap,
-  const void* sendbuff, void* recvbuff, size_t recvcount,
-  ncclDataType_t datatype, ncclRedOp_t op, ncclComm* comm,
-  cudaStream_t stream);
-ncclResult_t ncclReduceScatterCompOneShotOverlap(const void* sendbuff,
-  void* recvbuff, size_t recvcount, ncclDataType_t datatype, ncclRedOp_t op,
-  ncclComm* comm, cudaStream_t stream) {
+namespace {
+
+ncclResult_t cocclRunReduceScatterOneShot(
+    const cocclPreparedCall* prepared) {
+  const cocclInfo& args = prepared->info;
+  ncclComm_t comm = args.comm;
   const cocclPipelineStage stages[] = {
-    cocclPipelineCompress(),
-    cocclPipelineAllToAll(comm),
-    cocclPipelineDecompressReduce((size_t)comm->nRanks),
+      cocclPipelineCompress(),
+      cocclPipelineAllToAll(comm),
+      cocclPipelineDecompressReduce((size_t)comm->nRanks),
   };
   const cocclPipelineSpec spec = {
-    "reducescatter-oneshot-overlap", sendbuff, recvbuff, recvcount,
-    (size_t)comm->nRanks, datatype, comm, ncclCommOp_t::ReduceScatter,
-    stream, stages, (int)(sizeof(stages) / sizeof(stages[0]))
-  };
-  NCCLCHECK(cocclRunPipeline(&spec));
-  return ncclSuccess;
+      "reducescatter-oneshot-overlap", args.sendbuff, args.recvbuff,
+      args.count, (size_t)comm->nRanks, args.datatype, comm,
+      prepared->compressor, args.stream, stages,
+      (int)(sizeof(stages) / sizeof(stages[0]))};
+  return cocclRunPipeline(&spec);
 }
 
-NCCL_API(ncclResult_t, ncclReduceScatterCompTwoShotTLOverlap,
-  const void* sendbuff, void* recvbuff, size_t recvcount,
-  ncclDataType_t datatype, ncclRedOp_t op, ncclComm* comm,
-  cudaStream_t stream);
-ncclResult_t ncclReduceScatterCompTwoShotTLOverlap(const void* sendbuff,
-  void* recvbuff, size_t recvcount, ncclDataType_t datatype, ncclRedOp_t op,
-  ncclComm* comm, cudaStream_t stream) {
+ncclResult_t cocclRunReduceScatterTwoShot(
+    const cocclPreparedCall* prepared) {
+  const cocclInfo& args = prepared->info;
+  ncclComm_t comm = args.comm;
   const int localRanks = comm->localRanks;
   if (localRanks <= 0 || comm->nRanks % localRanks != 0) {
     return ncclInvalidArgument;
@@ -37,18 +32,91 @@ ncclResult_t ncclReduceScatterCompTwoShotTLOverlap(const void* sendbuff,
   NCCLCHECK(cocclCommGetHierarchicalComms(comm, &hierarchy));
 
   const cocclPipelineStage stages[] = {
-    cocclPipelineCompress(),
-    cocclPipelineAllToAll(hierarchy.intraComm),
-    cocclPipelineDecompReduceComp((size_t)localRanks),
-    cocclPipelineAllToAll(hierarchy.interComm),
-    cocclPipelineDecompressReduce((size_t)nNodes),
+      cocclPipelineCompress(),
+      cocclPipelineAllToAll(hierarchy.intraComm),
+      cocclPipelineDecompReduceComp((size_t)localRanks),
+      cocclPipelineAllToAll(hierarchy.interComm),
+      cocclPipelineDecompressReduce((size_t)nNodes),
   };
   const cocclPipelineSpec spec = {
-    "reducescatter-twoshot-tl-overlap", sendbuff, recvbuff, recvcount,
-    (size_t)comm->nRanks, datatype, comm,
-    ncclCommOp_t::ReduceScatter_Inter, stream, stages,
-    (int)(sizeof(stages) / sizeof(stages[0]))
-  };
-  NCCLCHECK(cocclRunPipeline(&spec));
-  return ncclSuccess;
+      "reducescatter-twoshot-tl-overlap", args.sendbuff, args.recvbuff,
+      args.count, (size_t)comm->nRanks, args.datatype, comm,
+      prepared->compressor, args.stream, stages,
+      (int)(sizeof(stages) / sizeof(stages[0]))};
+  return cocclRunPipeline(&spec);
+}
+
+cocclPreparedCall cocclDirectReduceScatterCall(
+    const void* sendbuff, void* recvbuff, size_t recvcount,
+    ncclDataType_t datatype, ncclRedOp_t op, ncclComm_t comm,
+    cudaStream_t stream, cocclAlgorithmKind algorithm,
+    const cocclCompressorHandle& compressor) {
+  cocclPreparedCall prepared;
+  prepared.info.sendbuff = sendbuff;
+  prepared.info.recvbuff = recvbuff;
+  prepared.info.count = recvcount;
+  prepared.info.datatype = datatype;
+  prepared.info.op = op;
+  prepared.info.func = ncclFuncReduceScatter;
+  prepared.info.operation = cocclOperation::ReduceScatter;
+  prepared.info.comm = comm;
+  prepared.info.stream = stream;
+  prepared.descriptor =
+      cocclGetOperationDescriptor(cocclOperation::ReduceScatter);
+  prepared.policy = algorithm == cocclAlgorithmReduceScatterTwoShot
+      ? cocclHierarchicalPolicy(cocclOperation::ReduceScatter)
+      : cocclDefaultPolicy(cocclOperation::ReduceScatter);
+  prepared.algorithm = algorithm;
+  prepared.compressor = compressor;
+  return prepared;
+}
+
+}  // namespace
+
+NCCL_API(ncclResult_t, ncclReduceScatterCompOneShotOverlap,
+  const void* sendbuff, void* recvbuff, size_t recvcount,
+  ncclDataType_t datatype, ncclRedOp_t op, ncclComm* comm,
+  cudaStream_t stream);
+ncclResult_t ncclReduceScatterCompOneShotOverlap(const void* sendbuff,
+  void* recvbuff, size_t recvcount, ncclDataType_t datatype, ncclRedOp_t op,
+  ncclComm* comm, cudaStream_t stream) {
+  cocclCompressorHandle compressor;
+  NCCLCHECK(cocclCommGetCompressor(
+      comm, cocclDefaultPolicy(cocclOperation::ReduceScatter), &compressor));
+  cocclPreparedCall prepared = cocclDirectReduceScatterCall(
+      sendbuff, recvbuff, recvcount, datatype, op, comm, stream,
+      cocclAlgorithmReduceScatterOneShot, compressor);
+  return cocclExecutePreparedCall(&prepared);
+}
+
+NCCL_API(ncclResult_t, ncclReduceScatterCompTwoShotTLOverlap,
+  const void* sendbuff, void* recvbuff, size_t recvcount,
+  ncclDataType_t datatype, ncclRedOp_t op, ncclComm* comm,
+  cudaStream_t stream);
+ncclResult_t ncclReduceScatterCompTwoShotTLOverlap(const void* sendbuff,
+  void* recvbuff, size_t recvcount, ncclDataType_t datatype, ncclRedOp_t op,
+  ncclComm* comm, cudaStream_t stream) {
+  cocclCompressorHandle compressor;
+  NCCLCHECK(cocclCommGetCompressor(
+      comm, cocclHierarchicalPolicy(cocclOperation::ReduceScatter),
+      &compressor));
+  cocclPreparedCall prepared = cocclDirectReduceScatterCall(
+      sendbuff, recvbuff, recvcount, datatype, op, comm, stream,
+      cocclAlgorithmReduceScatterTwoShot, compressor);
+  return cocclExecutePreparedCall(&prepared);
+}
+
+ncclResult_t cocclExecuteReduceScatter(const cocclPreparedCall* prepared) {
+  if (prepared == nullptr || prepared->info.comm == nullptr ||
+      !prepared->compressor) {
+    return ncclInvalidArgument;
+  }
+  switch (prepared->algorithm) {
+    case cocclAlgorithmReduceScatterOneShot:
+      return cocclRunReduceScatterOneShot(prepared);
+    case cocclAlgorithmReduceScatterTwoShot:
+      return cocclRunReduceScatterTwoShot(prepared);
+    default:
+      return ncclInternalError;
+  }
 }

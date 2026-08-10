@@ -1,6 +1,6 @@
-#include "reduce_extend.h"
+#include "compression/reduce_extend.h"
 
-#include "coccl_reduce_helper.h"
+#include "compression/coccl_reduce_helper.h"
 
 ncclResult_t ncclReductionColl(const void* input1, const void* input2,
                                void* output, ncclDataType_t type,

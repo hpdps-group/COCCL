@@ -1,4 +1,4 @@
-#include "coccl_primitives_internal.h"
+#include "primitives/coccl_primitives_internal.h"
 
 NCCL_API(ncclResult_t, ncclAllGatherComp, const void* sendbuff, void* recvbuff, size_t sendcount,
     ncclDataType_t datatype, ncclComm_t comm, cudaStream_t stream);
@@ -15,7 +15,7 @@ ncclResult_t ncclAllGatherComp(const void* sendbuff, void* recvbuff, size_t send
   void* workspaceBase = workspaceBuffer.ptr;
 
   NCCLCHECK(ncclCompress(sendbuff, &workspaceBase,
-            sendcount, datatype, &compSendCount, &compDatatype, 1, comm->rank, comm, ncclCommOp_t::AllGather, stream));
+            sendcount, datatype, &compSendCount, &compDatatype, 1, comm->rank, comm, cocclDefaultPolicy(cocclOperation::AllGather), stream));
 
   // INFO(NCCL_INIT, "AllgatherComp_datatype_%d_totalcounts_%zu_totalbytes_%zuMB_compSendBytes_%zuMB_rank_%d_nRanks_%d_sendbuff_%p_recvbuff_%p_diff_%p_stream_%p", datatype, sendcount * comm->nRanks, 
   //   sendcount * comm->nRanks * ncclTypeSize(datatype)/ 1024 /1024, compSendCount * comm->nRanks * ncclTypeSize(compDatatype) / 1024/ 1024, 
@@ -27,7 +27,7 @@ ncclResult_t ncclAllGatherComp(const void* sendbuff, void* recvbuff, size_t send
   NCCLCHECK(ncclEnqueueCheck(&info));
 
   // Decompress
-  NCCLCHECK(ncclDecompress(recvbuff, workspaceBase, sendcount, datatype, compSendCount, compDatatype, comm->nRanks, comm, ncclCommOp_t::AllGather, stream));
+  NCCLCHECK(ncclDecompress(recvbuff, workspaceBase, sendcount, datatype, compSendCount, compDatatype, comm->nRanks, comm, cocclDefaultPolicy(cocclOperation::AllGather), stream));
   NCCLCHECK(cocclReleaseBuffer(&workspaceBuffer, stream));
 
   return ncclSuccess;
@@ -57,8 +57,8 @@ ncclResult_t ncclAllGatherCompTwoShot(const void* sendbuff, void* recvbuff, size
   NCCLCHECK(cocclGetBuffer(comm, totalSendBytes, &workspaceBuffer));
   void* workspaceBase = workspaceBuffer.ptr;
   
-  // NCCLCHECK(ncclCompress(sendbuff, &sendCompbuff, sendcount, datatype , &compSendCount, &compDatatype, 1, comm, ncclCommOp_t::AllGather, stream));
-  NCCLCHECK(ncclCompress(sendbuff, &workspaceBase, sendcount, datatype , &compSendCount, &compDatatype, 1, comm->rank, comm, ncclCommOp_t::AllGather, stream));
+  // NCCLCHECK(ncclCompress(sendbuff, &sendCompbuff, sendcount, datatype , &compSendCount, &compDatatype, 1, comm, cocclDefaultPolicy(cocclOperation::AllGather), stream));
+  NCCLCHECK(ncclCompress(sendbuff, &workspaceBase, sendcount, datatype , &compSendCount, &compDatatype, 1, comm->rank, comm, cocclDefaultPolicy(cocclOperation::AllGather), stream));
   
   void* sendCompbuff=workspaceBase;
   void* recvCompbuff=(char*)workspaceBase + compSendCount * ncclTypeSize(compDatatype);
@@ -91,7 +91,7 @@ ncclResult_t ncclAllGatherCompTwoShot(const void* sendbuff, void* recvbuff, size
   NCCLCHECK(ncclGroupEnd());
 
   // Decompress
-  NCCLCHECK(ncclDecompress(recvbuff, (void*)recvCompbuff, sendcount, datatype, compSendCount, compDatatype, comm->nRanks, comm, ncclCommOp_t::AllGather, stream));
+  NCCLCHECK(ncclDecompress(recvbuff, (void*)recvCompbuff, sendcount, datatype, compSendCount, compDatatype, comm->nRanks, comm, cocclDefaultPolicy(cocclOperation::AllGather), stream));
 
 
   // Free

@@ -1,4 +1,4 @@
-#include "coccl_buffer_internal.h"
+#include "buffer/coccl_buffer_internal.h"
 
 #if CUDART_VERSION >= 11030
 
@@ -97,8 +97,7 @@ ncclResult_t vmmInitPool(cocclVmmDeviceBufferPool* pool, int cudaDev, bool* avai
               ret, unavailable);
 
   {
-    int64_t configured = ncclParamCocclDeviceBufferPhysicalChunkBytes();
-    size_t requestedChunkBytes = configured > 0 ? (size_t)configured : (size_t)8 * 1024 * 1024;
+    size_t requestedChunkBytes = cocclGetConfig().buffer.physicalChunkBytes;
     size_t chunkSize = std::max(requestedChunkBytes, granularity);
     NCCLCHECKGOTO(vmmGetMulticastGranularity(pool, requestedChunkBytes, &multicastGranularity),
                   ret, unavailable);
@@ -223,7 +222,7 @@ static ncclResult_t vmmReleaseFreeHandlesToLimit(cocclVmmDeviceBufferPool* pool)
   ncclResult_t ret = ncclSuccess;
   if (pool == nullptr) return ncclSuccess;
 
-  size_t limit = (size_t)ncclParamCocclDeviceBufferPoolLimit();
+  size_t limit = cocclGetConfig().buffer.poolLimitBytes;
   if (limit == 0) return ncclSuccess;
 
   // Only handles already detached from all VA ranges are eligible here; active
@@ -383,7 +382,7 @@ static ncclResult_t vmmTrimPoolLocked(cocclVmmDeviceBufferPool* pool) {
   ncclResult_t ret = ncclSuccess;
   if (pool == nullptr || !pool->ready) return ncclSuccess;
 
-  size_t limit = (size_t)ncclParamCocclDeviceBufferPoolLimit();
+  size_t limit = cocclGetConfig().buffer.poolLimitBytes;
   if (limit == 0 || pool->totalPhysicalBytes <= limit) return ncclSuccess;
 
   for (auto it = pool->blocks.begin(); it != pool->blocks.end() && pool->totalPhysicalBytes > limit;) {
@@ -459,7 +458,10 @@ static ncclResult_t vmmAcquireFromBlock(cocclVmmBackingBlock* block, size_t byte
     buffer->block = block;
     buffer->slice = &*it;
 
-    ncclResult_t ret = vmmEnsureRegistrationForRange(block, ownerComm, registeredComm, buffer->ptr, bytes);
+    ncclResult_t ret = registeredComm == nullptr
+        ? ncclSuccess
+        : vmmEnsureRegistrationForRange(
+              block, ownerComm, registeredComm, buffer->ptr, bytes);
     if (ret == ncclSuccess) return ncclSuccess;
 
     // A partial-overlap registration conflict means this VA range is not usable
@@ -518,7 +520,7 @@ ncclResult_t vmmAcquireForComm(cocclVmmDeviceBufferPool* pool, ncclComm_t ownerC
                                ncclComm_t registeredComm, size_t bytes,
                                cocclBufferHandle* buffer) {
   ncclResult_t ret = ncclSuccess;
-  if (pool == nullptr || ownerComm == nullptr || registeredComm == nullptr || buffer == nullptr) {
+  if (pool == nullptr || ownerComm == nullptr || buffer == nullptr) {
     return ncclInvalidArgument;
   }
 

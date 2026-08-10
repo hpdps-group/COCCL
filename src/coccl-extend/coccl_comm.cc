@@ -1,4 +1,4 @@
-#include "coccl_comm.h"
+#include "runtime/coccl_comm.h"
 
 #include "checks.h"
 #include "comm.h"
@@ -6,28 +6,26 @@
 #include <map>
 #include <memory>
 #include <pthread.h>
-#include <stdlib.h>
 #include <utility>
-#include <vector>
 
 namespace {
 
-struct cocclCompressorContext {
-  ncclCompressor_t* compressor = nullptr;
-  // Config ownership is shared so op fallback/copy chains can reuse parsed
-  // plugin config without double-freeing it during comm teardown.
-  std::shared_ptr<void> config;
+struct cocclCompressorPolicyKey {
+  cocclTrainingRole role = cocclTrainingRoleUnknown;
+  cocclPolicyKey policy;
 };
 
-using cocclCompressorChain = std::vector<cocclCompressorContext>;
-using cocclTrainingCompressorKey =
-    std::pair<cocclTrainingRole, ncclCommOp_t>;
+bool operator<(const cocclCompressorPolicyKey& lhs,
+               const cocclCompressorPolicyKey& rhs) {
+  if (lhs.role != rhs.role) return lhs.role < rhs.role;
+  return lhs.policy < rhs.policy;
+}
 
-// A configured chain owns both its callbacks and the threshold that controls
-// routing to it. A missing or empty chain is the single source of truth for
+// A configured policy owns one immutable plugin context and its routing
+// threshold. A missing handle is the single source of truth for
 // "compression disabled"; no parallel enable flag or threshold map is kept.
-struct cocclCompressorChainConfig {
-  cocclCompressorChain chain;
+struct cocclCompressorPolicyContext {
+  cocclCompressorHandle compressor;
   size_t thresholdBytes = 0;
 };
 
@@ -42,16 +40,10 @@ struct cocclHierarchicalCommState {
 // translation unit so NCCL core code only depends on lifecycle/query APIs.
 struct cocclComm {
   // Lifecycle readiness only. Per-operation compression availability is
-  // represented exclusively by the configured chains below.
+  // represented exclusively by the configured compressor policies below.
   bool committed = false;
 
-  // The default chain comes from NCCL_COMPRESSORS and is reserved for
-  // pre-commit profiling. Committed communication always requires an explicit
-  // normal op or training role/op chain.
-  cocclCompressorChain defaultCompressorChain;
-  std::map<ncclCommOp_t, cocclCompressorChainConfig> compressorChains;
-  std::map<cocclTrainingCompressorKey, cocclCompressorChainConfig>
-      trainingCompressorChains;
+  std::map<cocclCompressorPolicyKey, cocclCompressorPolicyContext> compressors;
 
   // Hierarchical ReduceScatter/AllReduce primitives use these private
   // subcommunicators for intra-node and inter-node exchanges.
@@ -68,32 +60,21 @@ static cocclComm* findCocclCommLocked(ncclComm_t comm) {
   return it == cocclCommRegistry.end() ? nullptr : it->second.get();
 }
 
-static std::shared_ptr<void> ownCompressorConfig(void* config) {
-  if (config == nullptr) return std::shared_ptr<void>();
-  // Compressor parseConfig allocates with malloc-compatible ownership today.
-  return std::shared_ptr<void>(config, [](void* ptr) { free(ptr); });
-}
-
-static const cocclCompressorChainConfig* configuredCompressorChainForOp(
-    cocclComm* coccl, ncclCommOp_t op) {
+static const cocclCompressorPolicyContext* configuredCompressor(
+    cocclComm* coccl, cocclTrainingRole role, cocclPolicyKey key) {
   if (coccl == nullptr) return nullptr;
-  auto chain = coccl->compressorChains.find(op);
-  return chain == coccl->compressorChains.end() || chain->second.chain.empty()
-      ? nullptr : &chain->second;
+  auto configured = coccl->compressors.find({role, key});
+  return configured == coccl->compressors.end() ||
+                 !configured->second.compressor
+      ? nullptr
+      : &configured->second;
 }
 
-static const cocclCompressorChainConfig* trainingCompressorChainForRoleAndOp(
-    cocclComm* coccl, cocclTrainingRole role, ncclCommOp_t op) {
-  if (coccl == nullptr || role == cocclTrainingRoleUnknown) return nullptr;
-  auto chain = coccl->trainingCompressorChains.find({role, op});
-  return chain == coccl->trainingCompressorChains.end() ||
-                 chain->second.chain.empty()
-             ? nullptr
-             : &chain->second;
+static bool validPolicyKey(cocclPolicyKey key) {
+  return cocclOperationSupportsPolicy(
+      cocclGetOperationDescriptor(key.operation), key.variant);
 }
 
-// This NCCL ABI has no FP8 datatype. Future FP8 enum values belong in this
-// centralized predicate without changing operation-specific routing code.
 static bool compressionDatatypeSupported(ncclDataType_t datatype) {
   if (datatype == ncclFloat16 || datatype == ncclFloat32) return true;
 #if defined(__CUDA_BF16_TYPES_EXIST__)
@@ -101,11 +82,6 @@ static bool compressionDatatypeSupported(ncclDataType_t datatype) {
 #else
   return false;
 #endif
-}
-
-static bool operationRequiresReduction(ncclCommOp_t op) {
-  return op == AllReduce || op == AllReduce_Inter ||
-         op == ReduceScatter || op == ReduceScatter_Inter;
 }
 
 static ncclResult_t destroyHierarchicalComms(cocclHierarchicalCommState* hierarchy);
@@ -208,6 +184,10 @@ ncclResult_t cocclCommDestroyDetachedResources(cocclCommDetachedResources* detac
 
   cocclComm* coccl = detachedResources->state.get();
   if (coccl != nullptr) {
+    // Compressor instances may own persistent pool slices. Drop their handles
+    // before destroying split communicators, because teardown of the final
+    // split comm may release the shared device pool.
+    coccl->compressors.clear();
     recordNcclCleanup(destroyHierarchicalComms(&coccl->hierarchicalComms), &ret);
   }
 
@@ -230,9 +210,18 @@ exit:
   return ret;
 }
 
-ncclResult_t cocclCommAppendDefaultCompressor(ncclComm_t comm, ncclCompressor_t* compressor, void* config) {
-  if (compressor == nullptr) return ncclInvalidArgument;
+bool cocclCommCommitted(ncclComm_t comm) {
+  pthread_mutex_lock(&cocclCommLock);
+  cocclComm* coccl = findCocclCommLocked(comm);
+  bool committed = coccl != nullptr && coccl->committed;
+  pthread_mutex_unlock(&cocclCommLock);
+  return committed;
+}
 
+ncclResult_t cocclCommSetCompressorPolicy(
+    ncclComm_t comm, cocclTrainingRole role, cocclPolicyKey key,
+    size_t thresholdBytes, const cocclCompressorHandle& compressor) {
+  if (!compressor || !validPolicyKey(key)) return ncclInvalidArgument;
   ncclResult_t ret = ncclSuccess;
   pthread_mutex_lock(&cocclCommLock);
   cocclComm* coccl = findCocclCommLocked(comm);
@@ -240,15 +229,21 @@ ncclResult_t cocclCommAppendDefaultCompressor(ncclComm_t comm, ncclCompressor_t*
     ret = ncclInvalidArgument;
     goto exit;
   }
-  coccl->defaultCompressorChain.push_back({compressor, ownCompressorConfig(config)});
+  coccl->compressors.insert_or_assign(
+      cocclCompressorPolicyKey{role, key},
+      cocclCompressorPolicyContext{compressor, thresholdBytes});
 
 exit:
   pthread_mutex_unlock(&cocclCommLock);
   return ret;
 }
 
-ncclResult_t cocclCommResetOpChain(
-    ncclComm_t comm, ncclCommOp_t op, size_t thresholdBytes) {
+ncclResult_t cocclCommCopyCompressorPolicy(
+    ncclComm_t comm, cocclTrainingRole role, cocclPolicyKey destination,
+    cocclPolicyKey source) {
+  if (!validPolicyKey(destination) || !validPolicyKey(source)) {
+    return ncclInvalidArgument;
+  }
   ncclResult_t ret = ncclSuccess;
   pthread_mutex_lock(&cocclCommLock);
   cocclComm* coccl = findCocclCommLocked(comm);
@@ -257,50 +252,13 @@ ncclResult_t cocclCommResetOpChain(
     goto exit;
   }
   {
-    cocclCompressorChainConfig& chain = coccl->compressorChains[op];
-    chain.chain.clear();
-    chain.thresholdBytes = thresholdBytes;
-  }
-
-exit:
-  pthread_mutex_unlock(&cocclCommLock);
-  return ret;
-}
-
-ncclResult_t cocclCommAppendOpCompressor(ncclComm_t comm, ncclCommOp_t op, ncclCompressor_t* compressor, void* config) {
-  if (compressor == nullptr) return ncclInvalidArgument;
-
-  ncclResult_t ret = ncclSuccess;
-  pthread_mutex_lock(&cocclCommLock);
-  cocclComm* coccl = findCocclCommLocked(comm);
-  if (coccl == nullptr) {
-    ret = ncclInvalidArgument;
-    goto exit;
-  }
-  coccl->compressorChains[op].chain.push_back(
-      {compressor, ownCompressorConfig(config)});
-
-exit:
-  pthread_mutex_unlock(&cocclCommLock);
-  return ret;
-}
-
-ncclResult_t cocclCommCopyOpChain(ncclComm_t comm, ncclCommOp_t dstOp, ncclCommOp_t srcOp) {
-  ncclResult_t ret = ncclSuccess;
-  pthread_mutex_lock(&cocclCommLock);
-  cocclComm* coccl = findCocclCommLocked(comm);
-  if (coccl == nullptr) {
-    ret = ncclInvalidArgument;
-    goto exit;
-  }
-  {
-    const cocclCompressorChainConfig* source =
-        configuredCompressorChainForOp(coccl, srcOp);
-    if (source == nullptr) {
+    const cocclCompressorPolicyContext* configured =
+        configuredCompressor(coccl, role, source);
+    if (configured == nullptr) {
       ret = ncclInvalidUsage;
       goto exit;
     }
-    coccl->compressorChains.insert_or_assign(dstOp, *source);
+    coccl->compressors.insert_or_assign({role, destination}, *configured);
   }
 
 exit:
@@ -308,89 +266,50 @@ exit:
   return ret;
 }
 
-ncclResult_t cocclCommResetTrainingRoleChain(
-    ncclComm_t comm, cocclTrainingRole role, ncclCommOp_t op,
-    size_t thresholdBytes) {
-  if (role == cocclTrainingRoleUnknown) return ncclInvalidArgument;
-
-  ncclResult_t ret = ncclSuccess;
-  pthread_mutex_lock(&cocclCommLock);
-  cocclComm* coccl = findCocclCommLocked(comm);
-  if (coccl == nullptr) {
-    ret = ncclInvalidArgument;
-    goto exit;
-  }
-  {
-    cocclCompressorChainConfig& chain =
-        coccl->trainingCompressorChains[{role, op}];
-    chain.chain.clear();
-    chain.thresholdBytes = thresholdBytes;
-  }
-
-exit:
-  pthread_mutex_unlock(&cocclCommLock);
-  return ret;
-}
-
-ncclResult_t cocclCommAppendTrainingRoleCompressor(
-    ncclComm_t comm, cocclTrainingRole role, ncclCommOp_t op,
-    ncclCompressor_t* compressor, void* config) {
-  if (role == cocclTrainingRoleUnknown || compressor == nullptr) {
+ncclResult_t cocclCommResolveCompressorPolicy(
+    ncclComm_t comm, cocclTrainingRole role, cocclPolicyKey key,
+    cocclResolvedCompressorPolicy* resolved) {
+  if (comm == nullptr || resolved == nullptr || !validPolicyKey(key)) {
     return ncclInvalidArgument;
   }
+  *resolved = {};
 
   ncclResult_t ret = ncclSuccess;
   pthread_mutex_lock(&cocclCommLock);
   cocclComm* coccl = findCocclCommLocked(comm);
   if (coccl == nullptr) {
     ret = ncclInvalidArgument;
-    goto exit;
-  }
-  coccl->trainingCompressorChains[{role, op}].chain.push_back(
-      {compressor, ownCompressorConfig(config)});
-
-exit:
-  pthread_mutex_unlock(&cocclCommLock);
-  return ret;
-}
-
-bool cocclCommAvailable(ncclComm_t comm) {
-  bool available = false;
-  pthread_mutex_lock(&cocclCommLock);
-  cocclComm* coccl = findCocclCommLocked(comm);
-  available = coccl != nullptr && coccl->committed;
-  pthread_mutex_unlock(&cocclCommLock);
-  return available;
-}
-
-bool cocclCommShouldCompress(
-    ncclComm_t comm, ncclCommOp_t compressorOp, cocclTrainingRole role,
-    size_t totalBytes, ncclDataType_t datatype, ncclRedOp_t reductionOp) {
-  if (comm == nullptr || comm->nRanks <= 1 ||
-      !compressionDatatypeSupported(datatype)) {
-    return false;
-  }
-
-  if (operationRequiresReduction(compressorOp) && reductionOp != ncclSum) {
-    return false;
-  }
-
-  bool chainConfigured = false;
-  size_t thresholdBytes = 0;
-  pthread_mutex_lock(&cocclCommLock);
-  cocclComm* coccl = findCocclCommLocked(comm);
-  if (coccl != nullptr && coccl->committed) {
-    const cocclCompressorChainConfig* chain = role == cocclTrainingRoleUnknown
-        ? configuredCompressorChainForOp(coccl, compressorOp)
-        : trainingCompressorChainForRoleAndOp(coccl, role, compressorOp);
-    if (chain != nullptr) {
-      chainConfigured = true;
-      thresholdBytes = chain->thresholdBytes;
+  } else if (!coccl->committed) {
+    ret = ncclInvalidUsage;
+  } else {
+    const cocclCompressorPolicyContext* configured =
+        configuredCompressor(coccl, role, key);
+    if (configured == nullptr) {
+      ret = ncclInvalidUsage;
+    } else {
+      resolved->compressor = configured->compressor;
+      resolved->thresholdBytes = configured->thresholdBytes;
     }
   }
   pthread_mutex_unlock(&cocclCommLock);
+  return ret;
+}
 
-  return chainConfigured && totalBytes > thresholdBytes;
+bool cocclCommShouldCompress(
+    ncclComm_t comm, cocclTrainingRole role, cocclPolicyKey key,
+    size_t totalBytes, ncclDataType_t datatype, ncclRedOp_t reductionOp) {
+  const cocclOperationDescriptor* descriptor =
+      cocclGetOperationDescriptor(key.operation);
+  if (comm == nullptr || comm->nRanks <= 1 || descriptor == nullptr ||
+      !compressionDatatypeSupported(datatype) ||
+      (cocclOperationHasTrait(descriptor, cocclOperationTraitReduction) &&
+       reductionOp != ncclSum)) {
+    return false;
+  }
+  cocclResolvedCompressorPolicy resolved;
+  return cocclCommResolveCompressorPolicy(
+             comm, role, key, &resolved) == ncclSuccess &&
+         totalBytes > resolved.thresholdBytes;
 }
 
 ncclResult_t cocclCommGetHierarchicalComms(ncclComm_t comm, cocclHierarchicalComms* resource) {
@@ -452,31 +371,16 @@ fail:
   goto exit;
 }
 
-ncclResult_t cocclVisitCompressorChain(ncclComm_t comm, ncclCommOp_t op, bool reverse,
-                                       cocclCompressorVisitor visitor, void* context) {
-  if (visitor == nullptr) return ncclInvalidArgument;
+ncclResult_t cocclCommGetCompressor(
+    ncclComm_t comm, cocclPolicyKey key,
+    cocclCompressorHandle* compressor) {
+  if (comm == nullptr || compressor == nullptr) return ncclInvalidArgument;
+  *compressor = {};
 
-  bool found = false;
-  bool runtimeCommitted = false;
-  pthread_mutex_lock(&cocclCommLock);
-  cocclComm* coccl = findCocclCommLocked(comm);
-  if (coccl != nullptr) {
-    found = true;
-    runtimeCommitted = coccl->committed;
-  }
-  pthread_mutex_unlock(&cocclCommLock);
-  if (!found) {
-    WARN("COCCL compressor chain requested for an unregistered communicator %p", comm);
-    return ncclInvalidArgument;
-  }
-
-  // Keep the training decision authoritative in training_assist. Direct private
-  // primitive calls must not reach a default chain while a role is unknown.
-  // The exact role/op chain checked below is the sole compression-enable state.
-  // Before runtime commit, autotune profiling intentionally uses the default
-  // chain because no training role can exist yet.
+  // training_assist remains the sole authority for role selection. Unknown
+  // training communicators cannot accidentally use a normal-mode policy.
   cocclTrainingRole role = cocclTrainingRoleUnknown;
-  if (runtimeCommitted && cocclTrainingAssistEnabled()) {
+  if (cocclTrainingAssistEnabled()) {
     cocclTrainingClassification classification;
     if (!cocclTrainingAssistQuery(comm, &classification) ||
         classification.role == cocclTrainingRoleUnknown) {
@@ -485,57 +389,9 @@ ncclResult_t cocclVisitCompressorChain(ncclComm_t comm, ncclCommOp_t op, bool re
     role = classification.role;
   }
 
-  // Copy the vector under the lock, then invoke callbacks after releasing it.
-  // Compressor callbacks can enqueue CUDA/NCCL work and must not run while the
-  // global COCCL comm registry mutex is held.
-  cocclCompressorChain chainSnapshot;
-  bool snapshotFound = false;
-  bool configuredChainFound = true;
-  pthread_mutex_lock(&cocclCommLock);
-  coccl = findCocclCommLocked(comm);
-  if (coccl != nullptr) {
-    snapshotFound = true;
-    if (role == cocclTrainingRoleUnknown) {
-      if (runtimeCommitted) {
-        const cocclCompressorChainConfig* normalChain =
-            configuredCompressorChainForOp(coccl, op);
-        configuredChainFound = normalChain != nullptr;
-        if (normalChain != nullptr) chainSnapshot = normalChain->chain;
-      } else {
-        chainSnapshot = coccl->defaultCompressorChain;
-      }
-    } else {
-      const cocclCompressorChainConfig* trainingChain =
-          trainingCompressorChainForRoleAndOp(coccl, role, op);
-      configuredChainFound = trainingChain != nullptr;
-      if (trainingChain != nullptr) chainSnapshot = trainingChain->chain;
-    }
-  }
-  pthread_mutex_unlock(&cocclCommLock);
-
-  if (!snapshotFound) {
-    WARN("COCCL compressor chain requested for an unregistered communicator %p", comm);
-    return ncclInvalidArgument;
-  }
-  if (!configuredChainFound) {
-    if (role == cocclTrainingRoleUnknown) {
-      WARN("COCCL has no explicitly configured compressor chain for op %d",
-           (int)op);
-    } else {
-      WARN("COCCL training role %s has no configured compressor chain for op %d",
-           cocclTrainingRoleName(role), (int)op);
-    }
-    return ncclInvalidUsage;
-  }
-
-  if (reverse) {
-    for (auto it = chainSnapshot.rbegin(); it != chainSnapshot.rend(); ++it) {
-      NCCLCHECK(visitor(it->compressor, it->config.get(), context));
-    }
-  } else {
-    for (const cocclCompressorContext& compressorContext : chainSnapshot) {
-      NCCLCHECK(visitor(compressorContext.compressor, compressorContext.config.get(), context));
-    }
-  }
-  return ncclSuccess;
+  ncclResult_t ret = ncclSuccess;
+  cocclResolvedCompressorPolicy resolved;
+  ret = cocclCommResolveCompressorPolicy(comm, role, key, &resolved);
+  if (ret == ncclSuccess) *compressor = std::move(resolved.compressor);
+  return ret;
 }

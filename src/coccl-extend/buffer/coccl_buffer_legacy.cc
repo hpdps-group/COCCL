@@ -1,4 +1,4 @@
-#include "coccl_buffer_internal.h"
+#include "buffer/coccl_buffer_internal.h"
 
 namespace coccl_buffer {
 
@@ -96,7 +96,7 @@ static ncclResult_t legacyCreateBackingBlock(cocclLegacyDeviceBufferPool* pool, 
   ncclResult_t ret = ncclSuccess;
   if (pool == nullptr || blockOut == nullptr) return ncclInvalidArgument;
 
-  size_t configuredBlockBytes = (size_t)ncclParamCocclDeviceBufferBlockBytes();
+  size_t configuredBlockBytes = cocclGetConfig().buffer.legacyBlockBytes;
   size_t blockBytes = alignUp(bytes, kCocclBufferAlignment);
   // The optional block size trades memory footprint for fewer future
   // allocations when message sizes fluctuate around a common large size.
@@ -129,7 +129,7 @@ static ncclResult_t legacyTrimPoolLocked(cocclLegacyDeviceBufferPool* pool) {
   ncclResult_t ret = ncclSuccess;
   if (pool == nullptr) return ncclSuccess;
 
-  size_t limit = (size_t)ncclParamCocclDeviceBufferPoolLimit();
+  size_t limit = cocclGetConfig().buffer.poolLimitBytes;
   if (limit == 0 || pool->totalBytes <= limit) return ncclSuccess;
 
   // Only completely free and unregistered blocks are released. This avoids
@@ -240,7 +240,7 @@ ncclResult_t legacyAcquireForComm(cocclLegacyDeviceBufferPool* pool, ncclComm_t 
                                   ncclComm_t registeredComm, size_t bytes,
                                   cocclBufferHandle* buffer) {
   ncclResult_t ret = ncclSuccess;
-  if (pool == nullptr || ownerComm == nullptr || registeredComm == nullptr || buffer == nullptr) {
+  if (pool == nullptr || ownerComm == nullptr || buffer == nullptr) {
     return ncclInvalidArgument;
   }
 
@@ -251,7 +251,11 @@ ncclResult_t legacyAcquireForComm(cocclLegacyDeviceBufferPool* pool, ncclComm_t 
     // adjacent free slices whenever blocks are scanned.
     ret = legacyAcquireFromBlock(block, bytes, ownerComm, buffer);
     if (ret == ncclSuccess) {
-      NCCLCHECKGOTO(legacyEnsureBlockRegistration(block, ownerComm, registeredComm), ret, rollback);
+      if (registeredComm != nullptr) {
+        NCCLCHECKGOTO(
+            legacyEnsureBlockRegistration(block, ownerComm, registeredComm),
+            ret, rollback);
+      }
       return ncclSuccess;
     }
     if (ret != ncclInProgress) return ret;
@@ -261,7 +265,11 @@ ncclResult_t legacyAcquireForComm(cocclLegacyDeviceBufferPool* pool, ncclComm_t 
     cocclLegacyBackingBlock* block = nullptr;
     NCCLCHECKGOTO(legacyCreateBackingBlock(pool, bytes, &block), ret, fail);
     NCCLCHECKGOTO(legacyAcquireFromBlock(block, bytes, ownerComm, buffer), ret, fail);
-    NCCLCHECKGOTO(legacyEnsureBlockRegistration(block, ownerComm, registeredComm), ret, rollback);
+    if (registeredComm != nullptr) {
+      NCCLCHECKGOTO(
+          legacyEnsureBlockRegistration(block, ownerComm, registeredComm),
+          ret, rollback);
+    }
   }
   return ncclSuccess;
 

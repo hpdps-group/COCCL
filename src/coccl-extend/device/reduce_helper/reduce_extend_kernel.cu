@@ -1,4 +1,4 @@
-#include "coccl_reduce_helper.h"
+#include "compression/coccl_reduce_helper.h"
 
 #include <cuda_bf16.h>
 #include <cuda_fp16.h>

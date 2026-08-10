@@ -1,4 +1,4 @@
-#include "coccl_old_impl_internal.h"
+#include "legacy/coccl_old_impl_internal.h"
 
 NCCL_API(ncclResult_t, ncclAllReduceCompTwoShot, const void* sendbuff, void* recvbuff, size_t count,
   ncclDataType_t datatype, ncclRedOp_t op, ncclComm* comm, cudaStream_t stream);
@@ -19,9 +19,9 @@ ncclResult_t ncclAllReduceCompTwoShot(const void* sendbuff, void* recvbuff, size
   void* workspaceBase = workspaceBuffer.ptr;
  
   // reuse buff may have some wrong, some data may not send/recv sometimes
-  // NCCLCHECK(ncclCompress(sendbuff, &sendCompbuff, chunkCount, datatype, &compSendCount, &compDatatype, comm->nRanks, comm, ncclCommOp_t::AllReduce, stream));
+  // NCCLCHECK(ncclCompress(sendbuff, &sendCompbuff, chunkCount, datatype, &compSendCount, &compDatatype, comm->nRanks, comm, cocclDefaultPolicy(cocclOperation::AllReduce), stream));
   NCCLCHECK(ncclCompress(sendbuff, &workspaceBase, chunkCount, datatype,
-                            &compSendCount, &compDatatype, comm->nRanks, comm->rank, comm, ncclCommOp_t::AllReduce, stream));
+                            &compSendCount, &compDatatype, comm->nRanks, comm->rank, comm, cocclDefaultPolicy(cocclOperation::AllReduce), stream));
 
   void* sendCompbuff = workspaceBase;
   void* recvCompbuff = (char*) workspaceBase + compSendCount * comm->nRanks * ncclTypeSize(compDatatype);
@@ -30,12 +30,12 @@ ncclResult_t ncclAllReduceCompTwoShot(const void* sendbuff, void* recvbuff, size
   
   // Two-shot: exchange compressed chunks, reduce/recompress one chunk per rank,
   // then AllGather the compressed reduced chunks.
-  NCCLCHECK(ncclAllToAll((void*)sendCompbuff, (void*)recvCompbuff, compSendCount, compDatatype, comm, stream));
+  NCCLCHECK(ncclAllToAllNaive((void*)sendCompbuff, (void*)recvCompbuff, compSendCount, compDatatype, comm, stream));
   size_t reCompSendCount;
   ncclDataType_t reCompDatatype;
   // DecompReduceComp
   NCCLCHECK(ncclDecompReduceComp((void*)recvCompbuff, &sendCompbuff, count / comm->nRanks, datatype,
-              compSendCount, compDatatype, &reCompSendCount, &reCompDatatype, comm->nRanks, comm, ncclCommOp_t::AllReduce, stream));
+              compSendCount, compDatatype, &reCompSendCount, &reCompDatatype, comm->nRanks, comm, cocclDefaultPolicy(cocclOperation::AllReduce), stream));
 
   struct ncclInfo info = { ncclFuncAllGather, "AllGather",
     sendCompbuff, recvCompbuff, reCompSendCount, reCompDatatype, ncclSum, 0, comm, stream, /* Args */
@@ -43,7 +43,7 @@ ncclResult_t ncclAllReduceCompTwoShot(const void* sendbuff, void* recvbuff, size
   NCCLCHECK(ncclEnqueueCheck(&info));
 
   // Decompress
-  NCCLCHECK(ncclDecompress(recvbuff, (void*)recvCompbuff, chunkCount, datatype, reCompSendCount, reCompDatatype, comm->nRanks, comm, ncclCommOp_t::AllReduce, stream));
+  NCCLCHECK(ncclDecompress(recvbuff, (void*)recvCompbuff, chunkCount, datatype, reCompSendCount, reCompDatatype, comm->nRanks, comm, cocclDefaultPolicy(cocclOperation::AllReduce), stream));
   NCCLCHECK(cocclReleaseBuffer(&workspaceBuffer, stream));
 
   return ncclSuccess;
@@ -74,7 +74,7 @@ ncclResult_t ncclAllReduceCompTripleShot(const void* sendbuff, void* recvbuff, s
   NCCLCHECK(cocclRegisterHierarchicalWorkspace(&workspaceBuffer, &hierarchy));
   void* workspaceBase = workspaceBuffer.ptr;
   NCCLCHECK(ncclCompress(sendbuff, &workspaceBase, recvcount, datatype, &compSendCount, &compDatatype, nRanks, comm->rank,
-      comm, ncclCommOp_t::AllReduce_Inter, stream));
+      comm, cocclHierarchicalPolicy(cocclOperation::AllReduce), stream));
 
   void* intraSendCompbuff = workspaceBase;
   void* intraRecvCompbuff =(char*) workspaceBase + compSendCount * nRanks * ncclTypeSize(compDatatype);
@@ -83,7 +83,7 @@ ncclResult_t ncclAllReduceCompTripleShot(const void* sendbuff, void* recvbuff, s
   // Triple-shot hierarchy: intra-node exchange/reduce, inter-node
   // exchange/reduce, then global AllGather of compressed reduced chunks.
   size_t intraSendCount = compSendCount * nNodes;
-  NCCLCHECK(ncclAllToAll((void*)intraSendCompbuff, (void*)intraRecvCompbuff, intraSendCount, compDatatype, IntraSubComm, stream));
+  NCCLCHECK(ncclAllToAllNaive((void*)intraSendCompbuff, (void*)intraRecvCompbuff, intraSendCount, compDatatype, IntraSubComm, stream));
   size_t interOffset = 2 * compSendCount * nRanks;
   void* interSendCompbuff = (char*) workspaceBase + interOffset * ncclTypeSize(compDatatype);
   void* interRecvCompbuff = (char*) workspaceBase + (interOffset + compSendCount * nNodes) * ncclTypeSize(compDatatype);
@@ -92,16 +92,16 @@ ncclResult_t ncclAllReduceCompTripleShot(const void* sendbuff, void* recvbuff, s
   ncclDataType_t reCompDatatype;
     // DecompReduceComp
   NCCLCHECK(ncclDecompReduceComp((void*)intraRecvCompbuff, &interSendCompbuff, recvcount * nNodes, datatype,
-             intraSendCount, compDatatype, &reCompSendCount, &reCompDatatype, localRanks, comm, ncclCommOp_t::AllReduce_Inter, stream));
+             intraSendCount, compDatatype, &reCompSendCount, &reCompDatatype, localRanks, comm, cocclHierarchicalPolicy(cocclOperation::AllReduce), stream));
     // inter alltoall
   size_t interSendCount = reCompSendCount / nNodes;
 
-  NCCLCHECK(ncclAllToAll((void*)interSendCompbuff, (void*)interRecvCompbuff, interSendCount, compDatatype, InterSubComm, stream));
+  NCCLCHECK(ncclAllToAllNaive((void*)interSendCompbuff, (void*)interRecvCompbuff, interSendCount, compDatatype, InterSubComm, stream));
     
   // DecompReduce
   
   NCCLCHECK(ncclDecompReduceComp((void*)interRecvCompbuff, &intraSendCompbuff, recvcount, datatype,
-             interSendCount, compDatatype, &reCompSendCount, &reCompDatatype, nNodes, comm, ncclCommOp_t::AllReduce_Inter, stream));
+             interSendCount, compDatatype, &reCompSendCount, &reCompDatatype, nNodes, comm, cocclHierarchicalPolicy(cocclOperation::AllReduce), stream));
     
   struct ncclInfo info = { ncclFuncAllGather, "AllGather",
     workspaceBase, workspaceBase, reCompSendCount, reCompDatatype, ncclSum, 0, comm, stream, /* Args */
@@ -109,7 +109,7 @@ ncclResult_t ncclAllReduceCompTripleShot(const void* sendbuff, void* recvbuff, s
   NCCLCHECK(ncclEnqueueCheck(&info));
 
   // Decompress
-  NCCLCHECK(ncclDecompress(recvbuff, workspaceBase, recvcount, datatype, reCompSendCount, reCompDatatype, comm->nRanks, comm, ncclCommOp_t::AllReduce_Inter, stream));
+  NCCLCHECK(ncclDecompress(recvbuff, workspaceBase, recvcount, datatype, reCompSendCount, reCompDatatype, comm->nRanks, comm, cocclHierarchicalPolicy(cocclOperation::AllReduce), stream));
   NCCLCHECK(cocclReleaseBuffer(&workspaceBuffer, stream));
   
 

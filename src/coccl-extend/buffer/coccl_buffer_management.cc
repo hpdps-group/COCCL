@@ -1,19 +1,10 @@
-#include "coccl_buffer_management.h"
+#include "buffer/coccl_buffer_management.h"
 
-#include "coccl_buffer_internal.h"
-#include "param.h"
+#include "buffer/coccl_buffer_internal.h"
+#include "config/coccl_config.h"
 
 #include <map>
 #include <pthread.h>
-
-// Pool limit is interpreted per CUDA device. The default keeps idle backing
-// memory cached because allocation latency is visible on collective hot paths.
-NCCL_PARAM(CocclDeviceBufferPoolLimit, "COCCL_DEVICE_BUFFER_POOL_LIMIT", 0);
-// Minimum block size for the legacy ncclMemAlloc backend.
-NCCL_PARAM(CocclDeviceBufferBlockBytes, "COCCL_DEVICE_BUFFER_BLOCK_BYTES", 0);
-// Minimum physical chunk size for the VMM backend. It is rounded up to CUDA's
-// VMM granularity before use.
-NCCL_PARAM(CocclDeviceBufferPhysicalChunkBytes, "COCCL_DEVICE_BUFFER_PHYSICAL_CHUNK_BYTES", 8 * 1024 * 1024);
 
 using namespace coccl_buffer;
 
@@ -135,10 +126,11 @@ fail:
   goto exit;
 }
 
-ncclResult_t cocclGetBufferForComm(ncclComm_t ownerComm, ncclComm_t registeredComm,
-                                   size_t bytes, cocclBufferHandle* buffer) {
+static ncclResult_t cocclAcquireBuffer(
+    ncclComm_t ownerComm, ncclComm_t registeredComm, size_t bytes,
+    cocclBufferHandle* buffer) {
   ncclResult_t ret = ncclSuccess;
-  if (ownerComm == nullptr || registeredComm == nullptr || buffer == nullptr) return ncclInvalidArgument;
+  if (ownerComm == nullptr || buffer == nullptr) return ncclInvalidArgument;
 
   *buffer = {};
   bytes = alignUp(bytes == 0 ? 1 : bytes, kCocclBufferAlignment);
@@ -169,8 +161,20 @@ fail:
   goto exit;
 }
 
+ncclResult_t cocclGetBufferForComm(ncclComm_t ownerComm,
+                                   ncclComm_t registeredComm, size_t bytes,
+                                   cocclBufferHandle* buffer) {
+  if (registeredComm == nullptr) return ncclInvalidArgument;
+  return cocclAcquireBuffer(ownerComm, registeredComm, bytes, buffer);
+}
+
 ncclResult_t cocclGetBuffer(ncclComm_t comm, size_t bytes, cocclBufferHandle* buffer) {
   return cocclGetBufferForComm(comm, comm, bytes, buffer);
+}
+
+ncclResult_t cocclGetUnregisteredBuffer(
+    ncclComm_t ownerComm, size_t bytes, cocclBufferHandle* buffer) {
+  return cocclAcquireBuffer(ownerComm, nullptr, bytes, buffer);
 }
 
 ncclResult_t cocclRegisterBufferForComm(cocclBufferHandle* buffer, ncclComm_t registeredComm) {

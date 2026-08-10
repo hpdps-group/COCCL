@@ -58,60 +58,139 @@ To switch from the NCCL library to the COCCL library, follow the steps below:
    export DATASET_PATH=/path/to/dataset
    ```
 
-## Training-Mode Compressor Selection
+## COCCL Configuration
 
-Training mode infers whether each communicator is used for DP, PP, or TP and
-then selects a compressor chain for that role:
+COCCL reads exactly two environment variables. `COCCL_ENABLE=0` disables it;
+when enabled, all remaining settings come from one TOML file:
 
 ```bash
-export NCCL_ENABLE_COMPRESS=1
-export NCCL_COCCL_TRAINING_MODE=1
-
-# Process-wide plugin allow-list.
-export NCCL_COMPRESSORS=sdp4bit,tahquant
-
-# Role switches are independent from role classification.
-export NCCL_ENABLE_DP_COMPRESS=1
-export NCCL_ENABLE_PP_COMPRESS=1
-export NCCL_ENABLE_TP_COMPRESS=1
-
-# Comma-separated role/primitive chains. Every name must also appear above.
-export NCCL_DP_ALLGATHER_COMPRESSORS=sdp4bit
-export NCCL_DP_REDUCESCATTER_COMPRESSORS=sdp4bit
-export NCCL_DP_ALLREDUCE_COMPRESSORS=sdp4bit
-export NCCL_DP_ALLGATHER_COMPRESS_ENABLE_THRESHOLD=8388608
-export NCCL_DP_REDUCESCATTER_COMPRESS_ENABLE_THRESHOLD=8388608
-export NCCL_DP_ALLREDUCE_COMPRESS_ENABLE_THRESHOLD=8388608
-
-export NCCL_TP_ALLGATHER_COMPRESSORS=sdp4bit
-export NCCL_TP_REDUCESCATTER_COMPRESSORS=sdp4bit
-export NCCL_TP_ALLREDUCE_COMPRESSORS=sdp4bit
-export NCCL_TP_ALLGATHER_COMPRESS_ENABLE_THRESHOLD=8388608
-export NCCL_TP_REDUCESCATTER_COMPRESS_ENABLE_THRESHOLD=8388608
-export NCCL_TP_ALLREDUCE_COMPRESS_ENABLE_THRESHOLD=8388608
-
-export NCCL_PP_SENDRECV_FWD_COMPRESSORS=tahquant
-export NCCL_PP_SENDRECV_BWD_COMPRESSORS=tahquant
-export NCCL_PP_SENDRECV_COMPRESS_ENABLE_THRESHOLD=8388608
+export COCCL_ENABLE=1
+export COCCL_CONFIG_FILE=/path/to/coccl.toml
 ```
 
-In training mode, all primitive-level `NCCL_ENABLE_<OP>_COMPRESS` and
-`NCCL_<OP>_COMPRESSORS` settings are ignored. COCCL still classifies every
-observed communicator even when its role switch is disabled. Before
-classification commits, for an `Unknown` role, or when the corresponding role
-switch is disabled, communication stays on native NCCL. A role switch does not
-enable all primitives by itself: an enabled role only compresses operations
-whose `NCCL_<ROLE>_<OP>_COMPRESSORS` list is non-empty. Missing role/operation
-configuration stays on native NCCL and does not fall back to the global chain.
-The retired `NCCL_DP_COMPRESSORS`, `NCCL_PP_COMPRESSORS`, and
-`NCCL_TP_COMPRESSORS` variables are ignored. Operation config files such as
-`sdp4bit_RS.config` remain active for explicitly configured role/op chains.
+The file is parsed and validated once per process. Invalid TOML, an unknown
+key, an incompatible plugin, or a policy that references a plugin outside the
+catalog disables COCCL and falls back to native NCCL. Relative
+`compressor_plugins.library_path` values are resolved relative to the TOML
+file.
 
-Compression thresholds are uncompressed logical bytes and default to 8 MiB
-(`8388608` bytes).
-Normal mode uses `NCCL_<OP>_COMPRESS_ENABLE_THRESHOLD`, where `<OP>` is
-`ALLTOALL`, `ALLREDUCE`, `ALLGATHER`, `REDUCESCATTER`, or `SENDRECV`. Training
-mode uses the role/operation variables shown above. Internal `*_Inter` stages
-reuse their parent collective threshold, and forward/backward Send/Recv share
-one SendRecv threshold. The former global `NCCL_COMPRESS_ENABLE_THRESHOLD` is
-ignored.
+```toml
+schema_version = 2
+
+[runtime]
+mode = "normal" # normal | training
+compression_threshold_bytes = 8388608
+
+[compressor_plugins]
+compressors = ["sdp4bit", "tahquant"]
+library_path = "/path/to/compressor/libs"
+
+[pipeline]
+depth = 4
+
+[normal.reduce_scatter]
+compressor = "sdp4bit"
+
+[normal.reduce_scatter.config.default]
+groupCount = 128
+quantBits = 4
+quantType = "Symmetric"
+
+[normal.reduce_scatter.config.hierarchical]
+inQuantBits = 4
+outQuantBits = 4
+```
+
+`pipeline.depth` is an explicit slice count in the range 1 through 16. A depth
+of 1 executes the declared stages serially; values of 2 or greater enable slice
+overlap.
+
+The plugin catalog only loads `lib<compressor>.so`; it never forms an
+execution policy. A primitive is compressed only when its policy contains a
+non-empty `compressor` name. `threshold_bytes` optionally overrides
+the runtime default for that policy. Normal mode supports `all_gather`,
+`reduce_scatter`, `all_reduce`, `all_to_all`, and one bidirectional `sendrecv`
+policy. `default` and `hierarchical` are independent parameter sets selected by
+the primitive path; `hierarchical` does not inherit from `default`.
+
+Training mode uses `training.dp` and `training.tp` policies for AllGather,
+ReduceScatter, and AllReduce. Pipeline parallel Send/Recv is configured
+independently under `training.pp.sendrecv.forward` and
+`training.pp.sendrecv.backward`; a missing direction does not inherit from the
+other direction. Until communicator classification is committed, or when its
+role remains unknown, communication uses native NCCL.
+
+Complete examples are provided in
+[`normal.toml`](src/coccl-extend/configs/normal.toml) and
+[`training.toml`](src/coccl-extend/configs/training.toml). The
+[`zfp_taco.toml`](src/coccl-extend/configs/zfp_taco.toml) example shows a
+CMake-based ZFP plugin and a Makefile-based TACO plugin. Compressor options
+are scalar TOML values passed as key/value strings to the selected plugin. The
+plugin's `coccl::ConfigReader` applies defaults, performs strict type and range
+checks, and rejects unknown options.
+
+### Adding a compressor
+
+Compressor plugins use the C++17 SDK header
+`src/coccl-extend/include/compressor_plugin/compressor_plugin.h`. A stateless plugin only
+implements the two required operations and registers its name:
+
+```cpp
+#include "compressor_plugin/compressor_plugin.h"
+
+struct MyCompressor {
+  static coccl::Status compress(const coccl::Input& input,
+                                coccl::Output& output,
+                                coccl::Context& context) {
+    const size_t compressedBytes =
+        launchCompress(input.data(), output.data(), input.elements(),
+                       context.stream());
+    return output.commitBytes(compressedBytes, input.chunks());
+  }
+
+  static coccl::Status decompress(const coccl::Input& input,
+                                  coccl::Output& output,
+                                  coccl::Context& context) {
+    launchDecompress(output.data(), input.data(), output.elements(),
+                     context.stream());
+    return ncclSuccess;
+  }
+};
+
+COCCL_REGISTER_COMPRESSOR("mycompressor", MyCompressor);
+```
+
+The registration macro generates the ABI v5 descriptor, operation dispatch,
+configuration lifecycle, and fixed `cocclGetCompressorPlugin` entry point.
+`configure()`, `decompressReduce()`, and `decompressReduceCompress()` are
+optional and detected at compile time. `Context::scratch()`,
+`Context::persistent()`, and `Context::instance()` allocate resources only
+when the plugin actually calls them; a normal stateless path creates none of
+their runtime metadata.
+
+Plugins keep their own Makefile or CMake project. They only need C++17, the
+COCCL SDK include directory, PIC/shared-library flags, and the conventional
+output name `lib<compressor>.so`.
+
+With `NCCL_DEBUG=INFO`, COCCL prints the normalized effective configuration
+once when the process first loads the TOML file. The output includes inherited
+thresholds, resolved plugin paths, selected compressors, and the independently
+parsed default and hierarchical compressor parameters. Values passed through
+the plugin ABI are shown as strings because that is their final in-memory
+representation.
+
+The build also produces a standalone checker that validates TOML structure,
+loads every catalog plugin, checks its ABI descriptor, and runs each policy's
+parameters through the SDK-generated configuration callback without creating
+a GPU context or NCCL communicator:
+
+```bash
+build/bin/coccl-config-check src/coccl-extend/configs/normal.toml
+build/bin/coccl-config-check --nodes 2 --devices-per-node 8 \
+  src/coccl-extend/configs/training.toml
+```
+
+The topology arguments only populate the compressor configuration context;
+they default to two nodes and eight devices per node. The checker exits with a
+nonzero status for malformed TOML, missing/incompatible plugins, unknown
+compressor options, or plugin parameter validation failures.

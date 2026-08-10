@@ -1,14 +1,12 @@
-#include "coccl_primitives_internal.h"
-#include "coccl_pipeline.h"
-#include "coccl_pipeline_layout.h"
-#include "coccl_pipeline_stage.h"
-#include "param.h"
+#include "primitives/coccl_primitives_internal.h"
+#include "config/coccl_config.h"
+#include "pipeline/coccl_pipeline.h"
+#include "pipeline/coccl_pipeline_layout.h"
+#include "pipeline/coccl_pipeline_stage.h"
 
 #include <limits.h>
 #include <stdlib.h>
 #include <string.h>
-
-NCCL_PARAM(PipelineDepth, "PIPELINE_DEPTH", 0);
 
 namespace {
 
@@ -77,15 +75,24 @@ bool cocclAlignPipelineBytes(size_t bytes, size_t* aligned) {
   return true;
 }
 
+bool cocclPipelineEncodedCapacity(size_t rawSliceBytes,
+                                  size_t logicalChunks,
+                                  size_t* capacity) {
+  return cocclCheckedMultiply(rawSliceBytes, logicalChunks, capacity) &&
+      cocclAlignPipelineBytes(*capacity, capacity);
+}
+
 bool cocclStageCreatesTemp(cocclPipelineStageKind kind) {
   return kind == cocclPipelineStageCompress ||
       kind == cocclPipelineStageAllToAll ||
+      kind == cocclPipelineStageAllGather ||
       kind == cocclPipelineStageDecompReduceComp;
 }
 
 ncclResult_t cocclValidatePipelineSpec(const cocclPipelineSpec* spec) {
   if (spec == nullptr || spec->name == nullptr || spec->input == nullptr ||
       spec->output == nullptr || spec->ownerComm == nullptr ||
+      !spec->compressor ||
       spec->stages == nullptr || spec->stageCount < 2 ||
       spec->stageCount > kMaxPipelineStages || spec->rawChunkCount == 0 ||
       spec->inputChunks == 0) {
@@ -138,27 +145,14 @@ ncclResult_t cocclBuildPipelinePlan(cocclPipelineContext* ctx) {
     logicalChunks = outputChunks;
 
     bool finalStage = stageIndex + 1 == spec->stageCount;
-    if (stage.kind == cocclPipelineStageAllGather) {
-      // AllGather grows the current edge in place. A logical edge may contain
-      // one or more chunks; every rank contributes the complete edge.
-      if (currentTemp < 0) return ncclInvalidArgument;
-      size_t capacity = 0;
-      if (!cocclCheckedMultiply(ctx->rawSliceBytes, logicalChunks, &capacity) ||
-          !cocclAlignPipelineBytes(capacity, &capacity)) {
-        return ncclInvalidArgument;
-      }
-      if (capacity > plan->temps[currentTemp].bytes) {
-        plan->temps[currentTemp].bytes = capacity;
-      }
-      plan->stageOutputTemp[stageIndex] = currentTemp;
-    } else if (finalStage) {
+    if (finalStage) {
       plan->stageOutputTemp[stageIndex] = -1;
     } else if (cocclStageCreatesTemp(stage.kind)) {
       if (plan->tempCount >= kMaxPipelineStages) return ncclInvalidArgument;
       currentTemp = plan->tempCount++;
       size_t capacity = 0;
-      if (!cocclCheckedMultiply(ctx->rawSliceBytes, logicalChunks, &capacity) ||
-          !cocclAlignPipelineBytes(capacity, &capacity)) {
+      if (!cocclPipelineEncodedCapacity(
+              ctx->rawSliceBytes, logicalChunks, &capacity)) {
         return ncclInvalidArgument;
       }
       plan->temps[currentTemp].bytes = capacity;
@@ -222,7 +216,7 @@ ncclResult_t cocclPreparePipeline(cocclPipelineContext* ctx) {
       ctx->rawSliceCount,
       ctx->spec->datatype,
       ctx->spec->ownerComm,
-      ctx->spec->commOp,
+      ctx->spec->compressor,
   };
   NCCLCHECK(cocclBuildPipelinePlan(ctx));
   return ncclSuccess;
@@ -267,7 +261,7 @@ ncclResult_t cocclFindOrCreatePipelineResources(
   for (cocclPipelineResources* cur = pipelineResources; cur != nullptr;
        cur = cur->next) {
     if (cur->cudaDev == cudaDev && cur->stageCount == stageCount &&
-        strcmp(cur->name, name) == 0) {
+        (cur->name == name || strcmp(cur->name, name) == 0)) {
       *out = cur;
       return ncclSuccess;
     }
@@ -291,17 +285,19 @@ ncclResult_t cocclFindOrCreatePipelineResources(
   for (int i = 0; i < stageCount; ++i) {
     CUDACHECK(cudaStreamCreateWithFlags(res->streams + i,
                                         cudaStreamNonBlocking));
-    CUDACHECK(cudaEventCreateWithFlags(res->events + i, cudaEventDefault));
+    CUDACHECK(cudaEventCreateWithFlags(
+        res->events + i, cudaEventDisableTiming));
   }
   CUDACHECK(cudaStreamCreateWithFlags(&res->packStream,
                                       cudaStreamNonBlocking));
   CUDACHECK(cudaStreamCreateWithFlags(&res->unpackStream,
                                       cudaStreamNonBlocking));
   CUDACHECK(cudaEventCreateWithFlags(&res->packReadyEvent,
-                                     cudaEventDefault));
+                                     cudaEventDisableTiming));
   CUDACHECK(cudaEventCreateWithFlags(&res->unpackDoneEvent,
-                                     cudaEventDefault));
-  CUDACHECK(cudaEventCreateWithFlags(&res->mainEvent, cudaEventDefault));
+                                     cudaEventDisableTiming));
+  CUDACHECK(cudaEventCreateWithFlags(
+      &res->mainEvent, cudaEventDisableTiming));
 
   res->next = pipelineResources;
   pipelineResources = res;
@@ -387,6 +383,10 @@ ncclResult_t cocclRunPipelineStage(cocclPipelineContext* ctx,
     } else {
       edge->ptr = initialInput;
     }
+    if (!cocclCheckedMultiply(ctx->rawSliceBytes, spec->inputChunks,
+                              &edge->bytes)) {
+      return ncclInvalidArgument;
+    }
     edge->totalElements = ctx->rawSliceCount * spec->inputChunks;
     edge->datatype = spec->datatype;
     edge->logicalChunks = spec->inputChunks;
@@ -403,10 +403,39 @@ ncclResult_t cocclRunPipelineStage(cocclPipelineContext* ctx,
   NCCLCHECK(cocclPipelineStageOutputChunks(stage, edge->logicalChunks,
                                            &outputChunks));
 
+  size_t outputCapacityBytes = 0;
+  if (!cocclCheckedMultiply(ctx->rawSliceBytes, outputChunks,
+                            &outputCapacityBytes)) {
+    return ncclInvalidArgument;
+  }
+  if (!finalStage) {
+    int outputTemp = ctx->plan.stageOutputTemp[stageIndex];
+    if (outputTemp < 0 || outputTemp >= ctx->plan.tempCount) {
+      return ncclInvalidArgument;
+    }
+    // Physical temps include alignment padding. Compressors only see the
+    // uncompressed-size bound required by the no-expansion contract.
+    if (outputCapacityBytes > ctx->plan.temps[outputTemp].bytes) {
+      return ncclInternalError;
+    }
+  }
   NCCLCHECK(cocclExecutePipelineStage(
-      &ctx->stageContext, &stage, edge, outputPtr, stream));
+      &ctx->stageContext, &stage, edge, outputPtr, outputCapacityBytes,
+      stream));
 
-  edge->logicalChunks = outputChunks;
+  size_t edgeStorageBytes = 0;
+  const int edgeTypeBytes = ncclTypeSize(edge->datatype);
+  if (edge->ptr != outputPtr || edge->logicalChunks != outputChunks ||
+      edge->logicalChunks == 0 || edge->bytes == 0 ||
+      edge->bytes > outputCapacityBytes ||
+      edge->totalElements == 0 || edgeTypeBytes <= 0 ||
+      !cocclCheckedMultiply(edge->totalElements, (size_t)edgeTypeBytes,
+                            &edgeStorageBytes) ||
+      edgeStorageBytes != edge->bytes ||
+      edge->totalElements % edge->logicalChunks != 0 ||
+      edge->bytes % edge->logicalChunks != 0) {
+    return ncclInvalidUsage;
+  }
   return ncclSuccess;
 }
 
@@ -560,7 +589,7 @@ ncclResult_t cocclRunPipelineWithDepth(const cocclPipelineSpec* spec,
 }  // namespace
 
 ncclResult_t cocclRunPipeline(const cocclPipelineSpec* spec) {
-  return cocclRunPipelineWithDepth(spec, ncclParamPipelineDepth());
+  return cocclRunPipelineWithDepth(spec, cocclGetConfig().pipeline.depth);
 }
 
 ncclResult_t cocclRunPipelineSerial(const cocclPipelineSpec* spec) {

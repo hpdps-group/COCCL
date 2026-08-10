@@ -11,6 +11,30 @@
 // #include <ATen/cuda/CUDAContext.h>
 namespace cg = cooperative_groups;
 
+namespace {
+
+template <typename T>
+struct QuantStorage;
+
+template <>
+struct QuantStorage<float> {
+    using Type = float;
+};
+
+template <>
+struct QuantStorage<__half> {
+    using Type = __half2;
+};
+
+#ifdef BF16_AVAILABLE
+template <>
+struct QuantStorage<__nv_bfloat16> {
+    using Type = __nv_bfloat162;
+};
+#endif
+
+}  // namespace
+
 template <typename scalar_t, int vec_size>
 __device__ __inline__ void load_to_local(
     scalar_t* __restrict__ local_buffer,
@@ -68,13 +92,16 @@ __device__ __inline__ void load_to_local(
                 if (idx + vec_size - 1 < end_idx) {
                     // IF [idx+j, idx+vec_size) is contiguous, load once is enough
                     // model_params+ param_offset [idx + j - start_idx: idx + vec_size] -> local_buffer[j: vec_size]
-                    if (vec_size - j >= 8) {
-                        mem_access::load_global<8*sizeof(scalar_t)>(
-                            local_buffer + j,
-                            model_params + param_offset +idx + j - start_idx);
-                        j += 8;
-                        break;
-                    } else if (vec_size - j >= 4) {
+                    if constexpr (vec_size >= 8) {
+                        if (vec_size - j >= 8) {
+                            mem_access::load_global<8*sizeof(scalar_t)>(
+                                local_buffer + j,
+                                model_params + param_offset +idx + j - start_idx);
+                            j += 8;
+                            break;
+                        }
+                    }
+                    if (vec_size - j >= 4) {
                         mem_access::load_global<4*sizeof(scalar_t)>(
                             local_buffer + j,
                             model_params+ param_offset +idx + j - start_idx);
@@ -97,13 +124,16 @@ __device__ __inline__ void load_to_local(
                     }
                 } else {
                     // IF [idx+j, idx+vec_size) is not contiguous, only load [idx+j, end_idx)
-                    if (end_idx - idx - j >= 8) {
-                        mem_access::load_global<8*sizeof(scalar_t)>(
-                            local_buffer + j,
-                            model_params+ param_offset +idx + j - start_idx);
-                        j += 8;
-                        break;
-                    } else if (end_idx - idx - j >= 4) {
+                    if constexpr (vec_size >= 8) {
+                        if (end_idx - idx - j >= 8) {
+                            mem_access::load_global<8*sizeof(scalar_t)>(
+                                local_buffer + j,
+                                model_params+ param_offset +idx + j - start_idx);
+                            j += 8;
+                            break;
+                        }
+                    }
+                    if (end_idx - idx - j >= 4) {
                         mem_access::load_global<4*sizeof(scalar_t)>(
                             local_buffer + j,
                             model_params+ param_offset +idx + j - start_idx);
@@ -135,8 +165,8 @@ __device__ __inline__ void load_to_local(
     // return param_idx;
 }
 
-#ifdef BF16_AVAILABLE
 template <
+    typename T,
     int q_bits,
     quantize::Type quant_type,
     int UNROLL,
@@ -145,8 +175,8 @@ template <
     int max_threads>
 __global__ void cached_quantization(
     int8_t* __restrict__ output_data,
-    const __nv_bfloat16* model_params, // model params are real params for forward computation
-    const __nv_bfloat16* __restrict__ shard_params_buffer, // Updated to bfloat16
+    const T* model_params,
+    const T* __restrict__ shard_params_buffer,
     int groups,
     int elems_per_group,
     int64_t elems_per_chunk,
@@ -155,6 +185,10 @@ __global__ void cached_quantization(
     const int64_t dp_param_offset,
     const int64_t total_elems)
 {
+    using Storage = typename QuantStorage<T>::Type;
+    constexpr int values_per_load = quantize::granularity / sizeof(T);
+    constexpr int storage_per_load = quantize::granularity / sizeof(Storage);
+
     cg::thread_block tb = cg::this_thread_block();
     cg::thread_block_tile<hw_warp_size> warp = cg::tiled_partition<hw_warp_size>(tb);
 
@@ -162,40 +196,47 @@ __global__ void cached_quantization(
     const int64_t block_offset =
         (static_cast<int64_t>(tb.group_index().x) * (max_threads / threads_per_group) * elems_per_group) +
         (tb.thread_index().y * elems_per_group);
-    const int elem_offset_in_group = tb.thread_index().x * 8;
+    const int elem_offset_in_group =
+        tb.thread_index().x * values_per_load;
     const int64_t padding_offset = block_offset + elem_offset_in_group;
     const int64_t chunk_idx = padding_offset / elems_per_chunk_padding;
     const int64_t elem_offset_in_chunk = padding_offset % elems_per_chunk_padding;
     const int64_t base_offset = chunk_idx * elems_per_chunk + elem_offset_in_chunk;
 
-    const int stride = tb.size() * 8;
+    const int stride = tb.size() * values_per_load;
 
-    const __nv_bfloat16* input_base = shard_params_buffer + base_offset;
-    // __nv_bfloat16* output_base = output_data + base_offset;
+    const T* input_base = shard_params_buffer + base_offset;
     // printf("base_offset %ld elem_offset %d\n", base_offset, elem_offset);
-    __nv_bfloat162 local_buffer[UNROLL * internal_unroll * 4]; // Updated buffer type
+    Storage local_buffer[UNROLL * internal_unroll * storage_per_load];
     // int64_t param_offset = d_block_start_param_offset[tb.group_index().x];
     // int64_t param_offset = 0;
 
 #pragma unroll
     for (int i = 0; i < UNROLL; i++) {
-        __nv_bfloat162* iteration_buffer = local_buffer + i * internal_unroll * 4; // Updated pointer type
+        Storage* iteration_buffer =
+            local_buffer + i * internal_unroll * storage_per_load;
 #pragma unroll
         for (int j = 0; j < internal_unroll; j++) {
             const int iteration = i * internal_unroll + j;
-            __nv_bfloat16* data_cast = reinterpret_cast<__nv_bfloat16*>(iteration_buffer + j * 4);
-            __nv_bfloat16 temp_param_model[8];
-            mem_access::load_global<16>(
-                iteration_buffer + j * 4,
+            T* data_cast = reinterpret_cast<T*>(
+                iteration_buffer + j * storage_per_load);
+            T temp_param_model[values_per_load];
+            mem_access::load_global<quantize::granularity>(
+                iteration_buffer + j * storage_per_load,
                 input_base + iteration * stride,
                 (elem_offset_in_group + iteration * stride < elems_per_group) &&
                 (elem_offset_in_chunk + iteration * stride < elems_per_chunk));            
-            load_to_local<__nv_bfloat16, 8>(temp_param_model, model_params, num_params, total_elems, base_offset + iteration * stride + dp_param_offset);
+            load_to_local<T, values_per_load>(
+                temp_param_model, model_params, num_params, total_elems,
+                base_offset + iteration * stride + dp_param_offset);
 
 #pragma unroll
-            for (int k = 0; k < 8; k++) {
+            for (int k = 0; k < values_per_load; k++) {
                 data_cast[k] = ((elem_offset_in_group + iteration * stride + k < elems_per_group) &&
-                                (elem_offset_in_chunk + iteration * stride + k < elems_per_chunk)) ? __hsub(data_cast[k], temp_param_model[k]) : __float2bfloat16(0.0f);
+                                (elem_offset_in_chunk + iteration * stride + k < elems_per_chunk))
+                    ? reduce::element<reduce::ROpType::Sub>(
+                          data_cast[k], temp_param_model[k])
+                    : reduce::init<reduce::ROpType::Add, T>();
             }
         }
     }
@@ -204,7 +245,6 @@ __global__ void cached_quantization(
         local_array<quant_type, q_bits, UNROLL * internal_unroll, threads_per_group, max_threads>(
             local_buffer, nullptr, output_data, elems_per_group, groups);
 }
-#endif
 
 
 // #ifdef BF16_AVAILABLE
@@ -298,7 +338,8 @@ __global__ void cached_quantization(
 
 /********* Launcher methods ***********/
 #define LAUNCH_CACHED_QUANT_CALL(q_bits, quant_type)                            \
-    cached_quantization<q_bits,                      \
+    cached_quantization<T,                           \
+                        q_bits,                      \
                         quant_type,                  \
                         unroll_factor,               \
                         internal_unroll_l,           \
@@ -325,10 +366,11 @@ __global__ void cached_quantization(
         }                                                                           \
     }
 
+template <typename T>
 void launch_fused_sub_quant_cuda(
     int8_t* output_data,
-    const __nv_bfloat16* param_list,
-    const __nv_bfloat16* shard_params_buffer,
+    const T* param_list,
+    const T* shard_params_buffer,
     const int num_bits,
     const quantize::Type quant_type,
     // const int groups,
@@ -341,10 +383,13 @@ void launch_fused_sub_quant_cuda(
     constexpr int max_threads = 256;
     constexpr int internal_unroll = 2;
     const bool is_subblock_schedule = (elems_per_group <= 128) ? true : false;
-    const int bf_per_step = is_subblock_schedule ? 8
-                                                : 8 * internal_unroll;
+    constexpr int values_per_load = quantize::granularity / sizeof(T);
+    const int values_per_step = is_subblock_schedule
+        ? values_per_load
+        : values_per_load * internal_unroll;
 
-    const int one_step_threads = next_pow2((elems_per_group + bf_per_step - 1) / bf_per_step);
+    const int one_step_threads = next_pow2(
+        (elems_per_group + values_per_step - 1) / values_per_step);
     const int threads_per_group = (one_step_threads < max_threads) ? one_step_threads : max_threads;
 
     const int groups_per_chunk = (elems_per_chunk + elems_per_group -1) / elems_per_group;
@@ -358,7 +403,7 @@ void launch_fused_sub_quant_cuda(
 
     dim3 block(threads_per_group, groups_per_block);
     dim3 grid(groups_launch);
-    const int elems_per_step = threads_per_group * bf_per_step;
+    const int elems_per_step = threads_per_group * values_per_step;
     const int external_unroll = (elems_per_group + elems_per_step - 1) / elems_per_step;
 
     // Calculate total size of the output tensor
@@ -389,6 +434,8 @@ void launch_fused_sub_quant_cuda(
             LAUNCH_CACHED_QUANT(num_bits, quant_type, 1, 1, 8);
         } else if (threads_per_group == 16) {
             LAUNCH_CACHED_QUANT(num_bits, quant_type, 1, 1, 16);
+        } else if (threads_per_group == 32) {
+            LAUNCH_CACHED_QUANT(num_bits, quant_type, 1, 1, 32);
         }
     } else if (external_unroll == 1) {
         LAUNCH_CACHED_QUANT(num_bits, quant_type, 1, internal_unroll, max_threads);
@@ -462,3 +509,15 @@ void launch_fused_sub_quant_cuda(
     // //     throw std::runtime_error("Unsupported input tensor data type.");
     // // }
 }
+
+template void launch_fused_sub_quant_cuda<float>(
+    int8_t*, const float*, const float*, int, quantize::Type, int, int64_t,
+    int, int, cudaStream_t);
+template void launch_fused_sub_quant_cuda<__half>(
+    int8_t*, const __half*, const __half*, int, quantize::Type, int, int64_t,
+    int, int, cudaStream_t);
+#ifdef BF16_AVAILABLE
+template void launch_fused_sub_quant_cuda<__nv_bfloat16>(
+    int8_t*, const __nv_bfloat16*, const __nv_bfloat16*, int,
+    quantize::Type, int, int64_t, int, int, cudaStream_t);
+#endif

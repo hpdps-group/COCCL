@@ -1,11 +1,11 @@
-#include "coccl_training_assist.h"
+#include "training/coccl_training_assist.h"
 
-#include "coccl_runtime.h"
-#include "coccl_training_classifier.h"
+#include "runtime/coccl_runtime.h"
+#include "config/coccl_config.h"
+#include "training/coccl_training_classifier.h"
 #include "collectives.h"
 #include "comm.h"
 #include "debug.h"
-#include "param.h"
 
 #include <algorithm>
 #include <limits>
@@ -16,10 +16,6 @@
 #include <string>
 #include <time.h>
 #include <vector>
-
-NCCL_PARAM(CocclTrainingMode, "COCCL_TRAINING_MODE", 0);
-NCCL_PARAM(CocclTrainingIterations, "COCCL_TRAINING_ITERATIONS", 10);
-NCCL_PARAM(CocclTrainingMaxEvents, "COCCL_TRAINING_MAX_EVENTS", 65536);
 
 namespace {
 
@@ -74,8 +70,11 @@ static const char* operationName(ncclFunc_t operation) {
   }
 }
 
-static bool checkedLogicalBytes(const cocclRuntimeArgs* args, size_t* bytes) {
+static bool checkedLogicalBytes(const cocclInfo* args, size_t* bytes) {
   if (args == nullptr || args->comm == nullptr || bytes == nullptr) return false;
+  const cocclOperationDescriptor* descriptor =
+      cocclGetOperationDescriptor(args->operation);
+  if (descriptor == nullptr) return false;
   int datatypeBytes = ncclTypeSize(args->datatype);
   if (datatypeBytes <= 0 ||
       args->count > std::numeric_limits<size_t>::max() /
@@ -84,8 +83,8 @@ static bool checkedLogicalBytes(const cocclRuntimeArgs* args, size_t* bytes) {
   }
 
   size_t result = args->count * (size_t)datatypeBytes;
-  if (args->func == ncclFuncAllGather ||
-      args->func == ncclFuncReduceScatter) {
+  if (cocclOperationHasTrait(
+          descriptor, cocclOperationTraitScaleBytesByRanks)) {
     if (args->comm->nRanks <= 0 ||
         result > std::numeric_limits<size_t>::max() /
                      (size_t)args->comm->nRanks) {
@@ -191,12 +190,12 @@ static void commitTraceLocked(
 }
 
 static int configuredIterations() {
-  return (int)std::clamp<int64_t>(ncclParamCocclTrainingIterations(), 2, 100);
+  return cocclGetConfig().training.observationIterations;
 }
 
 static size_t configuredMaxEvents() {
-  return (size_t)std::clamp<int64_t>(ncclParamCocclTrainingMaxEvents(),
-                                     256, 1024 * 1024);
+  return std::clamp(cocclGetConfig().training.maxEvents,
+                    (size_t)256, (size_t)1024 * 1024);
 }
 
 static uint64_t monotonicTimeNs() {
@@ -222,7 +221,7 @@ const char* cocclTrainingRoleName(cocclTrainingRole role) {
 }
 
 bool cocclTrainingAssistEnabled() {
-  return ncclParamCocclTrainingMode() == 1;
+  return cocclGetConfig().runtime.mode == cocclRuntimeMode::Training;
 }
 
 void cocclTrainingAssistRegister(ncclComm_t comm) {
@@ -282,7 +281,7 @@ void cocclTrainingAssistUnregister(ncclComm_t comm) {
 }
 
 void cocclTrainingAssistObserve(
-    const cocclRuntimeArgs* args, int groupDepth) {
+    const cocclInfo* args, int groupDepth) {
   if (!cocclTrainingAssistEnabled() || args == nullptr ||
       args->comm == nullptr || !isObservedOperation(args->func)) {
     return;

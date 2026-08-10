@@ -1,8 +1,9 @@
-#include "coccl_pipeline_stage.h"
+#include "pipeline/coccl_pipeline_stage.h"
 
-#include "coccl_primitives_internal.h"
+#include "primitives/coccl_primitives_internal.h"
 
 #include <limits.h>
+#include <stdint.h>
 
 namespace {
 
@@ -12,45 +13,56 @@ bool cocclStageCheckedMultiply(size_t lhs, size_t rhs, size_t* result) {
   return true;
 }
 
+bool cocclStageBuffersOverlap(const void* input, size_t inputBytes,
+                              const void* output, size_t outputBytes) {
+  const uintptr_t inputBegin = (uintptr_t)input;
+  const uintptr_t outputBegin = (uintptr_t)output;
+  if (inputBytes > UINTPTR_MAX - inputBegin ||
+      outputBytes > UINTPTR_MAX - outputBegin) {
+    return true;
+  }
+  const uintptr_t inputEnd = inputBegin + inputBytes;
+  const uintptr_t outputEnd = outputBegin + outputBytes;
+  return inputBegin < outputEnd && outputBegin < inputEnd;
+}
+
 using cocclPipelineStageFn = ncclResult_t (*)(
     const cocclPipelineStageContext* context,
     const cocclPipelineStage* stage, cocclPipelineEdge* edge,
-    void* outputPtr, cudaStream_t stream);
+    void* outputPtr, size_t outputCapacityBytes, cudaStream_t stream);
 
 ncclResult_t cocclRunCompressStage(
     const cocclPipelineStageContext* context,
     const cocclPipelineStage* /* stage */, cocclPipelineEdge* edge,
-    void* outputPtr, cudaStream_t stream) {
-  const size_t logicalChunks = edge->logicalChunks;
-  size_t compElementsPerChunk = 0;
-  ncclDataType_t compDatatype = ncclInt8;
-  void* compressOutput = outputPtr;
+    void* outputPtr, size_t outputCapacityBytes, cudaStream_t stream) {
+  const cocclCompressorDataView input = {
+      edge->ptr, edge->bytes, edge->totalElements, edge->logicalChunks,
+      edge->datatype};
+  cocclCompressorOutputView output = {
+      outputPtr, outputCapacityBytes, 0, 0, edge->logicalChunks, ncclInt8};
   NCCLCHECK(ncclCompress(
-      edge->ptr, &compressOutput, context->rawSliceCount,
-      context->rawDatatype, &compElementsPerChunk, &compDatatype,
-      logicalChunks, context->ownerComm->rank, context->ownerComm,
-      context->commOp, stream));
-  if (!cocclStageCheckedMultiply(compElementsPerChunk, logicalChunks,
-                                 &edge->totalElements)) {
-    return ncclInvalidArgument;
-  }
-  edge->ptr = compressOutput;
-  edge->datatype = compDatatype;
+      context->compressor, input, &output, context->ownerComm->rank, stream));
+  edge->ptr = output.data;
+  edge->bytes = output.bytes;
+  edge->totalElements = output.elements;
+  edge->datatype = output.datatype;
+  edge->logicalChunks = output.chunks;
   return ncclSuccess;
 }
 
 ncclResult_t cocclRunAllToAllStage(
     const cocclPipelineStageContext* /* context */,
     const cocclPipelineStage* stage, cocclPipelineEdge* edge,
-    void* outputPtr, cudaStream_t stream) {
+    void* outputPtr, size_t outputCapacityBytes, cudaStream_t stream) {
   if (stage->comm->nRanks <= 0 ||
-      edge->totalElements % (size_t)stage->comm->nRanks != 0) {
+      edge->bytes % (size_t)stage->comm->nRanks != 0 ||
+      edge->bytes > outputCapacityBytes) {
     return ncclInvalidArgument;
   }
-  const size_t sendCount =
-      edge->totalElements / (size_t)stage->comm->nRanks;
-  NCCLCHECK(ncclAllToAll(edge->ptr, outputPtr, sendCount, edge->datatype,
-                         stage->comm, stream));
+  const size_t sendBytes =
+      edge->bytes / (size_t)stage->comm->nRanks;
+  NCCLCHECK(ncclAllToAllNaive(edge->ptr, outputPtr, sendBytes, ncclUint8,
+                              stage->comm, stream));
   edge->ptr = outputPtr;
   return ncclSuccess;
 }
@@ -58,62 +70,82 @@ ncclResult_t cocclRunAllToAllStage(
 ncclResult_t cocclRunAllGatherStage(
     const cocclPipelineStageContext* /* context */,
     const cocclPipelineStage* stage, cocclPipelineEdge* edge,
-    void* /* outputPtr */, cudaStream_t stream) {
+    void* outputPtr, size_t outputCapacityBytes,
+    cudaStream_t stream) {
+  size_t gatheredBytes = 0;
+  size_t gatheredElements = 0;
+  size_t gatheredChunks = 0;
+  if (stage->comm->nRanks <= 0 ||
+      !cocclStageCheckedMultiply(edge->bytes,
+                                 (size_t)stage->comm->nRanks,
+                                 &gatheredBytes) ||
+      !cocclStageCheckedMultiply(edge->totalElements,
+                                 (size_t)stage->comm->nRanks,
+                                 &gatheredElements) ||
+      !cocclStageCheckedMultiply(edge->logicalChunks,
+                                 (size_t)stage->comm->nRanks,
+                                 &gatheredChunks) ||
+      gatheredBytes > outputCapacityBytes) {
+    return ncclInvalidArgument;
+  }
+
   struct ncclInfo info = {
-      ncclFuncAllGather, "AllGather", edge->ptr, edge->ptr,
-      edge->totalElements, edge->datatype, ncclSum, 0, stage->comm, stream,
+      ncclFuncAllGather, "AllGather", edge->ptr, outputPtr,
+      edge->bytes, ncclUint8, ncclSum, 0, stage->comm, stream,
       ALLGATHER_CHUNKSTEPS, ALLGATHER_SLICESTEPS};
   NCCLCHECK(ncclEnqueueCheck(&info));
 
-  size_t gatheredElements = 0;
-  if (!cocclStageCheckedMultiply(edge->totalElements,
-                                 (size_t)stage->comm->nRanks,
-                                 &gatheredElements)) {
-    return ncclInvalidArgument;
-  }
+  edge->ptr = outputPtr;
+  edge->bytes = gatheredBytes;
   edge->totalElements = gatheredElements;
+  edge->logicalChunks = gatheredChunks;
   return ncclSuccess;
 }
 
 ncclResult_t cocclRunDecompReduceCompStage(
     const cocclPipelineStageContext* context,
     const cocclPipelineStage* stage, cocclPipelineEdge* edge,
-    void* outputPtr, cudaStream_t stream) {
-  if (edge->logicalChunks % stage->reduceChunks != 0 ||
-      edge->totalElements % stage->reduceChunks != 0) {
+    void* outputPtr, size_t outputCapacityBytes, cudaStream_t stream) {
+  if (stage->reduceChunks == 0 ||
+      edge->logicalChunks % stage->reduceChunks != 0 ||
+      edge->totalElements % stage->reduceChunks != 0 ||
+      edge->bytes % stage->reduceChunks != 0) {
     return ncclInvalidArgument;
   }
 
-  const size_t remainingChunks =
+  const size_t outputChunks =
       edge->logicalChunks / stage->reduceChunks;
-  size_t originalChunkCount = 0;
-  if (!cocclStageCheckedMultiply(context->rawSliceCount, remainingChunks,
-                                 &originalChunkCount)) {
+  size_t reductionElements = 0;
+  if (!cocclStageCheckedMultiply(context->rawSliceCount, outputChunks,
+                                 &reductionElements)) {
     return ncclInvalidArgument;
   }
 
-  const size_t compChunkCount =
-      edge->totalElements / stage->reduceChunks;
-  size_t recompressedCount = 0;
-  ncclDataType_t recompressedDatatype = ncclInt8;
-  void* recompressedOutput = outputPtr;
+  const cocclCompressorDataView input = {
+      edge->ptr, edge->bytes, edge->totalElements, edge->logicalChunks,
+      edge->datatype};
+  cocclCompressorOutputView output = {
+      outputPtr, outputCapacityBytes, 0, 0, outputChunks, ncclInt8};
   NCCLCHECK(ncclDecompReduceComp(
-      edge->ptr, &recompressedOutput, originalChunkCount,
-      context->rawDatatype, compChunkCount, edge->datatype,
-      &recompressedCount, &recompressedDatatype, stage->reduceChunks,
-      context->ownerComm, context->commOp, stream));
-  edge->ptr = recompressedOutput;
-  edge->totalElements = recompressedCount;
-  edge->datatype = recompressedDatatype;
+      context->compressor, context->ownerComm, input, &output,
+      stage->reduceChunks, context->rawDatatype, reductionElements,
+      stream));
+  edge->ptr = output.data;
+  edge->bytes = output.bytes;
+  edge->totalElements = output.elements;
+  edge->datatype = output.datatype;
+  edge->logicalChunks = output.chunks;
   return ncclSuccess;
 }
 
 ncclResult_t cocclRunDecompressReduceStage(
     const cocclPipelineStageContext* context,
     const cocclPipelineStage* stage, cocclPipelineEdge* edge,
-    void* outputPtr, cudaStream_t stream) {
-  if (edge->logicalChunks % stage->reduceChunks != 0 ||
-      edge->totalElements % stage->reduceChunks != 0) {
+    void* outputPtr, size_t outputCapacityBytes, cudaStream_t stream) {
+  if (stage->reduceChunks == 0 ||
+      edge->logicalChunks % stage->reduceChunks != 0 ||
+      edge->totalElements % stage->reduceChunks != 0 ||
+      edge->bytes % stage->reduceChunks != 0) {
     return ncclInvalidArgument;
   }
 
@@ -124,35 +156,53 @@ ncclResult_t cocclRunDecompressReduceStage(
                                  &reduceChunkCount)) {
     return ncclInvalidArgument;
   }
+  const cocclCompressorDataView input = {
+      edge->ptr, edge->bytes, edge->totalElements, edge->logicalChunks,
+      edge->datatype};
+  cocclCompressorOutputView output = {
+      outputPtr, outputCapacityBytes, 0, reduceChunkCount,
+      remainingChunks, context->rawDatatype};
   NCCLCHECK(ncclDecompressReduce(
-      outputPtr, edge->ptr, edge->totalElements / stage->reduceChunks,
-      edge->datatype, reduceChunkCount, context->rawDatatype,
-      stage->reduceChunks, context->ownerComm, context->commOp, stream));
-  edge->ptr = outputPtr;
-  edge->totalElements = reduceChunkCount;
-  edge->datatype = context->rawDatatype;
+      context->compressor, context->ownerComm, input, &output,
+      stage->reduceChunks, stream));
+  edge->ptr = output.data;
+  edge->bytes = output.bytes;
+  edge->totalElements = output.elements;
+  edge->datatype = output.datatype;
+  edge->logicalChunks = output.chunks;
   return ncclSuccess;
 }
 
 ncclResult_t cocclRunDecompressStage(
     const cocclPipelineStageContext* context,
     const cocclPipelineStage* /* stage */, cocclPipelineEdge* edge,
-    void* outputPtr, cudaStream_t stream) {
+    void* outputPtr, size_t outputCapacityBytes, cudaStream_t stream) {
   if (edge->logicalChunks == 0 ||
       edge->totalElements % edge->logicalChunks != 0) {
     return ncclInvalidArgument;
   }
-  NCCLCHECK(ncclDecompress(
-      outputPtr, edge->ptr, context->rawSliceCount, context->rawDatatype,
-      edge->totalElements / edge->logicalChunks, edge->datatype,
-      edge->logicalChunks, context->ownerComm, context->commOp, stream));
+  size_t outputElements = 0;
+  size_t outputBytes = 0;
   if (!cocclStageCheckedMultiply(context->rawSliceCount,
-                                 edge->logicalChunks,
-                                 &edge->totalElements)) {
+                                 edge->logicalChunks, &outputElements) ||
+      !cocclStageCheckedMultiply(
+          outputElements, (size_t)ncclTypeSize(context->rawDatatype),
+          &outputBytes)) {
     return ncclInvalidArgument;
   }
-  edge->ptr = outputPtr;
-  edge->datatype = context->rawDatatype;
+  const cocclCompressorDataView input = {
+      edge->ptr, edge->bytes, edge->totalElements, edge->logicalChunks,
+      edge->datatype};
+  cocclCompressorOutputView output = {
+      outputPtr, outputCapacityBytes, 0, outputElements,
+      edge->logicalChunks, context->rawDatatype};
+  NCCLCHECK(ncclDecompress(
+      context->compressor, input, &output, stream));
+  edge->ptr = output.data;
+  edge->bytes = output.bytes;
+  edge->totalElements = output.elements;
+  edge->datatype = output.datatype;
+  edge->logicalChunks = output.chunks;
   return ncclSuccess;
 }
 
@@ -214,10 +264,15 @@ ncclResult_t cocclPipelineStageOutputChunks(
 ncclResult_t cocclExecutePipelineStage(
     const cocclPipelineStageContext* context,
     const cocclPipelineStage* stage, cocclPipelineEdge* edge,
-    void* outputPtr, cudaStream_t stream) {
+    void* outputPtr, size_t outputCapacityBytes, cudaStream_t stream) {
   if (context == nullptr || context->ownerComm == nullptr ||
-      stage == nullptr || edge == nullptr || outputPtr == nullptr) {
+      stage == nullptr || edge == nullptr || edge->ptr == nullptr ||
+      edge->bytes == 0 || outputPtr == nullptr || outputCapacityBytes == 0) {
     return ncclInvalidArgument;
+  }
+  if (cocclStageBuffersOverlap(edge->ptr, edge->bytes, outputPtr,
+                               outputCapacityBytes)) {
+    return ncclInvalidUsage;
   }
 
   const int stageKind = (int)stage->kind;
@@ -228,5 +283,5 @@ ncclResult_t cocclExecutePipelineStage(
       cocclPipelineStageHandlers[stageKind];
   return handler == nullptr
       ? ncclInvalidArgument
-      : handler(context, stage, edge, outputPtr, stream);
+      : handler(context, stage, edge, outputPtr, outputCapacityBytes, stream);
 }

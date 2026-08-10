@@ -1,659 +1,455 @@
-#include "dequantization_utils.h"
-#include "memory_access_utils.h"
-#include "ds_kernel_utils.h"
 #include "quantization.h"
-#include "quantization_utils.h"
-#include "reduction_utils.h"
-#include <cuda_runtime.h> 
-#include <cuda_fp16.h>  
-#include "nccl.h"
-// #include "device.h"
-// #include "checks.h"
-// #include "debug.h"
-#include "compressor.h"
-#include <pthread.h>
-#include <chrono>
-#include <map>
-
-
-#define __hidden __attribute__ ((visibility("hidden")))
-
-#define ALIGN_SIZE(size, align) \
-  size = ((size + (align) - 1) / (align)) * (align);
-
-struct sdp4bitConfig{
-    /* custom configs*/
-    // normal
-    int groupCount=2048;
-    int quantBits=8;
-    bool hadamard = false;
-    quantize::Type quantType = quantize::Type::Symmetric;
-    // gradient config
-    int inQuantBits = 0;
-    int outQuantBits = 0;
-    int inGroupCount = 0;
-    int outGroupCount = 0;
-    // intra and inter
-    bool intraAndInter = false;
-    // swizzle
-    int nodes = 1;
-    int devicesPerNodes = 4;
-    int pipelineSize = 1;
-    bool subAdd = 0;
-} ;
-
-__hidden void parseSDP4BitConfig(const char* configFile, void** compConfig, int nodes, int devicesPerNodes){
-    // alloc memory for config
-    *compConfig = (void*) malloc(sizeof(sdp4bitConfig));
-    sdp4bitConfig* config = reinterpret_cast<sdp4bitConfig*>(*compConfig);
-    // default values
-    config->groupCount = 2048;
-    config->hadamard = false;
-    config->quantBits = 8;
-    config->quantType = quantize::Type::Symmetric;
-    config->inQuantBits = 0;
-    config->outQuantBits = 0;
-    config->inGroupCount = 0;
-    config->outGroupCount = 0;
-    config->intraAndInter = false;
-    config->pipelineSize = 1;
-    config->nodes = nodes;
-    config->devicesPerNodes = devicesPerNodes;
-    config->subAdd = 0;
-    if(!configFile) return;
-    // load config from file
-    std::pair<const char*, const char*>* configPairs = nullptr;
-    int configPairCount = 0;
-    loadConfigPair(configFile, &configPairs, &configPairCount); 
-    if(configPairs == nullptr) return;
-    // get configs
-    for(int i = 0; i < configPairCount; i++){
-        // groupCounts
-        if(strcmp(configPairs[i].first, "groupCount") == 0){
-            char* end;
-            long groupCount = strtol(configPairs[i].second, &end, 10);
-            if(*end == '\0'){
-                config->groupCount = static_cast<int>(groupCount);
-            }
-        }
-        // quantBits
-        if(strcmp(configPairs[i].first, "quantBits") == 0){
-            char* end;
-            int quantBits = strtol(configPairs[i].second, &end, 10);
-            if(*end == '\0'){
-                config->quantBits = static_cast<int>(quantBits);
-            }
-        }
-        // hadamard
-        if(strcmp(configPairs[i].first, "hadamard") == 0){
-            config->hadamard = (strcmp(configPairs[i].second, "1") == 0);
-        }
-        // quantType
-        if(strcmp(configPairs[i].first, "quantType") == 0){
-            if(strcmp(configPairs[i].second, "Symmetric") == 0)config->quantType = quantize::Type::Symmetric;
-            else if(strcmp(configPairs[i].second, "Asymmetric") == 0)config->quantType = quantize::Type::Asymmetric;
-        }
-        // inQuanBits
-        if(strcmp(configPairs[i].first, "inQuanBits") == 0){
-            char* end;
-            int inQuantBits = strtol(configPairs[i].second, &end, 10);
-            if(*end == '\0'){
-                config->inQuantBits = static_cast<int>(inQuantBits);
-            }
-        }
-        // outQuanBits
-        if(strcmp(configPairs[i].first, "outQuanBits") == 0){
-            char* end;
-            int outQuantBits = strtol(configPairs[i].second, &end, 10);
-            if(*end == '\0'){
-                config->outQuantBits = static_cast<int>(outQuantBits);
-            }
-        }
-        // inGroupCount
-        if(strcmp(configPairs[i].first, "inGroupCount") == 0){
-            char* end;
-            int inGroupCount = strtol(configPairs[i].second, &end, 10);
-            if(*end == '\0'){
-                config->inGroupCount = static_cast<int>(inGroupCount);
-            }
-        }   
-        // outGroupCount
-        if(strcmp(configPairs[i].first, "outGroupCount") == 0){
-            char* end;
-            int outGroupCount = strtol(configPairs[i].second, &end, 10);
-            if(*end == '\0'){
-                config->outGroupCount = static_cast<int>(outGroupCount);
-            }
-        }
-        // intraAndInter
-        if(strcmp(configPairs[i].first, "intraAndInter") == 0){
-            config->intraAndInter = (strcmp(configPairs[i].second, "1") == 0);
-        }
-        if(strcmp(configPairs[i].first, "subAdd") == 0){
-            config->subAdd = (strcmp(configPairs[i].second, "1") == 0);
-        }
-        // pipelineSize
-        if(strcmp(configPairs[i].first, "pipelineSize") == 0){
-            char* end;
-            int pipelineSize = strtol(configPairs[i].second, &end, 10);
-            if(*end == '\0'){
-                config->pipelineSize = static_cast<int>(pipelineSize);
-            }
-        }
-    }
-   
-}
-
-#define GETSTOCHCOMPBUFF()                                                                                  \
-    size_t quanScales = 8 / quantBits;                                                                      \
-    size_t quantBytes = groupCount * sizeof(int8_t) / quanScales;                                           \
-    size_t paramsBytes = orgDayatype == ncclDataType_t::ncclFloat32 ?                                       \
-       (quantType == quantize::Type::Symmetric ? 1 : 2) * sizeof(float) : 2 * sizeof(float);                \
-    *compChunkCount = numGroups * (quantBytes + paramsBytes);                                               \
-    if(*compbuff == nullptr || *compbuff == NULL)                                                           \
-    {                                                                                                       \
-        if(compMemPool == nullptr || compMemPool == NULL)                                                   \
-            cudaMallocAsync((void**)compbuff, (*compChunkCount) * numChunks, stream);                       \
-        else                                                                                                \
-            cudaMallocFromPoolAsync((void**)compbuff, (*compChunkCount) * numChunks, compMemPool, stream);  \
-    }
-
-cudaError_t launchSwizzleQuan(const void* orgbuff, void** compbuff, const size_t orgChunkCount, ncclDataType_t orgDayatype,
-                                    size_t* compChunkCount, ncclDataType_t* compDatatype, const size_t numChunks, void* config, 
-                                    cudaMemPool_t compMemPool, cudaStream_t stream)
-{
-    int groupCount = 2048;
-    int quantBits = 8;
-    quantize::Type quantType = quantize::Type::Symmetric;
-    bool hadamard = false;
-    int nodes = 1;
-    int devicesPerNodes = 4;
-    int pipelineSize = 1;
-    if(config != NULL || config != nullptr){
-        sdp4bitConfig* quanConfig = (sdp4bitConfig*)config;
-        groupCount =  (quanConfig->inGroupCount == 0) ? quanConfig->groupCount: quanConfig->inGroupCount;
-        quantBits = (quanConfig->inQuantBits == 0) ? quanConfig->quantBits: quanConfig->inQuantBits;
-        quantType = quanConfig->quantType;
-        hadamard = quanConfig->hadamard;
-        nodes = quanConfig->nodes;
-        devicesPerNodes = quanConfig->devicesPerNodes;
-        pipelineSize = quanConfig->pipelineSize;
-    }
-    // when hadamard groupsize large than 128, there will be some error
-    if(hadamard && groupCount > 128) groupCount = 128;
-
-    int numGroups = (orgChunkCount + groupCount - 1) / groupCount;
-    *compDatatype = ncclDataType_t::ncclInt8;
-    GETSTOCHCOMPBUFF();
-    float* params =nullptr;
-    // swizzle
-    if(orgDayatype == ncclDataType_t::ncclFloat32){
-        if(!hadamard)
-            launch_swizzled_quant((int8_t*)*compbuff, params, (float*)orgbuff, quantBits, quantType, numChunks, orgChunkCount,
-                        groupCount, pipelineSize, nodes, devicesPerNodes, stream);
-        else
-            launch_swizzled_quant_ht((int8_t*)*compbuff, params, (float*)orgbuff, quantBits, quantType, numChunks, orgChunkCount,
-                        groupCount, pipelineSize, nodes, devicesPerNodes, stream);
-    } else if(orgDayatype == ncclDataType_t::ncclFloat16){
-        if(!hadamard)
-            launch_swizzled_quant((int8_t*)*compbuff, params, (__half*)orgbuff, quantBits, quantType, numChunks, orgChunkCount,
-                        groupCount, pipelineSize, nodes, devicesPerNodes, stream);
-        else
-            launch_swizzled_quant_ht((int8_t*)*compbuff, params, (__half*)orgbuff, quantBits, quantType, numChunks, orgChunkCount,
-                        groupCount, pipelineSize, nodes, devicesPerNodes, stream);
-    } else if(orgDayatype == ncclDataType_t::ncclBfloat16){
-        if(!hadamard)
-            launch_swizzled_quant((int8_t*)*compbuff, params, (__nv_bfloat16*)orgbuff, quantBits, quantType, numChunks, orgChunkCount,
-                        groupCount, pipelineSize, nodes, devicesPerNodes, stream);
-        else
-            launch_swizzled_quant_ht((int8_t*)*compbuff, params, (__nv_bfloat16*)orgbuff, quantBits, quantType, numChunks, orgChunkCount,
-                        groupCount, pipelineSize, nodes, devicesPerNodes, stream);
-    }
-    
-    return cudaGetLastError();
-}
-
-cudaError_t launchStochasticQuan(const void* orgbuff, void** compbuff, const size_t orgChunkCount, ncclDataType_t orgDayatype,
-                                    size_t* compChunkCount, ncclDataType_t* compDatatype, const size_t numChunks, const int rank, void* config, 
-                                    cudaMemPool_t compMemPool, cudaStream_t stream)
-{
-    int groupCount = 2048;
-    int quantBits = 8;
-    quantize::Type quantType = quantize::Type::Symmetric;
-    bool hadamard = false;
-    if(config != NULL || config != nullptr){
-        sdp4bitConfig* quanConfig = (sdp4bitConfig*)config;
-        groupCount = (quanConfig->inGroupCount == 0) ? quanConfig->groupCount: quanConfig->inGroupCount;
-        quantBits = (quanConfig->inQuantBits == 0) ? quanConfig->quantBits: quanConfig->inQuantBits;
-        quantType = quanConfig->quantType;
-        hadamard = quanConfig->hadamard;
-    }
-    // when hadamard groupsize large than 128, there will be some error
-    if(hadamard && groupCount > 128) groupCount = 128;
-
-    int numGroups = (orgChunkCount + groupCount - 1) / groupCount;
-    *compDatatype = ncclDataType_t::ncclInt8;
-    // printf("orgChunkCount %zu numGroups %d compChunkCount %zu\n", orgChunkCount, numGroups, *compChunkCount);
-    GETSTOCHCOMPBUFF();
-    float* params =nullptr;
-    if(orgDayatype == ncclDataType_t::ncclFloat32){
-        if(!hadamard)
-            launch_quant((int8_t*)*compbuff, params, (float*)orgbuff, numChunks, orgChunkCount, groupCount, quantBits, quantType, stream);
-        else
-            launch_quant_ht((int8_t*)*compbuff, params, (float*)orgbuff, numChunks, orgChunkCount, groupCount, quantBits, quantType, stream);
-    }
-    else if(orgDayatype == ncclDataType_t::ncclFloat16){
-        if(!hadamard)
-            launch_quant((int8_t*)*compbuff, params, (__half*)orgbuff, numChunks, orgChunkCount, groupCount, quantBits, quantType, stream);
-        else
-            launch_quant_ht((int8_t*)*compbuff, params, (__half*)orgbuff, numChunks, orgChunkCount, groupCount, quantBits, quantType, stream);
-    }
-    else if(orgDayatype == ncclDataType_t::ncclBfloat16){
-        if(!hadamard)
-            launch_quant((int8_t*)*compbuff, params, (__nv_bfloat16*)orgbuff, numChunks, orgChunkCount, groupCount, quantBits, quantType, stream);
-        else
-            launch_quant_ht((int8_t*)*compbuff, params, (__nv_bfloat16*)orgbuff, numChunks, orgChunkCount, groupCount, quantBits, quantType, stream);
-    }
-   
-    return cudaGetLastError();
-}
-
-
-thread_local std::map<void*, void*> shard_param_lists;
-__thread void* temp_list = nullptr;
-__thread int temp_rank = 0;
-__thread cudaStream_t cpyStream;
-__thread cudaEvent_t cpyEvent;
-__thread cudaEvent_t commEvent;
-
-void** h_offload_buff = nullptr;
-__thread size_t offChunkCount = 0;
-__thread int nRanks = 0;
-__thread size_t iter =0;
-__thread pthread_t tid;
-
-
-// typedef struct {
-//     int cuda_dev;
-//     void* h_offload_buff;
-//     void* d_offload_buff;
-//     size_t total_size;
-//     cudaStream_t mainStream;
-//     cudaStream_t cpyStream;
-// } offloadArgs;
-
-// __thread offloadArgs t_args;
-
-// void* offload_func(void *args){
-//     std::this_thread::sleep_for(std::chrono::milliseconds(20));
-//     offloadArgs* t_args = (offloadArgs*)args;
-//     cudaSetDevice(t_args->cuda_dev);
-//     cudaStreamSynchronize(t_args->mainStream);
-//     // sleep(2);
-//     cudaMemcpyAsync(t_args->h_offload_buff, t_args->d_offload_buff, 
-//                 t_args->total_size, cudaMemcpyDeviceToHost, t_args->cpyStream);
-//     cudaStreamSynchronize(t_args->cpyStream);
-//     return NULL;
-// }
-
-cudaError_t launchSubQuan(const void* orgbuff, void** compbuff, const size_t orgChunkCount, ncclDataType_t orgDayatype,
-                                    size_t* compChunkCount, ncclDataType_t* compDatatype, const size_t numChunks, const int rank, void* config, 
-                                    cudaMemPool_t compMemPool, cudaStream_t stream)
-{
-    int groupCount = 2048;
-    int quantBits = 8;
-    quantize::Type quantType = quantize::Type::Symmetric;
-    bool hadamard = false;
-    if(config != NULL || config != nullptr){
-        sdp4bitConfig* quanConfig = (sdp4bitConfig*)config;
-        groupCount = (quanConfig->inGroupCount == 0) ? quanConfig->groupCount: quanConfig->inGroupCount;
-        quantBits = (quanConfig->inQuantBits == 0) ? quanConfig->quantBits: quanConfig->inQuantBits;
-        quantType = quanConfig->quantType;
-        hadamard = quanConfig->hadamard;
-    }
-
-    // when hadamard groupsize large than 128, there will be some error
-    if(hadamard && groupCount > 128) groupCount = 128;
-
-    int numGroups = (orgChunkCount + groupCount - 1) / groupCount;
-
-    *compDatatype = ncclDataType_t::ncclInt8;
-    GETSTOCHCOMPBUFF();
-    float* params =nullptr;
-
-    if(orgDayatype == ncclDataType_t::ncclBfloat16){
-        if(!hadamard){
-            void* recvbuff = (char*)orgbuff - rank * orgChunkCount * 2;
-            if(shard_param_lists.find(recvbuff) == shard_param_lists.end()){
-                // cudaStreamCreateWithFlags(&cpyStream, cudaStreamNonBlocking);
-                // cudaEventCreateWithFlags(&cpyEvent, cudaEventDefault);
-                // cudaEventCreateWithFlags(&commEvent, cudaEventDefault);
-
-                cudaMemcpyAsync(*compbuff, orgbuff, orgChunkCount * sizeof(__nv_bfloat16), cudaMemcpyDeviceToDevice, stream);
-                *compChunkCount = orgChunkCount;
-                *compDatatype = orgDayatype;
-                temp_rank = rank;
-            } else {
-                
-                // cudaStreamWaitEvent(stream, cpyEvent, 0);
-                
-                // cudaMallocAsync((void**)&shard_param_list, orgChunkCount * sizeof(__nv_bfloat16), stream);
-
-                // cudaEventRecord(cpyEvent, cpyStream);
-
-                // if(offChunkCount == 0){
-                // cudaMemcpyAsync(shard_param_list, (__nv_bfloat16*)h_offload_buff[rank / 4] + rank * orgChunkCount, orgChunkCount * sizeof(__nv_bfloat16), cudaMemcpyHostToDevice, stream);
-                // cudaMemcpyAsync(shard_param_list, (__nv_bfloat16*)h_offload_buff[rank / 4] + rank * orgChunkCount, orgChunkCount * sizeof(__nv_bfloat16), cudaMemcpyHostToDevice, stream);
-
-                
-                // }
-                // else 
-                // {
-                //     cudaMemcpyAsync((int8_t*)shard_param_list + orgChunkCount * sizeof(__nv_bfloat16), h_offload_buff, 
-                //                             offChunkCount, cudaMemcpyHostToDevice, stream);
-                    
-                //     // if(rank == 0)
-                //     //     printf("offChunkCount %lld orgChunkCount %lld\n", offChunkCount, orgChunkCount);
-
-                //     launch_dequantize_kernel((__nv_bfloat16*)shard_param_list, (int8_t*)shard_param_list + orgChunkCount * sizeof(__nv_bfloat16), 
-                //                             params, quantType, 8, 32, orgChunkCount, orgChunkCount, stream);
-                // }
-
-                // launch_dequantize_kernel((__nv_bfloat16*)decompbuff, (const int8_t*)compbuff, params, quantType, quantBits, groupCount, decompChunkCount, totalCounts, stream);
-
-                launch_fused_sub_quant_cuda((int8_t*)*compbuff, (__nv_bfloat16*)shard_param_lists[recvbuff] + rank * orgChunkCount, (__nv_bfloat16*)orgbuff, quantBits, 
-                                            quantType, groupCount, orgChunkCount, 1, 0, stream);
-
-                // cudaEventRecord(commEvent, stream);
-                // cudaStreamWaitEvent(cpyStream, commEvent, 0);
-
-                
-
-            }
-        }
-        else{
-            launch_quant_ht((int8_t*)*compbuff, params, (__half*)orgbuff, numChunks, orgChunkCount, groupCount, quantBits, quantType, stream);
-        }
-    }
-    return cudaGetLastError();
-}
-
-__hidden cudaError_t launchQuantize(const void* orgbuff, void** compbuff, const size_t orgChunkCount, ncclDataType_t orgDayatype,
-                                    size_t* compChunkCount, ncclDataType_t* compDatatype, const size_t numChunks, const int rank, void* config, 
-                                    cudaMemPool_t compMemPool, cudaStream_t stream)
-{
-    bool intraAndInter = false;
-    bool subAdd=false;
-    if(config != NULL || config != nullptr){
-        sdp4bitConfig* quanConfig = (sdp4bitConfig*)config;
-        intraAndInter = quanConfig->intraAndInter;
-        subAdd = quanConfig->subAdd;
-    }
-    if(subAdd)
-        launchSubQuan(orgbuff, compbuff, orgChunkCount, orgDayatype, compChunkCount, compDatatype, numChunks, rank, config,
-            compMemPool, stream);
-    else if(intraAndInter)
-        launchSwizzleQuan(orgbuff, compbuff, orgChunkCount, orgDayatype, compChunkCount, compDatatype, numChunks, config,
-                        compMemPool, stream);
-    else 
-        launchStochasticQuan(orgbuff, compbuff, orgChunkCount, orgDayatype, compChunkCount, compDatatype, numChunks, rank, config,
-                        compMemPool, stream);
-    return cudaGetLastError();
-}
-
-pthread_mutex_t pinnedMemLock = PTHREAD_MUTEX_INITIALIZER;
-
-
-__hidden cudaError_t launchAddDequan(void* decompbuff, const void* compbuff, const size_t decompChunkCount, ncclDataType_t decompDatatype, 
-                                    const size_t compChunkCount, ncclDataType_t compDatatype, const size_t numChunks, void* config, 
-                                    cudaStream_t stream)
-{
-    int groupCount = 2048;
-    int quantBits = 8;
-    // bool subAdd=false;
-    quantize::Type quantType = quantize::Type::Symmetric;
-    if(config != NULL || config != nullptr){
-        sdp4bitConfig* quanConfig = (sdp4bitConfig*)config;
-        groupCount =  (quanConfig->outGroupCount == 0) ? quanConfig->groupCount : quanConfig->outGroupCount;
-        quantBits = (quanConfig->outQuantBits == 0)? quanConfig->quantBits : quanConfig->outQuantBits;
-        quantType = quanConfig->quantType;
-    }
-    
-    if(decompDatatype == ncclDataType_t::ncclBfloat16){
-        
-        if(shard_param_lists.find(decompbuff) == shard_param_lists.end()){
-            // pthread_mutex_lock(&pinnedMemLock);
-            // if(h_offload_buff == nullptr)
-            //     h_offload_buff = (void**) malloc(numChunks / 4 * sizeof(void*));
-            // pthread_mutex_unlock(&pinnedMemLock);
-            iter++;
-
-            // if(temp_rank % 4 == 0){
-            //     cudaHostAlloc((void **)&h_offload_buff[temp_rank / 4], decompChunkCount * numChunks * sizeof(__nv_bfloat16), cudaHostAllocPortable|cudaHostAllocWriteCombined);
-            // }
-
-            // temp_list = decompbuff;
-            cudaMallocAsync((void**)&shard_param_lists[decompbuff], decompChunkCount * numChunks * sizeof(__nv_bfloat16), stream);
-            cudaMemcpyAsync(decompbuff, compbuff, decompChunkCount * numChunks * sizeof(__nv_bfloat16), cudaMemcpyDeviceToDevice, stream);
-
-            // cudaMemcpyAsync(shard_param_list, (__nv_bfloat16*)compbuff + temp_rank * decompChunkCount, decompChunkCount * sizeof(__nv_bfloat16), cudaMemcpyDeviceToDevice, stream);
-            cudaMemcpyAsync(shard_param_lists[decompbuff], (__nv_bfloat16*)compbuff, decompChunkCount * numChunks * sizeof(__nv_bfloat16), cudaMemcpyDeviceToDevice, stream);
-
-            // cudaMemcpyAsync(h_offload_buff,  (__nv_bfloat16*)compbuff + temp_rank * decompChunkCount, 
-            //                     decompChunkCount * sizeof(__nv_bfloat16), cudaMemcpyDeviceToHost, cpyStream);
-            //  cudaMemcpyAsync(h_offload_buff, compbuff, numChunks * decompChunkCount * sizeof(__nv_bfloat16), cudaMemcpyDeviceToHost, cpyStream);
-            // cudaMemcpyAsync((__nv_bfloat16*)h_offload_buff[temp_rank/4] + temp_rank * decompChunkCount, compbuff, numChunks * decompChunkCount * sizeof(__nv_bfloat16), cudaMemcpyDeviceToHost, cpyStream);
-
-            //  nRanks = numChunks;
-            //  cudaEventRecord(cpyEvent, cpyStream);
-        } else {
-            // if(temp_rank == 0)
-            // printf("temp_list_%p_decompbuff_%p_size%lld\n", temp_list, decompbuff,  decompChunkCount * numChunks * sizeof(__nv_bfloat16));
-            // cudaMemcpyAsync(decompbuff, param_list, decompChunkCount * numChunks * sizeof(__nv_bfloat16), cudaMemcpyDeviceToDevice, stream);
-            // cudaMemcpyAsync((__nv_bfloat16*)temp_list + rank * orgChunkCount, shard_param_list, 
-            //                             orgChunkCount * sizeof(__nv_bfloat16), cudaMemcpyDeviceToDevice, cpyStream);
-
-            // cudaFreeAsync(shard_param_list, cpyStream);
-            // if(temp_rank > 0)
-            //     cudaMemcpyAsync((__nv_bfloat16*)decompbuff, h_offload_buff, 
-            //                                         temp_rank * decompChunkCount * sizeof(__nv_bfloat16), cudaMemcpyHostToDevice, cpyStream);
-            // if(temp_rank < nRanks)
-            //     cudaMemcpyAsync((__nv_bfloat16*)decompbuff + (temp_rank + 1) * decompChunkCount, (__nv_bfloat16*)h_offload_buff + (temp_rank + 1) * decompChunkCount, 
-            //                                         (nRanks - temp_rank - 1) * decompChunkCount * sizeof(__nv_bfloat16), cudaMemcpyHostToDevice, cpyStream);
-
-            // cudaEventRecord(cpyEvent, cpyStream);
-
-            // cudaStreamWaitEvent(stream, cpyEvent, 0);
-
-            // launch_fused_dequant_add_cuda((__nv_bfloat16*)decompbuff, (__nv_bfloat16*)decompbuff, (const int8_t*)compbuff, quantBits, quantType, 
-            //                 groupCount, decompChunkCount, numChunks, stream);
-            launch_fused_dequant_add_cuda((__nv_bfloat16*)decompbuff, (__nv_bfloat16*)shard_param_lists[decompbuff], (const int8_t*)compbuff, quantBits, quantType, 
-                            groupCount, decompChunkCount, numChunks, stream);
-                            
-            cudaMemcpyAsync(shard_param_lists[decompbuff], decompbuff, decompChunkCount * numChunks * sizeof(__nv_bfloat16), cudaMemcpyDeviceToDevice, stream);
-
-            // cudaEventRecord(commEvent, stream);  
-            // cudaStreamWaitEvent(cpyStream, commEvent, 0);
-
-            // cudaMemcpyAsync(shard_param_list, (__nv_bfloat16*)decompbuff + temp_rank * decompChunkCount, 
-            //                     decompChunkCount * sizeof(__nv_bfloat16), cudaMemcpyDeviceToDevice, cpyStream);
-
-            // launch((__nv_bfloat16*)decompbuff, (__nv_bfloat16*)decompbuff, (const int8_t*)compbuff, quantBits, quantType, 
-            //                 groupCount, decompChunkCount, numChunks, stream);
-
-            // size_t paramsBytes = decompDatatype == ncclDataType_t::ncclFloat32 ?                                       
-            //                     (quantType == quantize::Type::Symmetric ? 1 : 2) * sizeof(float) : 2 * sizeof(float);   
-            // size_t numOffGroups = (decompChunkCount + 32 - 1) / 32;
-
-            // offChunkCount = numOffGroups * (32 + paramsBytes);
-
-            // launch_quant((int8_t*)shard_param_list, nullptr, (__nv_bfloat16*)decompbuff + temp_rank * decompChunkCount, 
-            //                     1, decompChunkCount, 32, 8, quantType, cpyStream);
-
-            // cudaMemcpyAsync(h_offload_buff, (__nv_bfloat16*)decompbuff + temp_rank * decompChunkCount, 
-            //                     decompChunkCount * sizeof(__nv_bfloat16), cudaMemcpyDeviceToHost, cpyStream);
-
-            // cudaMemcpyAsync(h_offload_buff, decompbuff, 
-            //                     numChunks * decompChunkCount * sizeof(__nv_bfloat16), cudaMemcpyDeviceToHost, cpyStream);
-
-            // cudaMemcpyAsync(h_offload_buff, (int8_t*)shard_param_list, 
-            //                     offChunkCount * sizeof(int8_t), cudaMemcpyDeviceToHost, cpyStream);
-            // typedef struct {
-            //     int cuda_dev;
-            //     void* h_offload_buff;
-            //     void* d_offload_buff;
-            //     size_t total_size;
-            //     cudaStream_t stream;
-            // } offloadArgs;
-
-            // cudaSetDevice(t_args.cuda_dev);
-            // t_args.cuda_dev = temp_rank % 4;
-            // // printf("rank_%d_dev_%d\n", temp_rank,t_args.cuda_dev);
-            // t_args.h_offload_buff = h_offload_buff;
-            // t_args.d_offload_buff = decompbuff;
-            // t_args.total_size =  numChunks * decompChunkCount * sizeof(__nv_bfloat16);
-            // t_args.mainStream = stream;
-            // t_args.cpyStream = cpyStream;
-            // pthread_create(&tid, nullptr, offload_func, &t_args);
-            // cudaFreeAsync(shard_param_list, cpyStream);
-
-            // cudaEventRecord(cpyEvent, cpyStream);
-
-        }
-    }
-    // cudaDeviceSynchronize();
-
-    return cudaGetLastError(); 
-}
-
-__hidden cudaError_t launchDequantize(void* decompbuff, const void* compbuff, const size_t decompChunkCount, ncclDataType_t decompDatatype, 
-                                    const size_t compChunkCount, ncclDataType_t compDatatype, const size_t numChunks, void* config, 
-                                    cudaStream_t stream)
-{
-
-    int groupCount = 2048;
-    int quantBits = 8;
-    bool subAdd=false;
-    quantize::Type quantType = quantize::Type::Symmetric;
-    bool hadamard = false;
-
-    if(config != NULL || config != nullptr){
-        sdp4bitConfig* quanConfig = (sdp4bitConfig*)config;
-        groupCount =  (quanConfig->outGroupCount == 0) ? quanConfig->groupCount : quanConfig->outGroupCount;
-        quantBits = (quanConfig->outQuantBits == 0)? quanConfig->quantBits : quanConfig->outQuantBits;
-        quantType = quanConfig->quantType;
-        subAdd = quanConfig->subAdd;
-        hadamard = quanConfig->hadamard;
-    }
-
-    // int numGroups = (decompChunkCount + groupCount - 1) / groupCount;
-    int64_t totalCounts = (int64_t)numChunks * decompChunkCount;
-    float* params =nullptr;
-
-    if(subAdd)
-        launchAddDequan(decompbuff, compbuff, decompChunkCount, decompDatatype, compChunkCount, compDatatype, numChunks, config, stream);
-    else if(decompDatatype == ncclDataType_t::ncclFloat32)
-        if(!hadamard)
-            launch_dequantize_kernel((float*)decompbuff, (const int8_t*)compbuff, params, quantType, quantBits, groupCount, decompChunkCount, totalCounts, stream);
-        else 
-            launch_dequantize_ht_kernel((float*)decompbuff, (const int8_t*)compbuff, params, quantType, quantBits, groupCount, decompChunkCount, totalCounts, stream);
-    else if(decompDatatype == ncclDataType_t::ncclFloat16)
-        if(!hadamard)
-            launch_dequantize_kernel((__half*)decompbuff, (const int8_t*)compbuff, params, quantType, quantBits, groupCount, decompChunkCount, totalCounts, stream);
-        else
-            launch_dequantize_ht_kernel((__half*)decompbuff, (const int8_t*)compbuff, params, quantType, quantBits, groupCount, decompChunkCount, totalCounts, stream);  
-    else if(decompDatatype == ncclDataType_t::ncclBfloat16)
-        if(!hadamard)
-            launch_dequantize_kernel((__nv_bfloat16*)decompbuff, (const int8_t*)compbuff, params, quantType, quantBits, groupCount, decompChunkCount, totalCounts, stream);
-        else
-            launch_dequantize_ht_kernel((__nv_bfloat16*)decompbuff, (const int8_t*)compbuff, params, quantType, quantBits, groupCount, decompChunkCount, totalCounts, stream);
-
-    return cudaGetLastError();
-}
-
-__hidden cudaError_t launchDequanReduceQuan(const void* compbuff, void** recompbuff, const size_t compChunkCount, ncclDataType_t compDatatype,
-                                    size_t* reCompChunkCount, ncclDataType_t* reCompDatatype, const size_t numChunks, void* config,
-                                    cudaMemPool_t compMemPool, cudaStream_t stream)
-{
-    int inQuantBits = 8;
-    int outQuantBits = 8;
-    int inGroupCount = 2048;
-    int outGroupCount = 2048;
-    quantize::Type quantType = quantize::Type::Symmetric;
-    
-    if(config != NULL || config != nullptr){
-        sdp4bitConfig* quanConfig = (sdp4bitConfig*)config;
-        quantType = quanConfig->quantType;
-        inQuantBits = (quanConfig->inQuantBits == 0) ? quanConfig->quantBits: quanConfig->inQuantBits;
-        outQuantBits = (quanConfig->outQuantBits == 0) ? quanConfig->quantBits: quanConfig->outQuantBits;
-        inGroupCount = (quanConfig->inGroupCount == 0) ? quanConfig->groupCount: quanConfig->inGroupCount;
-        outGroupCount = (quanConfig->outGroupCount == 0) ? quanConfig->groupCount: quanConfig->outGroupCount;
-    }
-
-    int inGroupBytes = inGroupCount / (8 / inQuantBits); // number of Bytes
-    int outGroupBytes = outGroupCount / (8 / outQuantBits); // number of Bytes
-    int paramsBytes = (quantType == quantize::Type::Symmetric ? 1 : 2) * sizeof(float); 
-    // one group is GroupBytes + paramsBytes
-    int inChunkGroups = (compChunkCount + (inGroupBytes + paramsBytes) - 1) / (inGroupBytes + paramsBytes);
-    int outChunkGroups = (inChunkGroups * inGroupCount + outGroupCount - 1) / outGroupCount;
-    int64_t inChunkBytes = (int64_t)inChunkGroups * inGroupBytes;
-
-    *reCompDatatype = compDatatype;
-    *reCompChunkCount = (outGroupBytes + paramsBytes) * outChunkGroups;
-    if(*recompbuff == nullptr || *recompbuff == NULL)                                                           
-    {                                                                                                       
-        if(compMemPool == nullptr || compMemPool == NULL)                                                   
-            cudaMallocAsync((void**)recompbuff, (*reCompChunkCount), stream);                       
-        else                                                                                                
-            cudaMallocFromPoolAsync((void**)recompbuff, (*reCompChunkCount), compMemPool, stream); 
-    }
-
-    float* inputScales =nullptr;
-    float* outScales = nullptr;
-
-    launch_dequant_reduce_quant((int8_t*)(*recompbuff), outScales, (const int8_t*)compbuff, inputScales, 
-                        numChunks, inQuantBits, outQuantBits, quantType, outChunkGroups, outGroupBytes, 
-                        inChunkGroups, inGroupBytes, inChunkBytes, stream);
-
-    return cudaGetLastError();
-}
-
-__hidden cudaError_t launchDequanReduce(void* reducebuff, const void* compbuff, const size_t compChunkCount, ncclDataType_t compDatatype,
-                                    const size_t reduceChunkCount, ncclDataType_t reduceDataType, const size_t numChunks, void* config,
-                                    cudaStream_t stream)
-{
-    int quantBits = 8;
-    int groupCount = 2048;
-    quantize::Type quantType = quantize::Type::Symmetric;
-    bool hadamard = false;
-    if(config != NULL || config != nullptr){
-        sdp4bitConfig* quanConfig = (sdp4bitConfig*)config;
-        quantType = quanConfig->quantType;
-        quantBits = (quanConfig->outQuantBits == 0)? quanConfig->quantBits : quanConfig->outQuantBits;
-        groupCount = (quanConfig->outGroupCount == 0) ? quanConfig->groupCount : quanConfig->outGroupCount;
-        hadamard = quanConfig->hadamard;
-    }
-    // when hadamard groupsize large than 128, there will be some error
-    if(hadamard && groupCount > 128) groupCount = 128;
-
-    const float* input_scales = nullptr;
-    int numGroups = (reduceChunkCount + groupCount - 1) / groupCount;
-    int groupBytes = groupCount / (8 / quantBits);
-    int64_t chunkBytes = (int64_t)numGroups * groupBytes;
-    if(!hadamard)
-        launch_dequant_reduce((float*)reducebuff, (const int8_t*)compbuff, input_scales, numChunks, quantBits, quantType,
-                    chunkBytes, groupBytes, stream);
-    else
-        launch_dequant_reduce_ht((float*)reducebuff, (const int8_t*)compbuff, input_scales, numChunks, quantBits, quantType,
-                    chunkBytes, groupBytes, stream);
-    return cudaGetLastError();
-}
-
-extern "C" const ncclCompressor_t sdp4bit{
-    .name = "sdp4bit",
-    .compress = launchQuantize,
-    .decompress = launchDequantize,
-    .decompReduce = launchDequanReduce,
-    .decompReduceComp = launchDequanReduceQuan,
-    .parseConfig = parseSDP4BitConfig
+#include "compressor_plugin/compressor_plugin.h"
+
+#include <climits>
+#include <cuda_bf16.h>
+#include <cuda_fp16.h>
+#include <cuda_runtime.h>
+#include <stdint.h>
+#include <type_traits>
+
+namespace {
+
+struct Sdp4BitConfig {
+  int groupCount = 2048;
+  int quantBits = 8;
+  bool hadamard = false;
+  quantize::Type quantType = quantize::Type::Symmetric;
+  int inQuantBits = 0;
+  int outQuantBits = 0;
+  int inGroupCount = 0;
+  int outGroupCount = 0;
+  int pipelineSize = 1;
+  bool subAdd = false;
+  bool hierarchical = false;
+
+  int inputBits() const {
+    return inQuantBits == 0 ? quantBits : inQuantBits;
+  }
+  int outputBits() const {
+    return outQuantBits == 0 ? quantBits : outQuantBits;
+  }
+  int inputGroups(bool limitHadamard = true) const {
+    int groups = inGroupCount == 0 ? groupCount : inGroupCount;
+    return limitHadamard && hadamard && groups > 128 ? 128 : groups;
+  }
+  int outputGroups(bool limitHadamard = true) const {
+    int groups = outGroupCount == 0 ? groupCount : outGroupCount;
+    return limitHadamard && hadamard && groups > 128 ? 128 : groups;
+  }
 };
+
+// Created lazily only when the sub/add algorithm is selected.
+struct Sdp4BitState {
+  void* shardParams = nullptr;
+  ncclDataType_t datatype = ncclNumTypes;
+  bool initialized = false;
+};
+
+bool validQuantBits(int value, bool allowUnset) {
+  return (allowUnset && value == 0) || value == 1 || value == 2 ||
+         value == 4 || value == 8;
+}
+
+bool parameterBytes(ncclDataType_t datatype, quantize::Type quantType,
+                    size_t* bytes) {
+  if (bytes == nullptr) return false;
+  switch (datatype) {
+    case ncclFloat32:
+      *bytes = (quantType == quantize::Type::Symmetric ? 1u : 2u) *
+          sizeof(float);
+      return true;
+    case ncclFloat16:
+    case ncclBfloat16:
+      *bytes = 2u * sizeof(float);
+      return true;
+    default:
+      return false;
+  }
+}
+
+bool compressedBytes(const coccl::Input& input, const Sdp4BitConfig& config,
+                     size_t* bytes) {
+  const int groupCount = config.inputGroups();
+  const int quantBits = config.inputBits();
+  if (input.elementsPerChunk() == 0 || groupCount <= 0 ||
+      !validQuantBits(quantBits, false)) {
+    return false;
+  }
+
+  const size_t groups =
+      1 + (input.elementsPerChunk() - 1) / (size_t)groupCount;
+  const size_t quantBytes =
+      (size_t)groupCount / (size_t)(8 / quantBits);
+  size_t paramsBytes = 0;
+  if (!parameterBytes(input.datatype(), config.quantType, &paramsBytes)) {
+    return false;
+  }
+  size_t groupBytes = 0;
+  size_t chunkBytes = 0;
+  return coccl::checkedAdd(quantBytes, paramsBytes, &groupBytes) &&
+         coccl::checkedMultiply(groups, groupBytes, &chunkBytes) &&
+         coccl::checkedMultiply(chunkBytes, input.chunks(), bytes);
+}
+
+template <typename T>
+void launchQuant(int8_t* output, const T* input, const coccl::Input& shape,
+                 const Sdp4BitConfig& config, cudaStream_t stream) {
+  const int groupCount = config.inputGroups();
+  const int quantBits = config.inputBits();
+  if (config.hadamard) {
+    launch_quant_ht(output, nullptr, input, (int)shape.chunks(),
+                    (int64_t)shape.elementsPerChunk(), groupCount, quantBits,
+                    config.quantType, stream);
+  } else {
+    launch_quant(output, nullptr, input, (int)shape.chunks(),
+                 (int64_t)shape.elementsPerChunk(), groupCount, quantBits,
+                 config.quantType, stream);
+  }
+}
+
+template <typename T>
+void launchHierarchicalQuant(int8_t* output, const T* input,
+                             const coccl::Input& shape,
+                             const Sdp4BitConfig& config,
+                             const coccl::Context& context) {
+  const int groupCount = config.inputGroups();
+  const int quantBits = config.inputBits();
+  if (config.hadamard) {
+    launch_swizzled_quant_ht(
+        output, nullptr, input, quantBits, config.quantType,
+        (int)shape.chunks(), (int64_t)shape.elementsPerChunk(), groupCount,
+        config.pipelineSize, context.nodes(), context.devicesPerNode(),
+        context.stream());
+  } else {
+    launch_swizzled_quant(
+        output, nullptr, input, quantBits, config.quantType,
+        (int)shape.chunks(), (int64_t)shape.elementsPerChunk(), groupCount,
+        config.pipelineSize, context.nodes(), context.devicesPerNode(),
+        context.stream());
+  }
+}
+
+template <typename T>
+void launchDequant(T* output, const coccl::Input& input,
+                   const coccl::Output& shape,
+                   const Sdp4BitConfig& config, cudaStream_t stream) {
+  const int groupCount = config.outputGroups();
+  const int quantBits = config.outputBits();
+  const int64_t elementsPerChunk =
+      (int64_t)(shape.elements() / shape.chunks());
+  if (config.hadamard) {
+    launch_dequantize_ht_kernel(
+        output, input.dataAs<int8_t>(), nullptr, config.quantType, quantBits,
+        groupCount, elementsPerChunk, (int64_t)shape.elements(), stream);
+  } else {
+    launch_dequantize_kernel(
+        output, input.dataAs<int8_t>(), nullptr, config.quantType, quantBits,
+        groupCount, elementsPerChunk, (int64_t)shape.elements(), stream);
+  }
+}
+
+struct Sdp4BitCompressor {
+  using Config = Sdp4BitConfig;
+
+  static coccl::Status configure(coccl::ConfigReader& reader, Config& config,
+                                 const coccl::ConfigContext& context) {
+    config.hierarchical = context.hierarchical();
+    coccl::Status result =
+        reader.get("groupCount", config.groupCount, 1, INT_MAX)
+            .get("quantBits", config.quantBits, 1, 8)
+            .get("hadamard", config.hadamard)
+            .getEnum("quantType", config.quantType,
+                     {{"Symmetric", quantize::Type::Symmetric},
+                      {"Asymmetric", quantize::Type::Asymmetric}})
+            .get("inQuantBits", config.inQuantBits, 0, 8)
+            .get("outQuantBits", config.outQuantBits, 0, 8)
+            .get("inGroupCount", config.inGroupCount, 0, INT_MAX)
+            .get("outGroupCount", config.outGroupCount, 0, INT_MAX)
+            .get("pipelineSize", config.pipelineSize, 1, INT_MAX)
+            .get("subAdd", config.subAdd)
+            .finish();
+    if (result != ncclSuccess) return result;
+    return validQuantBits(config.quantBits, false) &&
+                   validQuantBits(config.inQuantBits, true) &&
+                   validQuantBits(config.outQuantBits, true) &&
+                   !(config.subAdd && config.hadamard)
+        ? ncclSuccess
+        : ncclInvalidArgument;
+  }
+
+  static coccl::Status compress(const coccl::Input& input,
+                                coccl::Output& output,
+                                coccl::Context& context) {
+    const Config& config = context.config<Config>();
+    Sdp4BitState* state = nullptr;
+    bool passthrough = false;
+    if (config.subAdd) {
+      size_t paramsBytes = 0;
+      if (!parameterBytes(input.datatype(), config.quantType, &paramsBytes)) {
+        return ncclInvalidArgument;
+      }
+      coccl::Status result = context.instance(&state);
+      if (result != ncclSuccess) return result;
+      if (state->datatype != input.datatype()) {
+        state->datatype = input.datatype();
+        state->initialized = false;
+      }
+      passthrough = !state->initialized;
+    }
+
+    size_t requiredBytes = input.bytes();
+    if (!passthrough && !compressedBytes(input, config, &requiredBytes)) {
+      return ncclInvalidArgument;
+    }
+    if (!passthrough && coccl::shouldPassthrough(input, requiredBytes)) {
+      return output.passthrough(input, context.stream());
+    }
+    if (requiredBytes > output.capacityBytes()) return ncclInvalidArgument;
+
+    cudaError_t cudaResult = cudaSuccess;
+    if (passthrough) {
+      cudaResult = cudaMemcpyAsync(output.data(), input.data(), input.bytes(),
+                                   cudaMemcpyDeviceToDevice,
+                                   context.stream());
+    } else if (config.subAdd) {
+      auto launch = [&](const auto* typedInput) {
+        using T = typename std::remove_cv<typename std::remove_pointer<
+            decltype(typedInput)>::type>::type;
+        launch_fused_sub_quant_cuda(
+            output.dataAs<int8_t>(),
+            static_cast<const T*>(state->shardParams) +
+                context.rank() * input.elementsPerChunk(),
+            typedInput, config.inputBits(), config.quantType,
+            config.inputGroups(), (int64_t)input.elementsPerChunk(), 1, 0,
+            context.stream());
+      };
+      switch (input.datatype()) {
+        case ncclFloat32: launch(input.dataAs<float>()); break;
+        case ncclFloat16: launch(input.dataAs<__half>()); break;
+        case ncclBfloat16: launch(input.dataAs<__nv_bfloat16>()); break;
+        default: return ncclInvalidArgument;
+      }
+      cudaResult = cudaGetLastError();
+    } else {
+      auto launch = [&](const auto* typedInput) {
+        if (config.hierarchical && !config.subAdd) {
+          launchHierarchicalQuant(output.dataAs<int8_t>(), typedInput, input,
+                                  config, context);
+        } else {
+          launchQuant(output.dataAs<int8_t>(), typedInput, input, config,
+                      context.stream());
+        }
+      };
+      switch (input.datatype()) {
+        case ncclFloat32: launch(input.dataAs<float>()); break;
+        case ncclFloat16: launch(input.dataAs<__half>()); break;
+        case ncclBfloat16: launch(input.dataAs<__nv_bfloat16>()); break;
+        default: return ncclInvalidArgument;
+      }
+      cudaResult = cudaGetLastError();
+    }
+    if (cudaResult != cudaSuccess) return coccl::fromCuda(cudaResult);
+    return passthrough
+        ? output.commit(input.elements(), input.datatype(), input.chunks())
+        : output.commitBytes(requiredBytes, input.chunks());
+  }
+
+  static coccl::Status decompress(const coccl::Input& input,
+                                  coccl::Output& output,
+                                  coccl::Context& context) {
+    const Config& config = context.config<Config>();
+    if (config.subAdd) {
+      size_t paramsBytes = 0;
+      if (!parameterBytes(output.datatype(), config.quantType, &paramsBytes)) {
+        return ncclInvalidArgument;
+      }
+
+      Sdp4BitState* state = nullptr;
+      coccl::Status result = context.instance(&state);
+      if (result != ncclSuccess) return result;
+      size_t requiredBytes = 0;
+      const size_t datatypeBytes = coccl::dataTypeSize(output.datatype());
+      if (datatypeBytes == 0 ||
+          !coccl::checkedMultiply(output.elements(), datatypeBytes,
+                                  &requiredBytes)) {
+        return ncclInvalidArgument;
+      }
+      coccl::Buffer persistent;
+      result = context.persistent(0, requiredBytes, &persistent);
+      if (result != ncclSuccess) return result;
+      if (state->shardParams != persistent.data() ||
+          state->datatype != output.datatype()) {
+        state->shardParams = persistent.data();
+        state->datatype = output.datatype();
+        state->initialized = false;
+      }
+
+      cudaError_t cudaResult = cudaSuccess;
+      if (!state->initialized) {
+        if (input.bytes() < requiredBytes) return ncclInvalidArgument;
+        cudaResult = cudaMemcpyAsync(output.data(), input.data(), requiredBytes,
+                                     cudaMemcpyDeviceToDevice,
+                                     context.stream());
+        if (cudaResult == cudaSuccess) {
+          cudaResult = cudaMemcpyAsync(
+              state->shardParams, input.data(), requiredBytes,
+              cudaMemcpyDeviceToDevice, context.stream());
+        }
+        if (cudaResult == cudaSuccess) state->initialized = true;
+      } else {
+        auto launch = [&](auto* typedOutput) {
+          using T = typename std::remove_pointer<decltype(typedOutput)>::type;
+          launch_fused_dequant_add_cuda(
+              typedOutput, static_cast<const T*>(state->shardParams),
+              input.dataAs<int8_t>(), config.outputBits(), config.quantType,
+              config.outputGroups(),
+              (int64_t)(output.elements() / output.chunks()),
+              (int)output.chunks(), context.stream());
+        };
+        switch (output.datatype()) {
+          case ncclFloat32: launch(output.dataAs<float>()); break;
+          case ncclFloat16: launch(output.dataAs<__half>()); break;
+          case ncclBfloat16: launch(output.dataAs<__nv_bfloat16>()); break;
+          default: return ncclInvalidArgument;
+        }
+        cudaResult = cudaGetLastError();
+        if (cudaResult == cudaSuccess) {
+          cudaResult = cudaMemcpyAsync(
+              state->shardParams, output.data(), requiredBytes,
+              cudaMemcpyDeviceToDevice, context.stream());
+        }
+      }
+      return coccl::fromCuda(cudaResult);
+    }
+
+    auto launch = [&](auto* typedOutput) {
+      launchDequant(typedOutput, input, output, config, context.stream());
+    };
+    switch (output.datatype()) {
+      case ncclFloat32: launch(output.dataAs<float>()); break;
+      case ncclFloat16: launch(output.dataAs<__half>()); break;
+      case ncclBfloat16: launch(output.dataAs<__nv_bfloat16>()); break;
+      default: return ncclInvalidArgument;
+    }
+    return coccl::fromCuda(cudaGetLastError());
+  }
+
+  static coccl::Status decompressReduce(const coccl::Input& input,
+                                        coccl::Output& output,
+                                        coccl::Context& context) {
+    const Config& config = context.config<Config>();
+    const size_t reduceChunks = context.reduceChunks();
+    size_t paramsBytes = 0;
+    if (reduceChunks == 0 || input.chunks() % reduceChunks != 0 ||
+        input.elements() % reduceChunks != 0 ||
+        !parameterBytes(output.datatype(), config.quantType, &paramsBytes)) {
+      return ncclInvalidArgument;
+    }
+
+    const int groupCount = config.outputGroups();
+    const int quantBits = config.outputBits();
+    const size_t groups = output.elements() == 0
+        ? 0
+        : 1 + (output.elements() - 1) / (size_t)groupCount;
+    const size_t groupBytes =
+        (size_t)groupCount / (size_t)(8 / quantBits);
+    size_t chunkBytes = 0;
+    if (groups == 0 ||
+        !coccl::checkedMultiply(groups, groupBytes, &chunkBytes) ||
+        chunkBytes > INT64_MAX || reduceChunks > INT_MAX) {
+      return ncclInvalidArgument;
+    }
+
+    auto launch = [&](auto* typedOutput) {
+      if (config.hadamard) {
+        launch_dequant_reduce_ht(
+            typedOutput, input.dataAs<int8_t>(), nullptr,
+            (int)reduceChunks, quantBits, config.quantType,
+            (int64_t)chunkBytes, (int)groupBytes, context.stream());
+      } else {
+        launch_dequant_reduce(
+            typedOutput, input.dataAs<int8_t>(), nullptr,
+            (int)reduceChunks, quantBits, config.quantType,
+            (int64_t)chunkBytes, (int)groupBytes, context.stream());
+      }
+    };
+    switch (output.datatype()) {
+      case ncclFloat32: launch(output.dataAs<float>()); break;
+      case ncclFloat16: launch(output.dataAs<__half>()); break;
+      case ncclBfloat16: launch(output.dataAs<__nv_bfloat16>()); break;
+      default: return ncclInvalidArgument;
+    }
+    return coccl::fromCuda(cudaGetLastError());
+  }
+
+  static coccl::Status decompressReduceCompress(
+      const coccl::Input& input, coccl::Output& output,
+      coccl::Context& context) {
+    const Config& config = context.config<Config>();
+    const size_t reduceChunks = context.reduceChunks();
+    size_t paramsBytes = 0;
+    if (reduceChunks == 0 || input.chunks() % reduceChunks != 0 ||
+        input.elements() % reduceChunks != 0 || reduceChunks > INT_MAX ||
+        config.hadamard ||
+        config.quantType != quantize::Type::Symmetric ||
+        !parameterBytes(context.originalDatatype(), config.quantType,
+                        &paramsBytes)) {
+      return ncclInvalidArgument;
+    }
+
+    const int inGroupCount = config.inputGroups(false);
+    const int outGroupCount = config.outputGroups(false);
+    const int inQuantBits = config.inputBits();
+    const int outQuantBits = config.outputBits();
+    const size_t inGroupBytes =
+        (size_t)inGroupCount / (size_t)(8 / inQuantBits);
+    const size_t outGroupBytes =
+        (size_t)outGroupCount / (size_t)(8 / outQuantBits);
+    size_t encodedInputGroupBytes = 0;
+    if (!coccl::checkedAdd(inGroupBytes, paramsBytes,
+                           &encodedInputGroupBytes)) {
+      return ncclInvalidArgument;
+    }
+
+    const size_t inputElements = input.elements() / reduceChunks;
+    const size_t inputGroups = inputElements == 0
+        ? 0
+        : 1 + (inputElements - 1) / encodedInputGroupBytes;
+    size_t originalElements = 0;
+    if (inputGroups == 0 ||
+        !coccl::checkedMultiply(inputGroups, (size_t)inGroupCount,
+                                &originalElements)) {
+      return ncclInvalidArgument;
+    }
+    const size_t outputGroups =
+        1 + (originalElements - 1) / (size_t)outGroupCount;
+    size_t encodedOutputGroupBytes = 0;
+    size_t inputChunkBytes = 0;
+    size_t outputBytes = 0;
+    if (!coccl::checkedAdd(outGroupBytes, paramsBytes,
+                           &encodedOutputGroupBytes) ||
+        !coccl::checkedMultiply(inputGroups, inGroupBytes,
+                                &inputChunkBytes) ||
+        !coccl::checkedMultiply(outputGroups, encodedOutputGroupBytes,
+                                &outputBytes) ||
+        inputGroups > INT_MAX || outputGroups > INT_MAX ||
+        inputChunkBytes > INT64_MAX || outputBytes > output.capacityBytes()) {
+      return ncclInvalidArgument;
+    }
+
+    launch_dequant_reduce_quant(
+        output.dataAs<int8_t>(), nullptr, input.dataAs<int8_t>(), nullptr,
+        (int)reduceChunks, inQuantBits, outQuantBits, config.quantType,
+        (int)outputGroups, (int)outGroupBytes, (int)inputGroups,
+        (int)inGroupBytes, (int64_t)inputChunkBytes, (int)paramsBytes,
+        context.stream());
+    cudaError_t cudaResult = cudaGetLastError();
+    if (cudaResult != cudaSuccess) return coccl::fromCuda(cudaResult);
+    return output.commitBytes(outputBytes, input.chunks() / reduceChunks);
+  }
+};
+
+}  // namespace
+
+COCCL_REGISTER_COMPRESSOR("sdp4bit", Sdp4BitCompressor);
