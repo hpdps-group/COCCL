@@ -5,7 +5,7 @@
 #include "core.h"
 #include "argcheck.h"
 #include "runtime/coccl_operation.h"
-#include "compression/coccl_compressor.h"
+#include "runtime/coccl_compressor_runtime.h"
 
 // Direct single-compressor API used by the pipeline after resolving a policy
 // once. Byte capacity and typed metadata are both explicit.

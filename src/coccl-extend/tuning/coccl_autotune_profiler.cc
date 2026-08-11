@@ -3,7 +3,7 @@
 #include "bootstrap.h"
 #include "checks.h"
 #include "compression/compress.h"
-#include "compression/coccl_compressor.h"
+#include "runtime/coccl_compressor_runtime.h"
 #include "config/coccl_config.h"
 #include "runtime/coccl_comm.h"
 #include "comm.h"

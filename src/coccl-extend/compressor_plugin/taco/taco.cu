@@ -1,4 +1,4 @@
-#include "compressor_plugin/compressor_plugin.h"
+#include "compressor_plugin/coccl_compressor_plugin.h"
 
 #include <cfloat>
 #include <cuda_bf16.h>
@@ -30,6 +30,25 @@ struct TacoConfig {
 bool validGroupSize(int value) {
     return value == 32 || value == 64 || value == 128 || value == 256 ||
            value == 512;
+}
+
+template <typename Shape>
+bool compressedBytes(const Shape& input, const TacoConfig& config,
+                     size_t* bytes) {
+    if (bytes == nullptr || input.elementsPerChunk() == 0 ||
+        !validGroupSize(config.groupSize)) {
+        return false;
+    }
+    const size_t groups =
+        DIVUP(input.elementsPerChunk(), (size_t)config.groupSize);
+    size_t scaleBytes = 0;
+    size_t metadataBytes = 0;
+    size_t outputChunkBytes = 0;
+    return coccl::checkedMultiply(groups, sizeof(float), &scaleBytes) &&
+        coccl::checkedMultiply(scaleBytes, 2, &metadataBytes) &&
+        coccl::checkedAdd(input.elementsPerChunk(), metadataBytes,
+                          &outputChunkBytes) &&
+        coccl::checkedMultiply(outputChunkBytes, input.chunks(), bytes);
 }
 
 
@@ -341,6 +360,16 @@ struct TacoCompressor {
                                                 : ncclInvalidArgument;
     }
 
+    static coccl::Status encodedSizeBound(
+        const coccl::Shape& input, size_t* encodedBytes,
+        const coccl::SizeContext& context) {
+        if (context.operation() != cocclCompressorOperationCompress) {
+            return ncclInvalidUsage;
+        }
+        return compressedBytes(input, context.config<Config>(), encodedBytes)
+            ? ncclSuccess : ncclInvalidArgument;
+    }
+
     static coccl::Status compress(const coccl::Input& input,
                                   coccl::Output& output,
                                   coccl::Context& context) {
@@ -358,12 +387,11 @@ struct TacoCompressor {
         size_t metadataBytes = 0;
         size_t outputChunkBytes = 0;
         size_t outputBytes = 0;
-        if (!coccl::checkedMultiply(groups, sizeof(float), &scaleBytes) ||
+        if (!compressedBytes(input, config, &outputBytes) ||
+            !coccl::checkedMultiply(groups, sizeof(float), &scaleBytes) ||
             !coccl::checkedMultiply(scaleBytes, 2, &metadataBytes) ||
             !coccl::checkedAdd(input.elementsPerChunk(), metadataBytes,
-                               &outputChunkBytes) ||
-            !coccl::checkedMultiply(outputChunkBytes, input.chunks(),
-                                    &outputBytes)) {
+                               &outputChunkBytes)) {
             return ncclInvalidArgument;
         }
         if (coccl::shouldPassthrough(input, outputBytes)) {

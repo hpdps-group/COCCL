@@ -1,7 +1,7 @@
 #ifndef COCCL_COMM_H_
 #define COCCL_COMM_H_
 
-#include "compression/coccl_compressor.h"
+#include "runtime/coccl_compressor_runtime.h"
 #include "runtime/coccl_operation.h"
 #include "training/coccl_training_assist.h"
 #include "nccl.h"

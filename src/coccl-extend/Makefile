@@ -18,6 +18,7 @@ COCCL_HOST_SRCFILES = \
 	$(wildcard $(COCCL_ROOT)/debug/*.cc) \
 	$(wildcard $(COCCL_ROOT)/old_impl/*.cc) \
 	$(wildcard $(COCCL_ROOT)/param/*.cc) \
+	$(wildcard $(COCCL_ROOT)/pipeline/*.cc) \
 	$(wildcard $(COCCL_ROOT)/primitives/*.cc) \
 	$(wildcard $(COCCL_ROOT)/tuning/*.cc) \
 	$(wildcard $(COCCL_ROOT)/training_assist/*.cc)
@@ -44,7 +45,7 @@ COCCL_CONFIG_CHECKER_SRCFILES := \
 	$(COCCL_ROOT)/param/coccl_config.cc \
 	$(COCCL_ROOT)/debug/coccl_config_format.cc
 COCCL_CONFIG_CHECKER_HEADERS := \
-	$(COCCL_ROOT)/include/compressor_plugin/detail/compressor_abi.h \
+	$(COCCL_ROOT)/include/compressor_plugin/detail/coccl_compressor_abi.h \
 	$(COCCL_ROOT)/include/config/coccl_config.h \
 	$(COCCL_ROOT)/include/config/coccl_config_debug.h \
 	$(COCCL_ROOT)/include/runtime/coccl_operation.h

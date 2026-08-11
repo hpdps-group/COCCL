@@ -39,7 +39,8 @@ ncclResult_t cocclExecuteAllGather(const cocclPreparedCall* prepared) {
   const cocclPipelineSpec spec = {
     "allgather-overlap", args.sendbuff, args.recvbuff, args.count, 1,
     args.datatype, args.comm, prepared->compressor, args.stream, stages,
-    (int)(sizeof(stages) / sizeof(stages[0]))
+    (int)(sizeof(stages) / sizeof(stages[0])),
+    cocclPipelineInPlaceInputRankChunk
   };
   return cocclRunPipeline(&spec);
 }

@@ -1,15 +1,23 @@
 #include "pipeline/coccl_pipeline_stage.h"
 
+#include "pipeline/coccl_pipeline_layout.h"
 #include "primitives/coccl_primitives_internal.h"
 
 #include <limits.h>
 #include <stdint.h>
 
+// Host-side dispatch for one non-in-place pipeline stage.
 namespace {
 
 bool cocclStageCheckedMultiply(size_t lhs, size_t rhs, size_t* result) {
   if (result == nullptr || (lhs != 0 && rhs > SIZE_MAX / lhs)) return false;
   *result = lhs * rhs;
+  return true;
+}
+
+bool cocclStageCheckedAdd(size_t lhs, size_t rhs, size_t* result) {
+  if (result == nullptr || rhs > SIZE_MAX - lhs) return false;
+  *result = lhs + rhs;
   return true;
 }
 
@@ -99,6 +107,32 @@ ncclResult_t cocclRunAllGatherStage(
   edge->bytes = gatheredBytes;
   edge->totalElements = gatheredElements;
   edge->logicalChunks = gatheredChunks;
+  return ncclSuccess;
+}
+
+ncclResult_t cocclRunPackStage(
+    const cocclPipelineStageContext* context,
+    const cocclPipelineStage* /* stage */, cocclPipelineEdge* edge,
+    void* outputPtr, size_t outputCapacityBytes, cudaStream_t stream) {
+  if (edge->bytes > outputCapacityBytes) return ncclInvalidArgument;
+  const size_t sliceBytes = edge->bytes / edge->logicalChunks;
+  NCCLCHECK(cocclLaunchPackSlice(
+      edge->ptr, context->rawChunkBytes, outputPtr, sliceBytes,
+      edge->logicalChunks, stream));
+  edge->ptr = outputPtr;
+  return ncclSuccess;
+}
+
+ncclResult_t cocclRunUnpackStage(
+    const cocclPipelineStageContext* context,
+    const cocclPipelineStage* /* stage */, cocclPipelineEdge* edge,
+    void* outputPtr, size_t outputCapacityBytes, cudaStream_t stream) {
+  if (edge->bytes > outputCapacityBytes) return ncclInvalidArgument;
+  const size_t sliceBytes = edge->bytes / edge->logicalChunks;
+  NCCLCHECK(cocclLaunchUnpackSlice(
+      edge->ptr, outputPtr, context->rawChunkBytes, sliceBytes,
+      edge->logicalChunks, stream));
+  edge->ptr = outputPtr;
   return ncclSuccess;
 }
 
@@ -206,13 +240,15 @@ ncclResult_t cocclRunDecompressStage(
   return ncclSuccess;
 }
 
-constexpr int kPipelineStageKindCount = cocclPipelineStageDecompress + 1;
+constexpr int kPipelineStageKindCount = cocclPipelineStageUnpack + 1;
 static_assert(cocclPipelineStageCompress == 0 &&
                   cocclPipelineStageAllToAll == 1 &&
                   cocclPipelineStageAllGather == 2 &&
                   cocclPipelineStageDecompReduceComp == 3 &&
                   cocclPipelineStageDecompressReduce == 4 &&
-                  cocclPipelineStageDecompress == 5,
+                  cocclPipelineStageDecompress == 5 &&
+                  cocclPipelineStagePack == 6 &&
+                  cocclPipelineStageUnpack == 7,
               "pipeline stage handlers require contiguous stage kinds");
 
 const cocclPipelineStageFn
@@ -223,9 +259,52 @@ const cocclPipelineStageFn
         cocclRunDecompReduceCompStage,
         cocclRunDecompressReduceStage,
         cocclRunDecompressStage,
+        cocclRunPackStage,
+        cocclRunUnpackStage,
 };
 
 }  // namespace
+
+ncclResult_t cocclPipelineStageLayoutSpans(
+    const cocclPipelineStageContext* context,
+    const cocclPipelineEdge* edge, size_t* contiguousBytes,
+    size_t* pitchedBytes) {
+  if (context == nullptr || edge == nullptr || contiguousBytes == nullptr ||
+      pitchedBytes == nullptr || context->rawSliceCount == 0 ||
+      context->rawChunkBytes == 0 || edge->bytes == 0 ||
+      edge->totalElements == 0 || edge->logicalChunks == 0 ||
+      edge->datatype != context->rawDatatype ||
+      edge->bytes % edge->logicalChunks != 0) {
+    return ncclInvalidArgument;
+  }
+
+  const int typeBytes = ncclTypeSize(context->rawDatatype);
+  size_t expectedElements = 0;
+  size_t expectedBytes = 0;
+  if (typeBytes <= 0 ||
+      !cocclStageCheckedMultiply(context->rawSliceCount,
+                                 edge->logicalChunks, &expectedElements) ||
+      !cocclStageCheckedMultiply(expectedElements, (size_t)typeBytes,
+                                 &expectedBytes) ||
+      edge->totalElements != expectedElements ||
+      edge->bytes != expectedBytes) {
+    return ncclInvalidArgument;
+  }
+
+  const size_t sliceBytes = edge->bytes / edge->logicalChunks;
+  size_t pitchedPrefixBytes = 0;
+  size_t spanBytes = 0;
+  if (sliceBytes == 0 || context->rawChunkBytes < sliceBytes ||
+      !cocclStageCheckedMultiply(edge->logicalChunks - 1,
+                                 context->rawChunkBytes,
+                                 &pitchedPrefixBytes) ||
+      !cocclStageCheckedAdd(pitchedPrefixBytes, sliceBytes, &spanBytes)) {
+    return ncclInvalidArgument;
+  }
+  *contiguousBytes = edge->bytes;
+  *pitchedBytes = spanBytes;
+  return ncclSuccess;
+}
 
 ncclResult_t cocclPipelineStageOutputChunks(
     const cocclPipelineStage& stage, size_t inputChunks,
@@ -238,6 +317,8 @@ ncclResult_t cocclPipelineStageOutputChunks(
     case cocclPipelineStageCompress:
     case cocclPipelineStageAllToAll:
     case cocclPipelineStageDecompress:
+    case cocclPipelineStagePack:
+    case cocclPipelineStageUnpack:
       *outputChunks = inputChunks;
       return ncclSuccess;
     case cocclPipelineStageAllGather:
@@ -270,15 +351,31 @@ ncclResult_t cocclExecutePipelineStage(
       edge->bytes == 0 || outputPtr == nullptr || outputCapacityBytes == 0) {
     return ncclInvalidArgument;
   }
-  if (cocclStageBuffersOverlap(edge->ptr, edge->bytes, outputPtr,
-                               outputCapacityBytes)) {
-    return ncclInvalidUsage;
-  }
-
   const int stageKind = (int)stage->kind;
   if (stageKind < 0 || stageKind >= kPipelineStageKindCount) {
     return ncclInvalidArgument;
   }
+  size_t inputSpanBytes = edge->bytes;
+  size_t outputSpanBytes = outputCapacityBytes;
+  if (stage->kind == cocclPipelineStagePack ||
+      stage->kind == cocclPipelineStageUnpack) {
+    size_t contiguousBytes = 0;
+    size_t pitchedBytes = 0;
+    NCCLCHECK(cocclPipelineStageLayoutSpans(
+        context, edge, &contiguousBytes, &pitchedBytes));
+    if (stage->kind == cocclPipelineStagePack) {
+      inputSpanBytes = pitchedBytes;
+      outputSpanBytes = contiguousBytes;
+    } else {
+      inputSpanBytes = contiguousBytes;
+      outputSpanBytes = pitchedBytes;
+    }
+  }
+  if (cocclStageBuffersOverlap(edge->ptr, inputSpanBytes, outputPtr,
+                               outputSpanBytes)) {
+    return ncclInvalidUsage;
+  }
+
   const cocclPipelineStageFn handler =
       cocclPipelineStageHandlers[stageKind];
   return handler == nullptr

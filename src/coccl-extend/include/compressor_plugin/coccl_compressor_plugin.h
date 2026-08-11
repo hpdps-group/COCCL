@@ -1,7 +1,7 @@
 #ifndef COCCL_COMPRESSOR_PLUGIN_SDK_H_
 #define COCCL_COMPRESSOR_PLUGIN_SDK_H_
 
-#include "compressor_plugin/detail/compressor_abi.h"
+#include "compressor_plugin/detail/coccl_compressor_abi.h"
 
 #include <cerrno>
 #include <charconv>
@@ -105,6 +105,43 @@ class Input {
 
  private:
   const cocclCompressorDataView* view_;
+};
+
+// Read-only raw shape that the requested encoding operation will produce.
+class Shape {
+ public:
+  explicit Shape(const cocclCompressorSizeQuery* query) : query_(query) {}
+
+  size_t bytes() const {
+    size_t result = 0;
+    return checkedMultiply(elements(), dataTypeSize(datatype()), &result)
+        ? result : 0;
+  }
+  size_t elements() const { return query_->elements; }
+  size_t chunks() const { return query_->chunks; }
+  ncclDataType_t datatype() const { return query_->datatype; }
+  size_t elementsPerChunk() const {
+    return query_->chunks == 0 ? 0 : query_->elements / query_->chunks;
+  }
+
+ private:
+  const cocclCompressorSizeQuery* query_;
+};
+
+class SizeContext {
+ public:
+  explicit SizeContext(const cocclCompressorSizeQuery* query)
+      : query_(query) {}
+
+  cocclCompressorOperation operation() const { return query_->operation; }
+
+  template <typename Config>
+  const Config& config() const {
+    return *static_cast<const Config*>(query_->config);
+  }
+
+ private:
+  const cocclCompressorSizeQuery* query_;
 };
 
 class Output {
@@ -539,6 +576,16 @@ struct HasDecompressReduceCompress<
         std::declval<const Input&>(), std::declval<Output&>(),
         std::declval<Context&>()))>> : std::true_type {};
 
+template <typename Compressor, typename = void>
+struct HasEncodedSizeBound : std::false_type {};
+
+template <typename Compressor>
+struct HasEncodedSizeBound<
+    Compressor,
+    VoidT<decltype(Compressor::encodedSizeBound(
+        std::declval<const Shape&>(), std::declval<size_t*>(),
+        std::declval<const SizeContext&>()))>> : std::true_type {};
+
 template <typename Compressor>
 struct PluginAdapter {
   using Config = typename ConfigTraits<Compressor>::Type;
@@ -637,6 +684,35 @@ struct PluginAdapter {
     }
   }
 
+  static Status getEncodedSizeBound(
+      const cocclCompressorSizeQuery* query, size_t* encodedBytes) {
+    if (encodedBytes == nullptr) return ncclInvalidArgument;
+    *encodedBytes = 0;
+    if (query == nullptr || query->structSize != sizeof(*query) ||
+        query->elements == 0 || query->chunks == 0 ||
+        query->elements % query->chunks != 0) {
+      return ncclInvalidArgument;
+    }
+    const size_t typeBytes = dataTypeSize(query->datatype);
+    size_t expectedBytes = 0;
+    if (typeBytes == 0 ||
+        !checkedMultiply(query->elements, typeBytes, &expectedBytes) ||
+        expectedBytes == 0) {
+      return ncclInvalidArgument;
+    }
+    if (query->operation != cocclCompressorOperationCompress &&
+        query->operation !=
+            cocclCompressorOperationDecompressReduceCompress) {
+      return ncclInvalidUsage;
+    }
+    const Shape shape(query);
+    const SizeContext context(query);
+    const Status result = executeEncodedSizeBound(
+        shape, encodedBytes, context);
+    return result == ncclSuccess && *encodedBytes == 0
+        ? ncclInvalidArgument : result;
+  }
+
   static const cocclCompressorPlugin* descriptor(const char* name) {
     static const cocclCompressorPlugin plugin = {
         COCCL_COMPRESSOR_ABI_VERSION,
@@ -646,11 +722,27 @@ struct PluginAdapter {
         &execute,
         &parseConfig,
         &destroyConfig,
+        &getEncodedSizeBound,
     };
     return &plugin;
   }
 
  private:
+  template <typename T = Compressor>
+  static typename std::enable_if<HasEncodedSizeBound<T>::value,
+                                 Status>::type
+  executeEncodedSizeBound(const Shape& shape, size_t* encodedBytes,
+                          const SizeContext& context) {
+    return T::encodedSizeBound(shape, encodedBytes, context);
+  }
+
+  template <typename T = Compressor>
+  static typename std::enable_if<!HasEncodedSizeBound<T>::value,
+                                 Status>::type
+  executeEncodedSizeBound(const Shape&, size_t*, const SizeContext&) {
+    return ncclInvalidUsage;
+  }
+
   template <typename T = Compressor>
   static typename std::enable_if<HasDecompressReduce<T>::value,
                                  Status>::type

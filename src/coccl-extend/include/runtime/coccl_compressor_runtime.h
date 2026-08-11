@@ -1,7 +1,7 @@
 #ifndef COCCL_COMPRESSOR_RUNTIME_H_
 #define COCCL_COMPRESSOR_RUNTIME_H_
 
-#include "compressor_plugin/detail/compressor_abi.h"
+#include "compressor_plugin/detail/coccl_compressor_abi.h"
 
 #include <memory>
 
@@ -31,6 +31,14 @@ const cocclCompressorPlugin* cocclCompressorDescriptor(
 
 bool cocclCompressorSupports(const cocclCompressorHandle& handle,
                              cocclCompressorCapability capability);
+
+// Queries a host-side encoded-size upper bound for a raw shape. Plugins
+// without an estimator return the raw shape size so planning remains safe.
+ncclResult_t cocclGetCompressorEncodedSizeBound(
+    const cocclCompressorHandle& handle,
+    cocclCompressorOperation operation,
+    size_t elements, size_t chunks, ncclDataType_t datatype,
+    size_t* encodedBytes);
 
 // All codec operations share this lifecycle path. Operation-specific NCCL
 // wrappers only populate the fields relevant to their semantic operation.

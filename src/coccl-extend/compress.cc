@@ -180,15 +180,25 @@ ncclResult_t ncclDecompReduceComp(
       originalElements % outputChunks != 0) {
     return ncclInvalidArgument;
   }
+  size_t reducedBytes = 0;
+  NCCLCHECK(typedBytes(originalElements, originalDatatype, &reducedBytes));
   if (!isRawPassthrough(input) && cocclCompressorSupports(
           compressor,
           cocclCompressorCapabilityDecompressReduceCompress)) {
-    ncclResult_t result = cocclExecuteCompressor(
-        compressor, cocclCompressorOperationDecompressReduceCompress, input,
-        output, 0, reduceChunks, originalDatatype, originalElements, stream);
-    return result == ncclSuccess && output->chunks != outputChunks
-        ? ncclInvalidUsage
-        : result;
+    size_t fusedBound = 0;
+    NCCLCHECK(cocclGetCompressorEncodedSizeBound(
+        compressor, cocclCompressorOperationDecompressReduceCompress,
+        originalElements, outputChunks, originalDatatype, &fusedBound));
+    if (fusedBound <= reducedBytes) {
+      if (fusedBound > output->capacityBytes) return ncclInvalidUsage;
+      ncclResult_t result = cocclExecuteCompressor(
+          compressor, cocclCompressorOperationDecompressReduceCompress,
+          input, output, 0, reduceChunks, originalDatatype,
+          originalElements, stream);
+      return result == ncclSuccess && output->chunks != outputChunks
+          ? ncclInvalidUsage
+          : result;
+    }
   }
 
   size_t decompressedElements = 0;
@@ -218,10 +228,6 @@ ncclResult_t ncclDecompReduceComp(
                       originalDatatype, reduceChunks, stream),
       ret, exit);
   {
-    size_t reducedBytes = 0;
-    NCCLCHECKGOTO(
-        typedBytes(originalElements, originalDatatype, &reducedBytes),
-        ret, exit);
     const cocclCompressorDataView reduced = {
         workspace.ptr, reducedBytes, originalElements, outputChunks,
         originalDatatype};

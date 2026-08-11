@@ -2,12 +2,13 @@
 #define COCCL_PIPELINE_STAGE_H_
 
 #include "pipeline/coccl_pipeline.h"
-#include "compression/coccl_compressor.h"
+#include "runtime/coccl_compressor_runtime.h"
 
-// Minimal execution state shared by every pipeline stage. Workspace planning,
-// slicing, and stream/event scheduling remain private to coccl_pipeline.cc.
+// Minimal execution state shared by every pipeline stage. Workspace planning
+// and stream/event scheduling remain private to the pipeline implementation.
 struct cocclPipelineStageContext {
   size_t rawSliceCount;
+  size_t rawChunkBytes;
   ncclDataType_t rawDatatype;
   ncclComm_t ownerComm;
   cocclCompressorHandle compressor;
@@ -32,8 +33,16 @@ ncclResult_t cocclPipelineStageOutputChunks(
     const cocclPipelineStage& stage, size_t inputChunks,
     size_t* outputChunks);
 
-// Dispatches one common Compress/Collective/Decompress stage and updates edge
-// metadata. Stream ordering is owned by coccl_pipeline.cc.
+// Returns the contiguous payload size and the pitched memory span touched by
+// a Pack/Unpack stage. Kept host-only so layout validation is testable without
+// launching a CUDA kernel.
+ncclResult_t cocclPipelineStageLayoutSpans(
+    const cocclPipelineStageContext* context,
+    const cocclPipelineEdge* edge, size_t* contiguousBytes,
+    size_t* pitchedBytes);
+
+// Dispatches one common layout/compress/collective/decompress stage and
+// updates edge metadata. The pipeline executor owns stream ordering.
 ncclResult_t cocclExecutePipelineStage(
     const cocclPipelineStageContext* context,
     const cocclPipelineStage* stage, cocclPipelineEdge* edge,

@@ -16,6 +16,7 @@ void cocclPipelineContract(const void* input, void* output, ncclComm_t comm,
   };
   cocclPipelineSpec spec = {
       "contract", input, output, 1024, 16, ncclFloat32, comm,
-      cocclCompressorHandle{}, stream, stages, 7};
+      cocclCompressorHandle{}, stream, stages, 7,
+      cocclPipelineInPlaceNone};
   (void)cocclRunPipeline(&spec);
 }

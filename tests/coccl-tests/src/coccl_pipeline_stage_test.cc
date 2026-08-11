@@ -8,12 +8,6 @@
 
 namespace {
 
-constexpr size_t kAlignment = 256;
-
-size_t alignBytes(size_t bytes) {
-  return (bytes + kAlignment - 1) / kAlignment * kAlignment;
-}
-
 int expectChunks(const char* scenario, const cocclPipelineStage& stage,
                  size_t inputChunks, ncclResult_t expectedResult,
                  size_t expectedChunks) {
@@ -26,6 +20,31 @@ int expectChunks(const char* scenario, const cocclPipelineStage& stage,
             "%s: expected result=%d chunks=%zu, got result=%d chunks=%zu\n",
             scenario, (int)expectedResult, expectedChunks, (int)result,
             outputChunks);
+    return 1;
+  }
+  return 0;
+}
+
+int expectLayoutSpans(const char* scenario,
+                      const cocclPipelineStageContext& context,
+                      const cocclPipelineEdge& edge,
+                      ncclResult_t expectedResult,
+                      size_t expectedContiguousBytes,
+                      size_t expectedPitchedBytes) {
+  size_t contiguousBytes = 0;
+  size_t pitchedBytes = 0;
+  const ncclResult_t result = cocclPipelineStageLayoutSpans(
+      &context, &edge, &contiguousBytes, &pitchedBytes);
+  if (result != expectedResult ||
+      (result == ncclSuccess &&
+       (contiguousBytes != expectedContiguousBytes ||
+        pitchedBytes != expectedPitchedBytes))) {
+    fprintf(stderr,
+            "%s: expected result=%d contiguous=%zu pitched=%zu, "
+            "got result=%d contiguous=%zu pitched=%zu\n",
+            scenario, (int)expectedResult, expectedContiguousBytes,
+            expectedPitchedBytes, (int)result, contiguousBytes,
+            pitchedBytes);
     return 1;
   }
   return 0;
@@ -82,45 +101,70 @@ int testChunkPropagation() {
   const int result =
       expectChunks("AllGather", cocclPipelineAllGather(comm), 2,
                    ncclSuccess, 16) ||
+      expectChunks("Pack", cocclPipelinePack(), 4, ncclSuccess, 4) ||
+      expectChunks("Unpack", cocclPipelineUnpack(), 4, ncclSuccess, 4) ||
       expectChunks("non-divisible DRC", cocclPipelineDecompReduceComp(4),
                    10, ncclInvalidArgument, 0) ||
       expectChunks("zero reduction", cocclPipelineDecompReduceComp(0), 8,
                    ncclInvalidArgument, 0) ||
       expectChunks("zero input", cocclPipelineCompress(), 0,
                    ncclInvalidArgument, 0) ||
+      expectChunks("zero Pack input", cocclPipelinePack(), 0,
+                   ncclInvalidArgument, 0) ||
       expectChunks("missing AllGather comm", cocclPipelineAllGather(nullptr),
-                   1, ncclInvalidArgument, 0);
+                   1, ncclInvalidArgument, 0) ||
+      expectChunks("AllGather overflow", cocclPipelineAllGather(comm),
+                   SIZE_MAX, ncclInvalidArgument, 0);
   free(comm);
   return result;
 }
 
-int testWorkspaceFormulas() {
-  const size_t ranks = 8;
-  const size_t nodes = 2;
-  const size_t chunkBytes = 1000;
-  const size_t rankBytes = alignBytes(ranks * chunkBytes);
-  const size_t nodeBytes = alignBytes(nodes * chunkBytes);
-  const size_t oneChunkBytes = alignBytes(chunkBytes);
+int testLayoutSpans() {
+  cocclPipelineStageContext context = {};
+  context.rawSliceCount = 2;
+  context.rawChunkBytes = 32;
+  context.rawDatatype = ncclFloat32;
 
-  const size_t reduceScatterSerial = 2 * rankBytes + 2 * nodeBytes;
-  const size_t reduceScatterOverlap = reduceScatterSerial + rankBytes;
-  const size_t allReduceSerial =
-      3 * rankBytes + 2 * nodeBytes + oneChunkBytes;
-  const size_t allReduceOverlap =
-      allReduceSerial + 2 * rankBytes;
-
-  if (reduceScatterSerial != 20480 || reduceScatterOverlap != 28672 ||
-      allReduceSerial != 29696 || allReduceOverlap != 46080) {
-    fprintf(stderr, "pipeline workspace formulas changed unexpectedly\n");
+  cocclPipelineEdge edge = {};
+  edge.bytes = 32;
+  edge.totalElements = 8;
+  edge.datatype = ncclFloat32;
+  edge.logicalChunks = 4;
+  if (expectLayoutSpans("four chunks", context, edge, ncclSuccess, 32, 104)) {
     return 1;
   }
-  return 0;
+
+  cocclPipelineEdge zeroChunks = edge;
+  zeroChunks.logicalChunks = 0;
+  if (expectLayoutSpans("zero chunks", context, zeroChunks,
+                        ncclInvalidArgument, 0, 0)) {
+    return 1;
+  }
+
+  cocclPipelineStageContext shortPitch = context;
+  shortPitch.rawChunkBytes = 4;
+  if (expectLayoutSpans("short pitch", shortPitch, edge,
+                        ncclInvalidArgument, 0, 0)) {
+    return 1;
+  }
+
+  cocclPipelineStageContext overflowing = context;
+  overflowing.rawSliceCount = 1;
+  overflowing.rawChunkBytes = SIZE_MAX;
+  cocclPipelineEdge overflowEdge = edge;
+  overflowEdge.bytes = 8;
+  overflowEdge.totalElements = 2;
+  overflowEdge.logicalChunks = 2;
+  return expectLayoutSpans("pitched span overflow", overflowing,
+                           overflowEdge, ncclInvalidArgument, 0, 0);
 }
 
 }  // namespace
 
 int main() {
-  if (testChunkPropagation() || testWorkspaceFormulas()) return 1;
+  if (testChunkPropagation() || testLayoutSpans()) {
+    return 1;
+  }
   printf("coccl pipeline stage tests passed\n");
   return 0;
 }

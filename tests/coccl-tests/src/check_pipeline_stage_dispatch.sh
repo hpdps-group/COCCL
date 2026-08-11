@@ -2,13 +2,15 @@
 set -euo pipefail
 
 root=$(cd "$(dirname "$0")/../../.." && pwd)
-executor_file="$root/src/coccl-extend/primitives/coccl_pipeline.cc"
-stage_file="$root/src/coccl-extend/primitives/coccl_pipeline_stage.cc"
+executor_file="$root/src/coccl-extend/pipeline/coccl_pipeline_execute.cc"
+stage_file="$root/src/coccl-extend/pipeline/coccl_pipeline_stage.cc"
 
 for symbol in \
   cocclRunCompressStage \
   cocclRunAllToAllStage \
   cocclRunAllGatherStage \
+  cocclRunPackStage \
+  cocclRunUnpackStage \
   cocclRunDecompReduceCompStage \
   cocclRunDecompressReduceStage \
   cocclRunDecompressStage \
@@ -18,6 +20,17 @@ for symbol in \
     echo "missing pipeline dispatch symbol: $symbol" >&2
     exit 1
   }
+done
+
+for symbol in cocclLaunchPackSlice cocclLaunchUnpackSlice; do
+  rg -q "$symbol" "$stage_file" || {
+    echo "pipeline stage dispatcher does not call $symbol" >&2
+    exit 1
+  }
+  if rg -q "$symbol" "$executor_file"; then
+    echo "pipeline executor still calls $symbol directly" >&2
+    exit 1
+  fi
 done
 
 run_stage_body=$(sed -n \

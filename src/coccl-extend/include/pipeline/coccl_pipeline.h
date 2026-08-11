@@ -3,7 +3,7 @@
 
 #include <stddef.h>
 
-#include "compression/coccl_compressor.h"
+#include "runtime/coccl_compressor_runtime.h"
 #include "nccl.h"
 
 // COCCL overlap primitives are linear flows assembled from these common
@@ -16,6 +16,19 @@ enum cocclPipelineStageKind {
   cocclPipelineStageDecompReduceComp = 3,
   cocclPipelineStageDecompressReduce = 4,
   cocclPipelineStageDecompress = 5,
+  // Layout stages are injected at pipeline boundaries and are not part of a
+  // primitive's explicit stage list.
+  cocclPipelineStagePack = 6,
+  cocclPipelineStageUnpack = 7,
+};
+
+// Declares the only user-buffer alias that may retain sliced overlap. The
+// planner validates the exact pointer and chunk relationship before using it.
+enum cocclPipelineInPlaceLayout {
+  cocclPipelineInPlaceNone = 0,
+  cocclPipelineInPlaceSameBuffer = 1,
+  cocclPipelineInPlaceInputRankChunk = 2,
+  cocclPipelineInPlaceOutputRankChunk = 3,
 };
 
 struct cocclPipelineStage {
@@ -50,6 +63,14 @@ static inline cocclPipelineStage cocclPipelineDecompress() {
   return {cocclPipelineStageDecompress, nullptr, 0};
 }
 
+static inline cocclPipelineStage cocclPipelinePack() {
+  return {cocclPipelineStagePack, nullptr, 0};
+}
+
+static inline cocclPipelineStage cocclPipelineUnpack() {
+  return {cocclPipelineStageUnpack, nullptr, 0};
+}
+
 // rawChunkCount is the uncompressed element count in one logical chunk before
 // slicing. inputChunks describes how many such chunks enter the flow.
 struct cocclPipelineSpec {
@@ -64,6 +85,7 @@ struct cocclPipelineSpec {
   cudaStream_t stream;
   const cocclPipelineStage* stages;
   int stageCount;
+  cocclPipelineInPlaceLayout inPlaceLayout;
 };
 
 ncclResult_t cocclRunPipeline(const cocclPipelineSpec* spec);

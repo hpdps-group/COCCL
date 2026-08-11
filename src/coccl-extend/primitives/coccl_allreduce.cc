@@ -22,7 +22,8 @@ ncclResult_t cocclRunAllReduceOneShot(const cocclPreparedCall* prepared) {
       "allreduce-oneshot", args.sendbuff, args.recvbuff, chunkCount,
       (size_t)args.comm->nRanks, args.datatype, args.comm,
       prepared->compressor, args.stream, stages,
-      (int)(sizeof(stages) / sizeof(stages[0]))};
+      (int)(sizeof(stages) / sizeof(stages[0])),
+      cocclPipelineInPlaceSameBuffer};
   return cocclRunPipelineSerial(&spec);
 }
 
@@ -41,7 +42,8 @@ ncclResult_t cocclRunAllReduceTwoShot(const cocclPreparedCall* prepared) {
       "allreduce-twoshot-overlap", args.sendbuff, args.recvbuff, recvcount,
       (size_t)args.comm->nRanks, args.datatype, args.comm,
       prepared->compressor, args.stream, stages,
-      (int)(sizeof(stages) / sizeof(stages[0]))};
+      (int)(sizeof(stages) / sizeof(stages[0])),
+      cocclPipelineInPlaceSameBuffer};
   return cocclRunPipeline(&spec);
 }
 
@@ -70,7 +72,8 @@ ncclResult_t cocclRunAllReduceTripleShot(const cocclPreparedCall* prepared) {
       "allreduce-tripleshot-tl-overlap", args.sendbuff, args.recvbuff,
       recvcount, (size_t)args.comm->nRanks, args.datatype, args.comm,
       prepared->compressor, args.stream, stages,
-      (int)(sizeof(stages) / sizeof(stages[0]))};
+      (int)(sizeof(stages) / sizeof(stages[0])),
+      cocclPipelineInPlaceSameBuffer};
   return cocclRunPipeline(&spec);
 }
 

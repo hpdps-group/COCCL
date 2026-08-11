@@ -40,7 +40,8 @@ ncclResult_t cocclExecuteAllToAll(const cocclPreparedCall* prepared) {
     "alltoall-overlap", args.sendbuff, args.recvbuff, args.count,
     (size_t)args.comm->nRanks, args.datatype, args.comm,
     prepared->compressor, args.stream, stages,
-    (int)(sizeof(stages) / sizeof(stages[0]))
+    (int)(sizeof(stages) / sizeof(stages[0])),
+    cocclPipelineInPlaceNone
   };
   return cocclRunPipeline(&spec);
 }

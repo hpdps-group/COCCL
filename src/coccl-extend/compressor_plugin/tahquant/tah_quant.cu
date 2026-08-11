@@ -1,5 +1,5 @@
 #include "quantization.h"
-#include "compressor_plugin/compressor_plugin.h"
+#include "compressor_plugin/coccl_compressor_plugin.h"
 
 #include <climits>
 #include <cuda_bf16.h>
@@ -25,33 +25,105 @@ bool validQuantBits(int value) {
   return value == 1 || value == 2 || value == 4 || value == 8;
 }
 
-bool compressedBytes(const coccl::Input& input, const TahQuantConfig& config,
-                     size_t* bytes) {
-  const int groupCount = config.kernelGroupCount();
-  if (input.elementsPerChunk() == 0 || groupCount <= 0 ||
-      !validQuantBits(config.quantBits)) {
+struct TahEncodedLayout {
+  size_t groupDataBytes = 0;
+  size_t groups = 0;
+  size_t bytes = 0;
+};
+
+bool encodedLayout(size_t elements, size_t chunks, int groupCount,
+                   int quantBits, size_t parameterBytes,
+                   size_t extraGroupBytes, TahEncodedLayout* layout) {
+  if (layout == nullptr || elements == 0 || chunks == 0 ||
+      elements % chunks != 0 || groupCount <= 0 ||
+      !validQuantBits(quantBits)) {
     return false;
   }
 
-  const size_t groups =
-      1 + (input.elementsPerChunk() - 1) / (size_t)groupCount;
-  const size_t quantBytes =
-      (size_t)groupCount / (size_t)(8 / config.quantBits);
+  const size_t elementsPerChunk = elements / chunks;
+  const size_t groupsPerChunk =
+      1 + (elementsPerChunk - 1) / (size_t)groupCount;
+  layout->groupDataBytes =
+      (size_t)groupCount / (size_t)(8 / quantBits);
+  size_t groupBytes = 0;
+  if (!coccl::checkedAdd(layout->groupDataBytes, parameterBytes,
+                         &groupBytes) ||
+      !coccl::checkedAdd(groupBytes, extraGroupBytes, &groupBytes)) {
+    return false;
+  }
+  return coccl::checkedMultiply(groupsPerChunk, chunks, &layout->groups) &&
+         coccl::checkedMultiply(layout->groups, groupBytes, &layout->bytes);
+}
+
+template <typename Shape>
+bool compressedBytes(const Shape& input, const TahQuantConfig& config,
+                     size_t* bytes) {
+  if (bytes == nullptr) return false;
   const size_t parameterBytes = input.datatype() == ncclFloat32
       ? (config.quantType == quantize::Type::Symmetric ? 1u : 2u) *
             sizeof(float)
       : 2u * sizeof(float);
-  size_t groupBytes = 0;
-  if (!coccl::checkedAdd(quantBytes, parameterBytes, &groupBytes)) {
+  const size_t extraGroupBytes = config.hadamard && config.pivotSwap
+      ? sizeof(int64_t) + 1 : 0;
+  TahEncodedLayout layout;
+  if (!encodedLayout(input.elements(), input.chunks(),
+                     config.kernelGroupCount(), config.quantBits,
+                     parameterBytes, extraGroupBytes, &layout)) {
     return false;
   }
-  if (config.hadamard && config.pivotSwap &&
-      !coccl::checkedAdd(groupBytes, sizeof(int64_t) + 1, &groupBytes)) {
+  *bytes = layout.bytes;
+  return true;
+}
+
+struct TahDrcLayout {
+  size_t groupDataBytes = 0;
+  size_t inputGroups = 0;
+  size_t outputGroups = 0;
+  size_t inputTensorDataBytes = 0;
+  size_t outputBytes = 0;
+};
+
+template <typename Shape>
+bool drcLayout(const Shape& input, const TahQuantConfig& config,
+               size_t reduceChunks, size_t originalElements,
+               TahDrcLayout* layout) {
+  if (layout == nullptr || reduceChunks == 0 || input.chunks() == 0 ||
+      input.chunks() % reduceChunks != 0 ||
+      input.bytes() % input.chunks() != 0 || config.groupCount <= 0 ||
+      !validQuantBits(config.quantBits)) {
     return false;
   }
-  size_t chunkBytes = 0;
-  return coccl::checkedMultiply(groups, groupBytes, &chunkBytes) &&
-         coccl::checkedMultiply(chunkBytes, input.chunks(), bytes);
+  const size_t outputChunks = input.chunks() / reduceChunks;
+  if (outputChunks == 0 || originalElements == 0 ||
+      originalElements % outputChunks != 0) {
+    return false;
+  }
+
+  const size_t parameterBytes =
+      (config.quantType == quantize::Type::Symmetric ? 1u : 2u) *
+      sizeof(float);
+  TahEncodedLayout outputLayout;
+  if (!encodedLayout(originalElements, outputChunks, config.groupCount,
+                     config.quantBits, parameterBytes, 0, &outputLayout)) {
+    return false;
+  }
+  layout->groupDataBytes = outputLayout.groupDataBytes;
+  layout->outputGroups = outputLayout.groups;
+  layout->outputBytes = outputLayout.bytes;
+  size_t encodedGroupBytes = 0;
+  if (!coccl::checkedAdd(layout->groupDataBytes, parameterBytes,
+                         &encodedGroupBytes) || encodedGroupBytes == 0) {
+    return false;
+  }
+  const size_t encodedInputChunkBytes = input.bytes() / input.chunks();
+  if (encodedInputChunkBytes % encodedGroupBytes != 0) return false;
+  const size_t inputGroupsPerChunk =
+      encodedInputChunkBytes / encodedGroupBytes;
+  return inputGroupsPerChunk != 0 &&
+      coccl::checkedMultiply(inputGroupsPerChunk, outputChunks,
+                             &layout->inputGroups) &&
+      coccl::checkedMultiply(layout->inputGroups, layout->groupDataBytes,
+                             &layout->inputTensorDataBytes);
 }
 
 struct TahQuantCompressor {
@@ -71,6 +143,31 @@ struct TahQuantCompressor {
     if (result != ncclSuccess) return result;
     return validQuantBits(config.quantBits) ? ncclSuccess
                                             : ncclInvalidArgument;
+  }
+
+  static coccl::Status encodedSizeBound(
+      const coccl::Shape& input, size_t* encodedBytes,
+      const coccl::SizeContext& context) {
+    if (encodedBytes == nullptr) return ncclInvalidArgument;
+    const Config& config = context.config<Config>();
+    if (context.operation() == cocclCompressorOperationCompress) {
+      return compressedBytes(input, config, encodedBytes)
+          ? ncclSuccess : ncclInvalidArgument;
+    }
+    if (context.operation() !=
+        cocclCompressorOperationDecompressReduceCompress) {
+      return ncclInvalidUsage;
+    }
+    const size_t parameterBytes =
+        (config.quantType == quantize::Type::Symmetric ? 1u : 2u) *
+        sizeof(float);
+    TahEncodedLayout layout;
+    if (!encodedLayout(input.elements(), input.chunks(), config.groupCount,
+                       config.quantBits, parameterBytes, 0, &layout)) {
+      return ncclInvalidArgument;
+    }
+    *encodedBytes = layout.bytes;
+    return ncclSuccess;
   }
 
   static coccl::Status compress(const coccl::Input& input,
@@ -235,43 +332,27 @@ struct TahQuantCompressor {
     }
 
     const Config& config = context.config<Config>();
-    const int groupDataBytes = config.groupCount / (8 / config.quantBits);
-    const int parameterBytes =
-        (config.quantType == quantize::Type::Symmetric ? 1 : 2) *
-        (int)sizeof(float);
-    const int encodedGroupBytes = groupDataBytes + parameterBytes;
-    const size_t inputElements = input.elements() / reduceChunks;
-    const size_t inputGroups = inputElements == 0
-        ? 0
-        : 1 + (inputElements - 1) / (size_t)encodedGroupBytes;
-    size_t originalElements = 0;
-    if (inputGroups == 0 ||
-        !coccl::checkedMultiply(inputGroups, (size_t)config.groupCount,
-                                &originalElements)) {
+    TahDrcLayout layout;
+    if (!drcLayout(input, config, reduceChunks, context.originalElements(),
+                   &layout) ||
+        layout.groupDataBytes > INT_MAX || layout.inputGroups > INT_MAX ||
+        layout.outputGroups > INT_MAX ||
+        layout.inputTensorDataBytes > INT64_MAX) {
       return ncclInvalidArgument;
     }
-    const size_t outputGroups =
-        1 + (originalElements - 1) / (size_t)config.groupCount;
-    size_t inputChunkBytes = 0;
-    size_t outputBytes = 0;
-    if (!coccl::checkedMultiply(inputGroups, (size_t)groupDataBytes,
-                                &inputChunkBytes) ||
-        !coccl::checkedMultiply(outputGroups, (size_t)encodedGroupBytes,
-                                &outputBytes) ||
-        inputGroups > INT_MAX || outputGroups > INT_MAX ||
-        inputChunkBytes > INT64_MAX || outputBytes > output.capacityBytes()) {
-      return ncclInvalidArgument;
-    }
+    if (layout.outputBytes > output.capacityBytes()) return ncclInvalidUsage;
 
     launch_dequant_reduce_quant(
         output.dataAs<int8_t>(), nullptr, input.dataAs<int8_t>(), nullptr,
         (int)reduceChunks, config.quantBits, config.quantBits,
-        config.quantType, (int)outputGroups, groupDataBytes,
-        (int64_t)inputChunkBytes, (int)inputGroups, groupDataBytes,
+        config.quantType, (int)layout.outputGroups,
+        (int)layout.groupDataBytes, (int64_t)layout.inputTensorDataBytes,
+        (int)layout.inputGroups, (int)layout.groupDataBytes,
         context.stream());
     cudaError_t cudaResult = cudaGetLastError();
     if (cudaResult != cudaSuccess) return coccl::fromCuda(cudaResult);
-    return output.commitBytes(outputBytes, input.chunks() / reduceChunks);
+    return output.commitBytes(layout.outputBytes,
+                              input.chunks() / reduceChunks);
   }
 };
 

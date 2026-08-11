@@ -15,7 +15,8 @@ ncclResult_t cocclRunReduceScatterOneShot(
       "reducescatter-oneshot-overlap", args.sendbuff, args.recvbuff,
       args.count, (size_t)comm->nRanks, args.datatype, comm,
       prepared->compressor, args.stream, stages,
-      (int)(sizeof(stages) / sizeof(stages[0]))};
+      (int)(sizeof(stages) / sizeof(stages[0])),
+      cocclPipelineInPlaceOutputRankChunk};
   return cocclRunPipeline(&spec);
 }
 
@@ -42,7 +43,8 @@ ncclResult_t cocclRunReduceScatterTwoShot(
       "reducescatter-twoshot-tl-overlap", args.sendbuff, args.recvbuff,
       args.count, (size_t)comm->nRanks, args.datatype, comm,
       prepared->compressor, args.stream, stages,
-      (int)(sizeof(stages) / sizeof(stages[0]))};
+      (int)(sizeof(stages) / sizeof(stages[0])),
+      cocclPipelineInPlaceOutputRankChunk};
   return cocclRunPipeline(&spec);
 }
 

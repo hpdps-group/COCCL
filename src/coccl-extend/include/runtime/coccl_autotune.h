@@ -1,7 +1,7 @@
 #ifndef COCCL_AUTOTUNE_H_
 #define COCCL_AUTOTUNE_H_
 
-#include "compression/coccl_compressor.h"
+#include "runtime/coccl_compressor_runtime.h"
 #include "nccl.h"
 
 struct cocclPreparedCall;

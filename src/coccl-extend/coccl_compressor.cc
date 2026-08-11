@@ -1,4 +1,4 @@
-#include "compression/coccl_compressor.h"
+#include "runtime/coccl_compressor_runtime.h"
 
 #include "buffer/coccl_buffer_management.h"
 #include "comm.h"
@@ -412,6 +412,53 @@ bool cocclCompressorSupports(const cocclCompressorHandle& handle,
                              cocclCompressorCapability capability) {
   const cocclCompressorPlugin* plugin = cocclCompressorDescriptor(handle);
   return plugin != nullptr && (plugin->capabilities & capability) != 0;
+}
+
+ncclResult_t cocclGetCompressorEncodedSizeBound(
+    const cocclCompressorHandle& handle,
+    cocclCompressorOperation operation,
+    size_t elements, size_t chunks, ncclDataType_t datatype,
+    size_t* encodedBytes) {
+  if (encodedBytes == nullptr) return ncclInvalidArgument;
+  *encodedBytes = 0;
+  if (!handle || elements == 0 || chunks == 0 || elements % chunks != 0 ||
+      (operation != cocclCompressorOperationCompress &&
+       operation !=
+           cocclCompressorOperationDecompressReduceCompress)) {
+    return ncclInvalidArgument;
+  }
+  const size_t datatypeBytes = typeSize(datatype);
+  size_t rawBytes = 0;
+  if (datatypeBytes == 0 ||
+      !checkedMultiply(elements, datatypeBytes, &rawBytes) ||
+      rawBytes == 0) {
+    return ncclInvalidArgument;
+  }
+
+  *encodedBytes = rawBytes;
+  cocclCompressorRuntimeState* state = handle.state.get();
+  if (state == nullptr || state->compressor == nullptr) {
+    return ncclInvalidArgument;
+  }
+  if (state->compressor->getEncodedSizeBound == nullptr) {
+    return ncclSuccess;
+  }
+
+  const cocclCompressorSizeQuery query = {
+      sizeof(cocclCompressorSizeQuery), operation,
+      elements, chunks, datatype, state->config,
+  };
+  size_t pluginBytes = 0;
+  const ncclResult_t result =
+      state->compressor->getEncodedSizeBound(&query, &pluginBytes);
+  if (result == ncclInvalidUsage) return ncclSuccess;
+  if (result != ncclSuccess) return result;
+  if (pluginBytes == 0) return ncclInvalidArgument;
+  if (pluginBytes % chunks != 0) {
+    return ncclInvalidUsage;
+  }
+  *encodedBytes = pluginBytes;
+  return ncclSuccess;
 }
 
 ncclResult_t cocclExecuteCompressor(

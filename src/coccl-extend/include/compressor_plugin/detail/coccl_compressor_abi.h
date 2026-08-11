@@ -1,5 +1,5 @@
-#ifndef COCCL_DETAIL_COMPRESSOR_ABI_H_
-#define COCCL_DETAIL_COMPRESSOR_ABI_H_
+#ifndef COCCL_COMPRESSOR_ABI_H_
+#define COCCL_COMPRESSOR_ABI_H_
 
 #include "nccl.h"
 
@@ -10,7 +10,7 @@
 
 // This is the only contract crossing the compressor shared-library boundary.
 // Keep it POD-only: the public C++ SDK adapts user code to these structures.
-constexpr uint32_t COCCL_COMPRESSOR_ABI_VERSION = 5;
+constexpr uint32_t COCCL_COMPRESSOR_ABI_VERSION = 6;
 constexpr uint32_t COCCL_COMPRESSOR_HOST_API_VERSION = 3;
 constexpr const char* COCCL_COMPRESSOR_ENTRY_SYMBOL =
     "cocclGetCompressorPlugin";
@@ -121,6 +121,19 @@ struct cocclCompressorCall {
   cocclCompressorExecutionContext* execution;
 };
 
+// Host-only raw shape query used by workspace planning. For DRC, this is the
+// reduced shape that the recompress step will encode. A successful callback
+// returns only a guaranteed encoded-size upper bound; it must not launch work
+// or acquire execution resources.
+struct cocclCompressorSizeQuery {
+  uint32_t structSize;
+  cocclCompressorOperation operation;
+  size_t elements;
+  size_t chunks;
+  ncclDataType_t datatype;
+  const void* config;
+};
+
 struct cocclCompressorPlugin {
   uint32_t abiVersion;
   uint32_t structSize;
@@ -132,6 +145,8 @@ struct cocclCompressorPlugin {
       const cocclCompressorConfigContext* context, void** config,
       char* error, size_t errorCapacity);
   void (*destroyConfig)(void* config);
+  ncclResult_t (*getEncodedSizeBound)(
+      const cocclCompressorSizeQuery* query, size_t* encodedBytes);
 };
 
 using cocclGetCompressorPluginFn = const cocclCompressorPlugin* (*)();

@@ -1,5 +1,5 @@
 #include "quantization.h"
-#include "compressor_plugin/compressor_plugin.h"
+#include "compressor_plugin/coccl_compressor_plugin.h"
 
 #include <climits>
 #include <cuda_bf16.h>
@@ -68,28 +68,116 @@ bool parameterBytes(ncclDataType_t datatype, quantize::Type quantType,
   }
 }
 
-bool compressedBytes(const coccl::Input& input, const Sdp4BitConfig& config,
-                     size_t* bytes) {
-  const int groupCount = config.inputGroups();
-  const int quantBits = config.inputBits();
-  if (input.elementsPerChunk() == 0 || groupCount <= 0 ||
+struct Sdp4BitEncodedLayout {
+  size_t parameterBytes = 0;
+  size_t groupDataBytes = 0;
+  size_t groups = 0;
+  size_t bytes = 0;
+};
+
+bool encodedLayout(size_t elements, size_t chunks,
+                   ncclDataType_t datatype, int groupCount, int quantBits,
+                   quantize::Type quantType,
+                   Sdp4BitEncodedLayout* layout) {
+  if (layout == nullptr || elements == 0 || chunks == 0 ||
+      elements % chunks != 0 || groupCount <= 0 ||
       !validQuantBits(quantBits, false)) {
     return false;
   }
 
-  const size_t groups =
-      1 + (input.elementsPerChunk() - 1) / (size_t)groupCount;
-  const size_t quantBytes =
+  const size_t elementsPerChunk = elements / chunks;
+  const size_t groupsPerChunk =
+      1 + (elementsPerChunk - 1) / (size_t)groupCount;
+  layout->groupDataBytes =
       (size_t)groupCount / (size_t)(8 / quantBits);
-  size_t paramsBytes = 0;
-  if (!parameterBytes(input.datatype(), config.quantType, &paramsBytes)) {
+  if (!parameterBytes(datatype, quantType, &layout->parameterBytes)) {
     return false;
   }
   size_t groupBytes = 0;
-  size_t chunkBytes = 0;
-  return coccl::checkedAdd(quantBytes, paramsBytes, &groupBytes) &&
-         coccl::checkedMultiply(groups, groupBytes, &chunkBytes) &&
-         coccl::checkedMultiply(chunkBytes, input.chunks(), bytes);
+  return coccl::checkedAdd(layout->groupDataBytes,
+                           layout->parameterBytes, &groupBytes) &&
+         coccl::checkedMultiply(groupsPerChunk, chunks, &layout->groups) &&
+         coccl::checkedMultiply(layout->groups, groupBytes, &layout->bytes);
+}
+
+template <typename Shape>
+bool compressedBytes(const Shape& input, const Sdp4BitConfig& config,
+                     size_t* bytes) {
+  if (bytes == nullptr) return false;
+  Sdp4BitEncodedLayout layout;
+  if (!encodedLayout(input.elements(), input.chunks(), input.datatype(),
+                     config.inputGroups(), config.inputBits(),
+                     config.quantType, &layout)) {
+    return false;
+  }
+  *bytes = layout.bytes;
+  return true;
+}
+
+struct Sdp4BitDrcLayout {
+  size_t parameterBytes = 0;
+  size_t inputGroupDataBytes = 0;
+  size_t outputGroupDataBytes = 0;
+  size_t inputGroups = 0;
+  size_t outputGroups = 0;
+  size_t inputTensorDataBytes = 0;
+  size_t outputBytes = 0;
+};
+
+template <typename Shape>
+bool drcLayout(const Shape& input, const Sdp4BitConfig& config,
+               size_t reduceChunks, ncclDataType_t originalDatatype,
+               size_t originalElements, Sdp4BitDrcLayout* layout) {
+  if (layout == nullptr || reduceChunks == 0 || input.chunks() == 0 ||
+      input.chunks() % reduceChunks != 0 ||
+      input.bytes() % input.chunks() != 0) {
+    return false;
+  }
+  const size_t outputChunks = input.chunks() / reduceChunks;
+  if (outputChunks == 0 || originalElements == 0 ||
+      originalElements % outputChunks != 0) {
+    return false;
+  }
+
+  const int inputGroupCount = config.inputGroups(false);
+  const int outputGroupCount = config.outputGroups(false);
+  const int inputBits = config.inputBits();
+  const int outputBits = config.outputBits();
+  if (inputGroupCount <= 0 || outputGroupCount <= 0 ||
+      !validQuantBits(inputBits, false) ||
+      !validQuantBits(outputBits, false)) {
+    return false;
+  }
+  Sdp4BitEncodedLayout outputLayout;
+  if (!encodedLayout(originalElements, outputChunks, originalDatatype,
+                     outputGroupCount, outputBits, config.quantType,
+                     &outputLayout)) {
+    return false;
+  }
+  layout->parameterBytes = outputLayout.parameterBytes;
+  layout->inputGroupDataBytes =
+      (size_t)inputGroupCount / (size_t)(8 / inputBits);
+  layout->outputGroupDataBytes = outputLayout.groupDataBytes;
+  layout->outputGroups = outputLayout.groups;
+  layout->outputBytes = outputLayout.bytes;
+
+  size_t encodedInputGroupBytes = 0;
+  if (!coccl::checkedAdd(layout->inputGroupDataBytes,
+                         layout->parameterBytes,
+                         &encodedInputGroupBytes) ||
+      encodedInputGroupBytes == 0) {
+    return false;
+  }
+  const size_t encodedInputChunkBytes = input.bytes() / input.chunks();
+  if (encodedInputChunkBytes % encodedInputGroupBytes != 0) return false;
+  const size_t inputGroupsPerChunk =
+      encodedInputChunkBytes / encodedInputGroupBytes;
+  return inputGroupsPerChunk != 0 &&
+      coccl::checkedMultiply(inputGroupsPerChunk, outputChunks,
+                             &layout->inputGroups) &&
+      coccl::checkedMultiply(layout->inputGroups,
+                             layout->inputGroupDataBytes,
+                             &layout->inputTensorDataBytes);
 }
 
 template <typename T>
@@ -176,6 +264,37 @@ struct Sdp4BitCompressor {
                    !(config.subAdd && config.hadamard)
         ? ncclSuccess
         : ncclInvalidArgument;
+  }
+
+  static coccl::Status encodedSizeBound(
+      const coccl::Shape& input, size_t* encodedBytes,
+      const coccl::SizeContext& context) {
+    if (encodedBytes == nullptr) return ncclInvalidArgument;
+    const Config& config = context.config<Config>();
+    if (context.operation() == cocclCompressorOperationCompress) {
+      if (config.subAdd) {
+        *encodedBytes = input.bytes();
+        return ncclSuccess;
+      }
+      return compressedBytes(input, config, encodedBytes)
+          ? ncclSuccess : ncclInvalidArgument;
+    }
+    if (context.operation() !=
+        cocclCompressorOperationDecompressReduceCompress) {
+      return ncclInvalidUsage;
+    }
+    if (config.hadamard ||
+        config.quantType != quantize::Type::Symmetric) {
+      return ncclInvalidArgument;
+    }
+    Sdp4BitEncodedLayout layout;
+    if (!encodedLayout(input.elements(), input.chunks(), input.datatype(),
+                       config.outputGroups(false), config.outputBits(),
+                       config.quantType, &layout)) {
+      return ncclInvalidArgument;
+    }
+    *encodedBytes = layout.bytes;
+    return ncclSuccess;
   }
 
   static coccl::Status compress(const coccl::Input& input,
@@ -398,55 +517,32 @@ struct Sdp4BitCompressor {
       return ncclInvalidArgument;
     }
 
-    const int inGroupCount = config.inputGroups(false);
-    const int outGroupCount = config.outputGroups(false);
     const int inQuantBits = config.inputBits();
     const int outQuantBits = config.outputBits();
-    const size_t inGroupBytes =
-        (size_t)inGroupCount / (size_t)(8 / inQuantBits);
-    const size_t outGroupBytes =
-        (size_t)outGroupCount / (size_t)(8 / outQuantBits);
-    size_t encodedInputGroupBytes = 0;
-    if (!coccl::checkedAdd(inGroupBytes, paramsBytes,
-                           &encodedInputGroupBytes)) {
+    Sdp4BitDrcLayout layout;
+    if (!drcLayout(input, config, reduceChunks,
+                   context.originalDatatype(), context.originalElements(),
+                   &layout) ||
+        layout.inputGroups > INT_MAX || layout.outputGroups > INT_MAX ||
+        layout.inputGroupDataBytes > INT_MAX ||
+        layout.outputGroupDataBytes > INT_MAX ||
+        layout.inputTensorDataBytes > INT64_MAX ||
+        layout.parameterBytes != paramsBytes) {
       return ncclInvalidArgument;
     }
-
-    const size_t inputElements = input.elements() / reduceChunks;
-    const size_t inputGroups = inputElements == 0
-        ? 0
-        : 1 + (inputElements - 1) / encodedInputGroupBytes;
-    size_t originalElements = 0;
-    if (inputGroups == 0 ||
-        !coccl::checkedMultiply(inputGroups, (size_t)inGroupCount,
-                                &originalElements)) {
-      return ncclInvalidArgument;
-    }
-    const size_t outputGroups =
-        1 + (originalElements - 1) / (size_t)outGroupCount;
-    size_t encodedOutputGroupBytes = 0;
-    size_t inputChunkBytes = 0;
-    size_t outputBytes = 0;
-    if (!coccl::checkedAdd(outGroupBytes, paramsBytes,
-                           &encodedOutputGroupBytes) ||
-        !coccl::checkedMultiply(inputGroups, inGroupBytes,
-                                &inputChunkBytes) ||
-        !coccl::checkedMultiply(outputGroups, encodedOutputGroupBytes,
-                                &outputBytes) ||
-        inputGroups > INT_MAX || outputGroups > INT_MAX ||
-        inputChunkBytes > INT64_MAX || outputBytes > output.capacityBytes()) {
-      return ncclInvalidArgument;
-    }
+    if (layout.outputBytes > output.capacityBytes()) return ncclInvalidUsage;
 
     launch_dequant_reduce_quant(
         output.dataAs<int8_t>(), nullptr, input.dataAs<int8_t>(), nullptr,
         (int)reduceChunks, inQuantBits, outQuantBits, config.quantType,
-        (int)outputGroups, (int)outGroupBytes, (int)inputGroups,
-        (int)inGroupBytes, (int64_t)inputChunkBytes, (int)paramsBytes,
-        context.stream());
+        (int)layout.outputGroups, (int)layout.outputGroupDataBytes,
+        (int)layout.inputGroups, (int)layout.inputGroupDataBytes,
+        (int64_t)layout.inputTensorDataBytes,
+        (int)layout.parameterBytes, context.stream());
     cudaError_t cudaResult = cudaGetLastError();
     if (cudaResult != cudaSuccess) return coccl::fromCuda(cudaResult);
-    return output.commitBytes(outputBytes, input.chunks() / reduceChunks);
+    return output.commitBytes(layout.outputBytes,
+                              input.chunks() / reduceChunks);
   }
 };
 

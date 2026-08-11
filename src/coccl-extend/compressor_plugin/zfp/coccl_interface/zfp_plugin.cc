@@ -1,4 +1,4 @@
-#include "compressor_plugin/compressor_plugin.h"
+#include "compressor_plugin/coccl_compressor_plugin.h"
 #include "zfp.h"
 #include "zfp/internal/zfp/macros.h"
 
@@ -30,12 +30,55 @@ bool configureStream(zfp_stream* stream, zfp_type type, int rate) {
   return true;
 }
 
+bool maximumCompressedBytes(zfp_stream* stream, zfp_field* field,
+                            zfp_type type, size_t elementsPerChunk,
+                            size_t chunks, size_t* maxChunkBytes,
+                            size_t* maxBytes) {
+  if (stream == nullptr || field == nullptr || type == zfp_type_none ||
+      elementsPerChunk == 0 || chunks == 0 || maxChunkBytes == nullptr ||
+      maxBytes == nullptr) {
+    return false;
+  }
+  zfp_field_set_type(field, type);
+  zfp_field_set_size_1d(field, elementsPerChunk);
+  *maxChunkBytes = zfp_stream_maximum_size(stream, field);
+  return *maxChunkBytes != 0 &&
+      coccl::checkedMultiply(*maxChunkBytes, chunks, maxBytes);
+}
+
 struct ZfpCompressor {
   using Config = ZfpConfig;
 
   static coccl::Status configure(coccl::ConfigReader& reader, Config& config,
                                  const coccl::ConfigContext&) {
     return reader.get("rate", config.rate, 1, 64).finish();
+  }
+
+  static coccl::Status encodedSizeBound(
+      const coccl::Shape& input, size_t* encodedBytes,
+      const coccl::SizeContext& context) {
+    if (context.operation() != cocclCompressorOperationCompress ||
+        encodedBytes == nullptr || input.chunks() > INT_MAX) {
+      return context.operation() == cocclCompressorOperationCompress
+          ? ncclInvalidArgument : ncclInvalidUsage;
+    }
+    const zfp_type type = zfpType(input.datatype());
+    const Config& config = context.config<Config>();
+    zfp_stream* stream = zfp_stream_open(nullptr);
+    zfp_field* field = zfp_field_alloc();
+    if (stream == nullptr || field == nullptr ||
+        !configureStream(stream, type, config.rate)) {
+      zfp_field_free(field);
+      zfp_stream_close(stream);
+      return ncclInternalError;
+    }
+    size_t maxChunkBytes = 0;
+    const bool valid = maximumCompressedBytes(
+        stream, field, type, input.elementsPerChunk(), input.chunks(),
+        &maxChunkBytes, encodedBytes);
+    zfp_field_free(field);
+    zfp_stream_close(stream);
+    return valid ? ncclSuccess : ncclInvalidArgument;
   }
 
   static coccl::Status compress(const coccl::Input& input,
@@ -59,12 +102,11 @@ struct ZfpCompressor {
     cudaStream_t cudaStream = context.stream();
     stream->exec.params = &cudaStream;
 
-    zfp_field_set_type(field, type);
-    zfp_field_set_size_1d(field, input.elementsPerChunk());
-    const size_t maxChunkBytes = zfp_stream_maximum_size(stream, field);
+    size_t maxChunkBytes = 0;
     size_t maxBytes = 0;
-    if (maxChunkBytes == 0 ||
-        !coccl::checkedMultiply(maxChunkBytes, input.chunks(), &maxBytes)) {
+    if (!maximumCompressedBytes(
+            stream, field, type, input.elementsPerChunk(), input.chunks(),
+            &maxChunkBytes, &maxBytes)) {
       zfp_field_free(field);
       zfp_stream_close(stream);
       return ncclInvalidArgument;

@@ -1,4 +1,4 @@
-#include "compressor_plugin/compressor_plugin.h"
+#include "compressor_plugin/coccl_compressor_plugin.h"
 
 #include <stdio.h>
 #include <string.h>

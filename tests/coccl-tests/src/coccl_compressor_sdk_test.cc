@@ -1,4 +1,4 @@
-#include "compressor_plugin/compressor_plugin.h"
+#include "compressor_plugin/coccl_compressor_plugin.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -63,6 +63,39 @@ struct ResourceCompressor {
   static coccl::Status decompressReduce(const coccl::Input&,
                                         coccl::Output&,
                                         coccl::Context&) {
+    return ncclSuccess;
+  }
+
+  static coccl::Status encodedSizeBound(
+      const coccl::Shape& input, size_t* encodedBytes,
+      const coccl::SizeContext& context) {
+    if (context.operation() != cocclCompressorOperationCompress) {
+      return ncclInvalidUsage;
+    }
+    if (encodedBytes == nullptr || context.config<Config>().bits != 4) {
+      return ncclInvalidArgument;
+    }
+    *encodedBytes = input.bytes() / 2;
+    return ncclSuccess;
+  }
+};
+
+struct ZeroEstimateCompressor {
+  static coccl::Status compress(const coccl::Input& input,
+                                coccl::Output& output,
+                                coccl::Context&) {
+    return output.commitBytes(input.bytes(), input.chunks());
+  }
+
+  static coccl::Status decompress(const coccl::Input&, coccl::Output&,
+                                  coccl::Context&) {
+    return ncclSuccess;
+  }
+
+  static coccl::Status encodedSizeBound(
+      const coccl::Shape&, size_t* encodedBytes,
+      const coccl::SizeContext&) {
+    *encodedBytes = 0;
     return ncclSuccess;
   }
 };
@@ -142,10 +175,10 @@ int testMinimalPlugin() {
   }
 
   cocclCompressorPlugin incompatible = *plugin;
-  incompatible.abiVersion = 4;
+  incompatible.abiVersion = 5;
   if (cocclValidateCompressorPlugin("minimal", &incompatible, error,
                                     sizeof(error)) ||
-      strstr(error, "ABI v4") == nullptr) {
+      strstr(error, "ABI v5") == nullptr) {
     fprintf(stderr, "ABI mismatch was not rejected\n");
     return 1;
   }
@@ -176,6 +209,18 @@ int testMinimalPlugin() {
   if (cocclValidateCompressorPlugin("minimal", &incompatible, error,
                                     sizeof(error))) {
     fprintf(stderr, "missing required callback was not rejected\n");
+    return 1;
+  }
+
+  const cocclCompressorSizeQuery query = {
+      sizeof(cocclCompressorSizeQuery), cocclCompressorOperationCompress,
+      32, 1, ncclInt8, nullptr};
+  size_t encodedBytes = 123;
+  if (plugin->getEncodedSizeBound == nullptr ||
+      plugin->getEncodedSizeBound(&query, &encodedBytes) !=
+          ncclInvalidUsage ||
+      encodedBytes != 0) {
+    fprintf(stderr, "missing estimator did not report unavailable\n");
     return 1;
   }
   return 0;
@@ -235,6 +280,42 @@ int testOptionalResources() {
     fprintf(stderr, "typed SDK config failed: %s\n", error);
     return 1;
   }
+  cocclCompressorSizeQuery sizeQuery = {
+      sizeof(cocclCompressorSizeQuery), cocclCompressorOperationCompress,
+      32, 1, ncclInt8, config};
+  size_t encodedBytes = 0;
+  if (plugin->getEncodedSizeBound == nullptr ||
+      plugin->getEncodedSizeBound(&sizeQuery, &encodedBytes) != ncclSuccess ||
+      encodedBytes != 16 || coccl::Shape(&sizeQuery).bytes() != 32) {
+    fprintf(stderr, "SDK encoded-size estimator dispatch failed\n");
+    plugin->destroyConfig(config);
+    return 1;
+  }
+  sizeQuery.structSize--;
+  if (plugin->getEncodedSizeBound(&sizeQuery, &encodedBytes) !=
+      ncclInvalidArgument) {
+    fprintf(stderr, "malformed size query was not rejected\n");
+    plugin->destroyConfig(config);
+    return 1;
+  }
+  sizeQuery.structSize = sizeof(cocclCompressorSizeQuery);
+  cocclCompressorSizeQuery invalidShape = sizeQuery;
+  invalidShape.chunks = 3;
+  if (plugin->getEncodedSizeBound(&invalidShape, &encodedBytes) !=
+      ncclInvalidArgument) {
+    fprintf(stderr, "non-divisible size query was not rejected\n");
+    plugin->destroyConfig(config);
+    return 1;
+  }
+  invalidShape = sizeQuery;
+  invalidShape.elements = SIZE_MAX;
+  invalidShape.datatype = ncclFloat64;
+  if (plugin->getEncodedSizeBound(&invalidShape, &encodedBytes) !=
+      ncclInvalidArgument) {
+    fprintf(stderr, "overflowing size query was not rejected\n");
+    plugin->destroyConfig(config);
+    return 1;
+  }
 
   FakeHost host;
   cocclCompressorExecutionContext execution = {
@@ -282,6 +363,18 @@ int testOptionalResources() {
   if (noResourceResult != ncclSuccess || host.scratchCalls != 1 ||
       host.persistentCalls != 1 || host.stateCalls != 1) {
     fprintf(stderr, "unused SDK resources were allocated\n");
+    return 1;
+  }
+
+  const cocclCompressorPlugin* zeroPlugin =
+      coccl::detail::PluginAdapter<ZeroEstimateCompressor>::descriptor(
+          "zero");
+  sizeQuery.config = nullptr;
+  encodedBytes = 1;
+  if (zeroPlugin->getEncodedSizeBound(&sizeQuery, &encodedBytes) !=
+          ncclInvalidArgument ||
+      encodedBytes != 0) {
+    fprintf(stderr, "zero encoded-size bound was not rejected\n");
     return 1;
   }
 
