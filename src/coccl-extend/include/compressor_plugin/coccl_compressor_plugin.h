@@ -94,6 +94,11 @@ class Input {
   size_t elements() const { return view_->elements; }
   size_t chunks() const { return view_->chunks; }
   ncclDataType_t datatype() const { return view_->datatype; }
+  bool framed() const { return view_->frameMetadata != nullptr; }
+  const cocclCompressorFrameMetadata* frameMetadata() const {
+    return view_->frameMetadata;
+  }
+  size_t frameStrideBytes() const { return view_->frameStrideBytes; }
   size_t elementsPerChunk() const {
     return view_->chunks == 0 ? 0 : view_->elements / view_->chunks;
   }
@@ -158,6 +163,15 @@ class Output {
   size_t elements() const { return plannedElements_; }
   size_t chunks() const { return plannedChunks_; }
   ncclDataType_t datatype() const { return plannedDatatype_; }
+  bool framed() const {
+    return view_ != nullptr && view_->frameMetadata != nullptr;
+  }
+  cocclCompressorFrameMetadata* frameMetadata() const {
+    return view_ == nullptr ? nullptr : view_->frameMetadata;
+  }
+  size_t frameStrideBytes() const {
+    return view_ == nullptr ? 0 : view_->frameStrideBytes;
+  }
 
   template <typename T>
   T* dataAs() const {
@@ -203,6 +217,17 @@ class Output {
 
   Status commitBytes(size_t bytes, size_t chunks) {
     return commit(bytes, ncclInt8, chunks);
+  }
+
+  Status commitFrames() {
+    size_t bytes = 0;
+    if (view_ == nullptr || view_->frameMetadata == nullptr ||
+        view_->frameStrideBytes == 0 || plannedChunks_ == 0 ||
+        !checkedMultiply(view_->frameStrideBytes, plannedChunks_, &bytes) ||
+        bytes > view_->capacityBytes) {
+      return ncclInvalidArgument;
+    }
+    return commit(bytes, ncclInt8, plannedChunks_);
   }
 
   bool committed() const { return committed_; }
@@ -586,6 +611,16 @@ struct HasEncodedSizeBound<
         std::declval<const Shape&>(), std::declval<size_t*>(),
         std::declval<const SizeContext&>()))>> : std::true_type {};
 
+template <typename Compressor, typename = void>
+struct FramedTraits {
+  static constexpr bool value = false;
+};
+
+template <typename Compressor>
+struct FramedTraits<Compressor, VoidT<decltype(Compressor::kFramed)>> {
+  static constexpr bool value = Compressor::kFramed;
+};
+
 template <typename Compressor>
 struct PluginAdapter {
   using Config = typename ConfigTraits<Compressor>::Type;
@@ -603,7 +638,9 @@ struct PluginAdapter {
         (HasDecompressReduce<Compressor>::value
              ? cocclCompressorCapabilityDecompressReduce : 0) |
         (HasDecompressReduceCompress<Compressor>::value
-             ? cocclCompressorCapabilityDecompressReduceCompress : 0);
+             ? cocclCompressorCapabilityDecompressReduceCompress : 0) |
+        (FramedTraits<Compressor>::value
+             ? cocclCompressorCapabilityFramed : 0);
   }
 
   static Status execute(cocclCompressorCall* call) {
@@ -615,6 +652,25 @@ struct PluginAdapter {
         call->output->elements % call->output->chunks != 0 ||
         call->execution == nullptr ||
         call->execution->structSize != sizeof(*call->execution)) {
+      return ncclInvalidArgument;
+    }
+    const bool inputFramed = call->input.frameMetadata != nullptr;
+    const bool outputFramed = call->output->frameMetadata != nullptr;
+    if (inputFramed != (call->input.frameStrideBytes != 0) ||
+        outputFramed != (call->output->frameStrideBytes != 0)) {
+      return ncclInvalidArgument;
+    }
+    const bool encodedInput =
+        call->operation != cocclCompressorOperationCompress;
+    const bool encodedOutput =
+        call->operation == cocclCompressorOperationCompress ||
+        call->operation ==
+            cocclCompressorOperationDecompressReduceCompress;
+    if (FramedTraits<Compressor>::value) {
+      if (inputFramed != encodedInput || outputFramed != encodedOutput) {
+        return ncclInvalidArgument;
+      }
+    } else if (inputFramed || outputFramed) {
       return ncclInvalidArgument;
     }
     Input input(call->input);
@@ -638,10 +694,6 @@ struct PluginAdapter {
         return ncclInvalidArgument;
     }
     if (result != ncclSuccess) return result;
-    const bool encodedOutput =
-        call->operation == cocclCompressorOperationCompress ||
-        call->operation ==
-            cocclCompressorOperationDecompressReduceCompress;
     if (encodedOutput) return output.committed() ? ncclSuccess
                                                   : ncclInvalidUsage;
     return output.committed() ? ncclSuccess : output.commitPlanned();

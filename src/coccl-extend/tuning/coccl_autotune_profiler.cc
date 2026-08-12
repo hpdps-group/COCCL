@@ -323,6 +323,7 @@ bool runCompressorIteration(
     ncclComm_t measurementComm, const cocclCompressorHandle& compressor,
     void* rawBuffer, void* compressedStorage, size_t bytes,
     size_t compressedCapacity, cudaStream_t stream,
+    cocclCompressorFrameMetadata* frameMetadata,
     size_t* compressedBytes) {
   if (!compressor || compressedBytes == nullptr ||
       bytes % sizeof(float) != 0) {
@@ -332,7 +333,8 @@ bool runCompressorIteration(
   const cocclCompressorDataView input = {
       rawBuffer, bytes, elementCount, 1, ncclFloat32};
   cocclCompressorOutputView compressed = {
-      compressedStorage, compressedCapacity, 0, 0, 1, ncclInt8};
+      compressedStorage, compressedCapacity, 0, 0, 1, ncclInt8,
+      frameMetadata, frameMetadata == nullptr ? 0 : bytes};
   if (ncclCompress(compressor, input, &compressed, measurementComm->rank,
                    stream) != ncclSuccess) {
     return false;
@@ -344,7 +346,8 @@ bool runCompressorIteration(
   // safely overwrite the raw scratch after compression has consumed it.
   const cocclCompressorDataView compressedInput = {
       compressed.data, compressed.bytes, compressed.elements,
-      compressed.chunks, compressed.datatype};
+      compressed.chunks, compressed.datatype, compressed.frameMetadata,
+      compressed.frameStrideBytes};
   cocclCompressorOutputView decompressed = {
       rawBuffer, bytes, 0, elementCount, 1, ncclFloat32};
   return ncclDecompress(compressor, compressedInput, &decompressed,
@@ -362,6 +365,8 @@ ncclResult_t profileCompressor(
   ncclResult_t ret = ncclSuccess;
   void* rawBuffer = nullptr;
   void* compressedBuffer = nullptr;
+  cocclCompressorFrameMetadata* deviceFrameMetadata = nullptr;
+  cocclCompressorFrameMetadata* hostFrameMetadata = nullptr;
   void* config = nullptr;
   cocclCompressorHandle compressorHandle;
   cudaStream_t stream = nullptr;
@@ -373,6 +378,7 @@ ncclResult_t profileCompressor(
   std::vector<cocclAutotuneProfilePoint> points;
   std::vector<double> ratios;
   size_t compressedCapacity = 0;
+  bool framed = false;
 
   // Profiling intentionally uses the plugin's intrinsic defaults rather than
   // any operation-specific policy stored in the TOML configuration.
@@ -391,6 +397,8 @@ ncclResult_t profileCompressor(
           measurementComm, compressor, config, &compressorHandle),
       ret, fail);
   config = nullptr;
+  framed = cocclCompressorSupports(
+      compressorHandle, cocclCompressorCapabilityFramed);
 
   CUDACHECKGOTO(cudaSetDevice(measurementComm->cudaDev), ret, fail);
   CUDACHECKGOTO(cudaMalloc(&rawBuffer, sampleSizes.back()), ret, fail);
@@ -401,6 +409,17 @@ ncclResult_t profileCompressor(
   compressedCapacity = sampleSizes.back() * 2;
   CUDACHECKGOTO(
       cudaMalloc(&compressedBuffer, compressedCapacity), ret, fail);
+  if (framed) {
+    CUDACHECKGOTO(cudaMalloc(
+                      &deviceFrameMetadata,
+                      sizeof(cocclCompressorFrameMetadata)),
+                  ret, fail);
+    CUDACHECKGOTO(cudaHostAlloc(
+                      &hostFrameMetadata,
+                      sizeof(cocclCompressorFrameMetadata),
+                      cudaHostAllocDefault),
+                  ret, fail);
+  }
   CUDACHECKGOTO(
       cudaStreamCreateWithFlags(&stream, cudaStreamNonBlocking), ret, fail);
   CUDACHECKGOTO(cudaEventCreate(&start), ret, fail);
@@ -418,7 +437,8 @@ ncclResult_t profileCompressor(
       }
       valid = runCompressorIteration(
           measurementComm, compressorHandle, rawBuffer, compressedBuffer,
-          bytes, compressedCapacity, stream, &compressedBytes);
+          bytes, compressedCapacity, stream, deviceFrameMetadata,
+          &compressedBytes);
     }
     if (valid && cudaStreamSynchronize(stream) != cudaSuccess) valid = false;
 
@@ -434,7 +454,8 @@ ncclResult_t profileCompressor(
       }
       valid = runCompressorIteration(
           measurementComm, compressorHandle, rawBuffer, compressedBuffer,
-          bytes, compressedCapacity, stream, &compressedBytes);
+          bytes, compressedCapacity, stream, deviceFrameMetadata,
+          &compressedBytes);
       if (!valid || cudaEventRecord(stop, stream) != cudaSuccess ||
           cudaEventSynchronize(stop) != cudaSuccess) {
         valid = false;
@@ -446,6 +467,21 @@ ncclResult_t profileCompressor(
         break;
       }
       times.push_back((double)elapsedMs * 1000.0);
+    }
+    if (valid && framed) {
+      if (cudaMemcpy(hostFrameMetadata, deviceFrameMetadata,
+                     sizeof(cocclCompressorFrameMetadata),
+                     cudaMemcpyDeviceToHost) != cudaSuccess ||
+          hostFrameMetadata->payloadBytes == 0 ||
+          hostFrameMetadata->payloadBytes > bytes ||
+          hostFrameMetadata->reserved != 0 ||
+          (hostFrameMetadata->encoding != cocclCompressorFrameEncoded &&
+           !(hostFrameMetadata->encoding == cocclCompressorFrameRaw &&
+             hostFrameMetadata->payloadBytes == bytes))) {
+        valid = false;
+      } else {
+        compressedBytes = (size_t)hostFrameMetadata->payloadBytes;
+      }
     }
     if (valid && !times.empty() && compressedBytes > 0) {
       local.timeUs = median(std::move(times));
@@ -472,6 +508,8 @@ exit:
   if (start != nullptr) (void)cudaEventDestroy(start);
   if (stream != nullptr) (void)cudaStreamDestroy(stream);
   if (compressedBuffer != nullptr) (void)cudaFree(compressedBuffer);
+  if (deviceFrameMetadata != nullptr) (void)cudaFree(deviceFrameMetadata);
+  if (hostFrameMetadata != nullptr) (void)cudaFreeHost(hostFrameMetadata);
   if (rawBuffer != nullptr) (void)cudaFree(rawBuffer);
   if (config != nullptr) compressor->destroyConfig(config);
   return ret;

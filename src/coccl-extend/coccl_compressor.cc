@@ -349,6 +349,34 @@ ncclResult_t validateExecution(const cocclCompressorHandle& handle,
       input.chunks == 0 || input.elements % input.chunks != 0) {
     return ncclInvalidArgument;
   }
+  *state = handle.state.get();
+  const uint64_t capability = capabilityForOperation(operation);
+  if ((*state)->compressor == nullptr || capability == 0 ||
+      (((*state)->compressor->capabilities & capability) == 0)) {
+    return ncclInvalidUsage;
+  }
+
+  const bool compressorFramed =
+      ((*state)->compressor->capabilities &
+       cocclCompressorCapabilityFramed) != 0;
+  const bool inputFramed = input.frameMetadata != nullptr;
+  const bool outputFramed = output->frameMetadata != nullptr;
+  if (inputFramed != (input.frameStrideBytes != 0) ||
+      outputFramed != (output->frameStrideBytes != 0)) {
+    return ncclInvalidArgument;
+  }
+  const bool encodedInput = operation != cocclCompressorOperationCompress;
+  const bool encodedOutput =
+      operation == cocclCompressorOperationCompress ||
+      operation == cocclCompressorOperationDecompressReduceCompress;
+  if (compressorFramed) {
+    if (inputFramed != encodedInput || outputFramed != encodedOutput) {
+      return ncclInvalidArgument;
+    }
+  } else if (inputFramed || outputFramed) {
+    return ncclInvalidArgument;
+  }
+
   const size_t inputTypeBytes = typeSize(input.datatype);
   size_t expectedInputBytes = 0;
   if (inputTypeBytes == 0 ||
@@ -357,18 +385,32 @@ ncclResult_t validateExecution(const cocclCompressorHandle& handle,
       expectedInputBytes != input.bytes) {
     return ncclInvalidArgument;
   }
-  *state = handle.state.get();
-  const uint64_t capability = capabilityForOperation(operation);
-  if ((*state)->compressor == nullptr || capability == 0 ||
-      (((*state)->compressor->capabilities & capability) == 0)) {
-    return ncclInvalidUsage;
+  if (inputFramed) {
+    size_t framedBytes = 0;
+    if (input.datatype != ncclInt8 || input.elements != input.bytes ||
+        !checkedMultiply(input.frameStrideBytes, input.chunks, &framedBytes) ||
+        framedBytes != input.bytes) {
+      return ncclInvalidArgument;
+    }
+  }
+  if (outputFramed) {
+    size_t framedCapacity = 0;
+    if (!checkedMultiply(output->frameStrideBytes, output->chunks,
+                         &framedCapacity) ||
+        framedCapacity == 0 || framedCapacity > output->capacityBytes) {
+      return ncclInvalidArgument;
+    }
   }
   return ncclSuccess;
 }
 
 ncclResult_t validateOutput(void* expectedData,
+                            cocclCompressorFrameMetadata* expectedMetadata,
+                            size_t expectedFrameStride,
                             const cocclCompressorOutputView* output) {
   if (output == nullptr || output->data != expectedData ||
+      output->frameMetadata != expectedMetadata ||
+      output->frameStrideBytes != expectedFrameStride ||
       output->bytes > output->capacityBytes || output->chunks == 0 ||
       output->elements % output->chunks != 0) {
     return ncclInvalidArgument;
@@ -378,6 +420,16 @@ ncclResult_t validateOutput(void* expectedData,
   if (outputTypeBytes == 0 ||
       !checkedMultiply(output->elements, outputTypeBytes, &expectedBytes) ||
       expectedBytes != output->bytes) {
+    return ncclInvalidArgument;
+  }
+  if (expectedMetadata != nullptr) {
+    size_t framedBytes = 0;
+    if (output->datatype != ncclInt8 || output->elements != output->bytes ||
+        !checkedMultiply(expectedFrameStride, output->chunks, &framedBytes) ||
+        framedBytes != output->bytes) {
+      return ncclInvalidArgument;
+    }
+  } else if (expectedFrameStride != 0) {
     return ncclInvalidArgument;
   }
   return ncclSuccess;
@@ -477,6 +529,8 @@ ncclResult_t cocclExecuteCompressor(
   }
 
   void* expectedData = output->data;
+  cocclCompressorFrameMetadata* expectedMetadata = output->frameMetadata;
+  const size_t expectedFrameStride = output->frameStrideBytes;
   cocclCompressorInvocation invocation = {state, stream};
   cocclCompressorExecutionContext execution = {
       sizeof(cocclCompressorExecutionContext),
@@ -496,5 +550,8 @@ ncclResult_t cocclExecuteCompressor(
   };
   ncclResult_t ret = finishInvocation(
       &invocation, state->compressor->execute(&call));
-  return ret == ncclSuccess ? validateOutput(expectedData, output) : ret;
+  return ret == ncclSuccess
+      ? validateOutput(expectedData, expectedMetadata, expectedFrameStride,
+                       output)
+      : ret;
 }

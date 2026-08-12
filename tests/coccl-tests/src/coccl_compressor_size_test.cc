@@ -178,6 +178,54 @@ int testZfp(const char* directory) {
   return result;
 }
 
+int testDietGpu(const char* directory) {
+  LoadedPlugin plugin;
+  if (loadPlugin(directory, "dietgpu", &plugin)) return 1;
+  if ((plugin.descriptor->capabilities &
+       cocclCompressorCapabilityFramed) == 0 ||
+      (plugin.descriptor->capabilities &
+       cocclCompressorCapabilityDecompressReduce) != 0 ||
+      (plugin.descriptor->capabilities &
+       cocclCompressorCapabilityDecompressReduceCompress) != 0) {
+    fprintf(stderr, "dietgpu: framed capability set is invalid\n");
+    dlclose(plugin.library);
+    return 1;
+  }
+  const cocclConfigPair pairs[] = {{"probBits", "10"}};
+  void* config = nullptr;
+  int result = parseConfig(plugin, pairs, 1, &config);
+  if (result == 0) {
+    result = queryBound(
+        plugin, config, cocclCompressorOperationCompress,
+        1024, 2, ncclFloat32, ncclSuccess, 4096);
+  }
+  if (result == 0) {
+    result = queryBound(
+        plugin, config,
+        cocclCompressorOperationDecompressReduceCompress,
+        1024, 2, ncclFloat32, ncclInvalidUsage, 0);
+  }
+  if (config != nullptr) plugin.descriptor->destroyConfig(config);
+
+  const cocclConfigPair invalidPairs[] = {{"probBits", "8"}};
+  config = nullptr;
+  if (result == 0) {
+    const cocclConfigView values = {invalidPairs, 1};
+    const cocclCompressorConfigContext context = {
+        cocclCompressorConfigDefault, 2, 8};
+    char error[160] = {};
+    if (plugin.descriptor->parseConfig(
+            &values, &context, &config, error, sizeof(error)) !=
+        ncclInvalidArgument) {
+      fprintf(stderr, "dietgpu: invalid probBits was accepted\n");
+      result = 1;
+    }
+  }
+  if (config != nullptr) plugin.descriptor->destroyConfig(config);
+  dlclose(plugin.library);
+  return result;
+}
+
 }  // namespace
 
 int main(int argc, char** argv) {
@@ -187,7 +235,8 @@ int main(int argc, char** argv) {
   }
   if (testQuantizedPlugin(argv[1], "sdp4bit", false) ||
       testQuantizedPlugin(argv[1], "tahquant", true) ||
-      testTaco(argv[1]) || testZfp(argv[1])) {
+      testTaco(argv[1]) || testZfp(argv[1]) ||
+      testDietGpu(argv[1])) {
     return 1;
   }
   printf("COCCL compressor size-bound tests passed\n");

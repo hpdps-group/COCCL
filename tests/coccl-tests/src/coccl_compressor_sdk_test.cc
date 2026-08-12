@@ -100,6 +100,20 @@ struct ZeroEstimateCompressor {
   }
 };
 
+struct FramedCompressor {
+  static constexpr bool kFramed = true;
+
+  static coccl::Status compress(const coccl::Input&, coccl::Output& output,
+                                coccl::Context&) {
+    return output.commitFrames();
+  }
+
+  static coccl::Status decompress(const coccl::Input&, coccl::Output&,
+                                  coccl::Context&) {
+    return ncclSuccess;
+  }
+};
+
 struct FakeHost {
   unsigned char scratch[64] = {};
   unsigned char persistent[128] = {};
@@ -175,12 +189,19 @@ int testMinimalPlugin() {
   }
 
   cocclCompressorPlugin incompatible = *plugin;
-  incompatible.abiVersion = 5;
-  if (cocclValidateCompressorPlugin("minimal", &incompatible, error,
-                                    sizeof(error)) ||
-      strstr(error, "ABI v5") == nullptr) {
-    fprintf(stderr, "ABI mismatch was not rejected\n");
-    return 1;
+  const uint32_t legacyVersions[] = {5u, 6u};
+  for (uint32_t legacyVersion : legacyVersions) {
+    incompatible = *plugin;
+    incompatible.abiVersion = legacyVersion;
+    char expected[16] = {};
+    snprintf(expected, sizeof(expected), "ABI v%u", legacyVersion);
+    if (cocclValidateCompressorPlugin("minimal", &incompatible, error,
+                                      sizeof(error)) ||
+        strstr(error, expected) == nullptr) {
+      fprintf(stderr, "ABI v%u mismatch was not rejected\n",
+              legacyVersion);
+      return 1;
+    }
   }
 
   incompatible = *plugin;
@@ -221,6 +242,72 @@ int testMinimalPlugin() {
           ncclInvalidUsage ||
       encodedBytes != 0) {
     fprintf(stderr, "missing estimator did not report unavailable\n");
+    return 1;
+  }
+  return 0;
+}
+
+int testFramedPlugin() {
+  const cocclCompressorPlugin* plugin =
+      coccl::detail::PluginAdapter<FramedCompressor>::descriptor("framed");
+  if ((plugin->capabilities & cocclCompressorCapabilityFramed) == 0 ||
+      sizeof(cocclCompressorFrameMetadata) != 16) {
+    fprintf(stderr, "framed capability or metadata layout is invalid\n");
+    return 1;
+  }
+
+  cocclCompressorExecutionContext execution = {
+      sizeof(cocclCompressorExecutionContext), nullptr, nullptr,
+      nullptr, 0, 0, 1, 1, 1};
+  unsigned char raw[32] = {};
+  unsigned char encoded[32] = {};
+  cocclCompressorFrameMetadata metadata[2] = {};
+  cocclCompressorOutputView compressed = {
+      encoded, sizeof(encoded), 0, 0, 2, ncclInt8, metadata, 16};
+  cocclCompressorCall compressCall = {
+      sizeof(cocclCompressorCall),
+      cocclCompressorOperationCompress,
+      {raw, sizeof(raw), 8, 2, ncclFloat32, nullptr, 0},
+      &compressed,
+      0,
+      0,
+      ncclFloat32,
+      8,
+      nullptr,
+      &execution,
+  };
+  if (plugin->execute(&compressCall) != ncclSuccess ||
+      compressed.bytes != sizeof(encoded) ||
+      compressed.elements != sizeof(encoded) ||
+      compressed.datatype != ncclInt8 || compressed.chunks != 2) {
+    fprintf(stderr, "framed output commit failed\n");
+    return 1;
+  }
+
+  cocclCompressorOutputView decompressed = {
+      raw, sizeof(raw), 0, 8, 2, ncclFloat32, nullptr, 0};
+  cocclCompressorCall decompressCall = {
+      sizeof(cocclCompressorCall),
+      cocclCompressorOperationDecompress,
+      {encoded, sizeof(encoded), sizeof(encoded), 2, ncclInt8,
+       metadata, 16},
+      &decompressed,
+      0,
+      0,
+      ncclFloat32,
+      8,
+      nullptr,
+      &execution,
+  };
+  if (plugin->execute(&decompressCall) != ncclSuccess ||
+      decompressed.bytes != sizeof(raw)) {
+    fprintf(stderr, "framed input dispatch failed\n");
+    return 1;
+  }
+
+  compressCall.output->frameMetadata = nullptr;
+  if (plugin->execute(&compressCall) != ncclInvalidArgument) {
+    fprintf(stderr, "missing framed output metadata was accepted\n");
     return 1;
   }
   return 0;
@@ -396,7 +483,7 @@ COCCL_REGISTER_COMPRESSOR("minimal", MinimalCompressor);
 
 int main() {
   if (testMinimalPlugin() || testPassthroughMetadata() ||
-      testOptionalResources()) {
+      testOptionalResources() || testFramedPlugin()) {
     return 1;
   }
   printf("COCCL compressor SDK tests passed\n");

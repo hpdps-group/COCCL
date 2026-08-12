@@ -1,6 +1,7 @@
 #include "primitives/coccl_primitives_internal.h"
 
 #include "group.h"
+#include "pipeline/coccl_frame_exchange.h"
 #include "training/coccl_training_assist.h"
 
 #include <limits.h>
@@ -32,6 +33,15 @@ __thread compMeta_t* hCompRecvMeta = nullptr;
 __thread compMeta_t* dCompRecvMeta = nullptr;
 __thread compMeta_t* hCompBWDRecvMeta = nullptr;
 __thread compMeta_t* dCompBWDRecvMeta = nullptr;
+
+__thread cocclCompressorFrameMetadata* hFrameSendMeta = nullptr;
+__thread cocclCompressorFrameMetadata* dFrameSendMeta = nullptr;
+__thread cocclCompressorFrameMetadata* hFrameBWDSendMeta = nullptr;
+__thread cocclCompressorFrameMetadata* dFrameBWDSendMeta = nullptr;
+__thread cocclCompressorFrameMetadata* hFrameRecvMeta = nullptr;
+__thread cocclCompressorFrameMetadata* dFrameRecvMeta = nullptr;
+__thread cocclCompressorFrameMetadata* hFrameBWDRecvMeta = nullptr;
+__thread cocclCompressorFrameMetadata* dFrameBWDRecvMeta = nullptr;
 
 namespace {
 
@@ -76,6 +86,31 @@ ncclResult_t cocclEnsureSendRecvMeta(compMeta_t** hostMeta,
   return ncclSuccess;
 }
 
+ncclResult_t cocclEnsureSendRecvFrameMeta(
+    cocclCompressorFrameMetadata** hostMeta,
+    cocclCompressorFrameMetadata** deviceMeta) {
+  if (hostMeta == nullptr || deviceMeta == nullptr) {
+    return ncclInvalidArgument;
+  }
+  if (*hostMeta == nullptr) {
+    CUDACHECK(cudaHostAlloc(
+        (void**)hostMeta, sizeof(cocclCompressorFrameMetadata),
+        cudaHostAllocDefault));
+    CUDACHECK(cudaMalloc(
+        (void**)deviceMeta, sizeof(cocclCompressorFrameMetadata)));
+  }
+  return ncclSuccess;
+}
+
+bool cocclValidSendRecvFrame(
+    const cocclCompressorFrameMetadata& metadata, size_t slotBytes) {
+  return metadata.payloadBytes > 0 && metadata.payloadBytes <= slotBytes &&
+      metadata.reserved == 0 &&
+      (metadata.encoding == cocclCompressorFrameEncoded ||
+       (metadata.encoding == cocclCompressorFrameRaw &&
+        metadata.payloadBytes == slotBytes));
+}
+
 bool cocclSendRecvForward(const cocclInfo& args) {
   return args.func == ncclFuncSend
       ? args.comm->rank < args.peer
@@ -87,6 +122,111 @@ cocclPolicyKey cocclDirectSendRecvPolicy(const cocclInfo& args) {
       ? cocclDirectionalPolicy(cocclOperation::SendRecv,
                                cocclSendRecvForward(args))
       : cocclDefaultPolicy(cocclOperation::SendRecv);
+}
+
+ncclResult_t cocclRunFramedSend(
+    const cocclPreparedCall* prepared, ncclComm_t sendComm,
+    cudaStream_t sendStream, size_t rawBytes,
+    cocclCompressorFrameMetadata** hostMetadata,
+    cocclCompressorFrameMetadata** deviceMetadata) {
+  const cocclInfo& args = prepared->info;
+  NCCLCHECK(cocclEnsureSendRecvFrameMeta(hostMetadata, deviceMetadata));
+
+  ncclResult_t ret = ncclSuccess;
+  cocclBufferHandle sendBuffer = {};
+  NCCLCHECKGOTO(cocclGetBufferForComm(
+                    args.comm, sendComm, rawBytes, &sendBuffer),
+                ret, exit);
+  {
+    const cocclCompressorDataView input = {
+        args.sendbuff, rawBytes, args.count, 1, args.datatype, nullptr, 0};
+    cocclCompressorOutputView output = {
+        sendBuffer.ptr, rawBytes, 0, 0, 1, ncclInt8,
+        *deviceMetadata, rawBytes};
+    NCCLCHECKGOTO(ncclCompress(
+                      prepared->compressor, input, &output,
+                      args.comm->rank, sendStream),
+                  ret, exit);
+    NCCLCHECKGOTO(
+        ncclSendNaive(*deviceMetadata,
+                      sizeof(cocclCompressorFrameMetadata), ncclInt8,
+                      args.peer, sendComm, sendStream),
+        ret, exit);
+    CUDACHECKGOTO(cudaMemcpyAsync(
+                      *hostMetadata, *deviceMetadata,
+                      sizeof(cocclCompressorFrameMetadata),
+                      cudaMemcpyDeviceToHost, sendStream),
+                  ret, exit);
+    CUDACHECKGOTO(cudaStreamSynchronize(sendStream), ret, exit);
+    if (!cocclValidSendRecvFrame(**hostMetadata, rawBytes)) {
+      ret = ncclInvalidUsage;
+      goto exit;
+    }
+    const cocclFrameExchange exchange = {
+        args.peer, output.data, nullptr,
+        (size_t)(*hostMetadata)->payloadBytes, 0, rawBytes};
+    NCCLCHECKGOTO(cocclCommitFrameExchange(
+                      &exchange, 1, sendComm, sendStream),
+                  ret, exit);
+  }
+
+exit:
+  if (sendBuffer.ptr != nullptr) {
+    const ncclResult_t releaseResult =
+        cocclReleaseBuffer(&sendBuffer, sendStream);
+    if (ret == ncclSuccess) ret = releaseResult;
+  }
+  return ret;
+}
+
+ncclResult_t cocclRunFramedRecv(
+    const cocclPreparedCall* prepared, ncclComm_t recvComm,
+    cudaStream_t recvStream, size_t rawBytes,
+    cocclCompressorFrameMetadata** hostMetadata,
+    cocclCompressorFrameMetadata** deviceMetadata) {
+  const cocclInfo& args = prepared->info;
+  NCCLCHECK(cocclEnsureSendRecvFrameMeta(hostMetadata, deviceMetadata));
+  NCCLCHECK(ncclRecvNaive(
+      *deviceMetadata, sizeof(cocclCompressorFrameMetadata), ncclInt8,
+      args.peer, recvComm, recvStream));
+  CUDACHECK(cudaMemcpyAsync(
+      *hostMetadata, *deviceMetadata, sizeof(cocclCompressorFrameMetadata),
+      cudaMemcpyDeviceToHost, recvStream));
+  CUDACHECK(cudaStreamSynchronize(recvStream));
+  if (!cocclValidSendRecvFrame(**hostMetadata, rawBytes)) {
+    return ncclInvalidUsage;
+  }
+
+  ncclResult_t ret = ncclSuccess;
+  cocclBufferHandle recvBuffer = {};
+  NCCLCHECKGOTO(cocclGetBufferForComm(
+                    args.comm, recvComm, rawBytes, &recvBuffer),
+                ret, exit);
+  {
+    const cocclFrameExchange exchange = {
+        args.peer, nullptr, recvBuffer.ptr, 0,
+        (size_t)(*hostMetadata)->payloadBytes, rawBytes};
+    NCCLCHECKGOTO(cocclCommitFrameExchange(
+                      &exchange, 1, recvComm, recvStream),
+                  ret, exit);
+    const cocclCompressorDataView input = {
+        recvBuffer.ptr, rawBytes, rawBytes, 1, ncclInt8,
+        *deviceMetadata, rawBytes};
+    cocclCompressorOutputView output = {
+        args.recvbuff, rawBytes, 0, args.count, 1, args.datatype,
+        nullptr, 0};
+    NCCLCHECKGOTO(ncclDecompress(
+                      prepared->compressor, input, &output, recvStream),
+                  ret, exit);
+  }
+
+exit:
+  if (recvBuffer.ptr != nullptr) {
+    const ncclResult_t releaseResult =
+        cocclReleaseBuffer(&recvBuffer, recvStream);
+    if (ret == ncclSuccess) ret = releaseResult;
+  }
+  return ret;
 }
 
 ncclResult_t cocclRunSend(const cocclPreparedCall* prepared) {
@@ -107,11 +247,9 @@ ncclResult_t cocclRunSend(const cocclPreparedCall* prepared) {
                                     cudaHostAllocWriteCombined));
 
   size_t rawBytes = 0;
-  if (!cocclSendRecvBytes(args.count, args.datatype, &rawBytes) ||
-      rawBytes > SIZE_MAX / 2) {
+  if (!cocclSendRecvBytes(args.count, args.datatype, &rawBytes)) {
     return ncclInvalidArgument;
   }
-  const size_t capacity = 2 * rawBytes;
   ncclComm_t sendComm = forward ? fwdComm : bwdComm;
   cudaStream_t sendStream = forward ? fwdStream : bwdStream;
 
@@ -120,6 +258,18 @@ ncclResult_t cocclRunSend(const cocclPreparedCall* prepared) {
   }
   CUDACHECK(cudaEventRecord(mEvent, args.stream));
   CUDACHECK(cudaStreamWaitEvent(sendStream, mEvent, 0));
+
+  if (cocclCompressorSupports(
+          prepared->compressor, cocclCompressorCapabilityFramed)) {
+    cocclCompressorFrameMetadata** hFrameMeta = forward
+        ? &hFrameSendMeta : &hFrameBWDSendMeta;
+    cocclCompressorFrameMetadata** dFrameMeta = forward
+        ? &dFrameSendMeta : &dFrameBWDSendMeta;
+    return cocclRunFramedSend(
+        prepared, sendComm, sendStream, rawBytes, hFrameMeta, dFrameMeta);
+  }
+  if (rawBytes > SIZE_MAX / 2) return ncclInvalidArgument;
+  const size_t capacity = 2 * rawBytes;
 
   cocclBufferHandle sendBuffer = {};
   NCCLCHECK(cocclGetBufferForComm(args.comm, sendComm, capacity,
@@ -162,6 +312,23 @@ ncclResult_t cocclRunRecv(const cocclPreparedCall* prepared) {
   ncclComm_t recvComm = forward ? fwdComm : bwdComm;
   cudaStream_t recvStream = forward ? fwdStream : bwdStream;
   cudaEvent_t recvEvent = forward ? fwdEvent : bwdEvent;
+
+  if (cocclCompressorSupports(
+          prepared->compressor, cocclCompressorCapabilityFramed)) {
+    size_t rawBytes = 0;
+    if (!cocclSendRecvBytes(args.count, args.datatype, &rawBytes)) {
+      return ncclInvalidArgument;
+    }
+    cocclCompressorFrameMetadata** hFrameMeta = forward
+        ? &hFrameRecvMeta : &hFrameBWDRecvMeta;
+    cocclCompressorFrameMetadata** dFrameMeta = forward
+        ? &dFrameRecvMeta : &dFrameBWDRecvMeta;
+    NCCLCHECK(cocclRunFramedRecv(
+        prepared, recvComm, recvStream, rawBytes, hFrameMeta, dFrameMeta));
+    CUDACHECK(cudaEventRecord(recvEvent, recvStream));
+    CUDACHECK(cudaStreamWaitEvent(args.stream, recvEvent, 0));
+    return ncclSuccess;
+  }
 
   NCCLCHECK(ncclRecvNaive(*dMeta, sizeof(compMeta_t), ncclInt8, args.peer,
                           recvComm, recvStream));

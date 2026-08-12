@@ -94,7 +94,9 @@ ncclResult_t ncclCompress(
   NCCLCHECK(cocclExecuteCompressor(
       compressor, cocclCompressorOperationCompress, input, output, rank, 0,
       ncclInt8, 0, stream));
-  return output->bytes > input.bytes
+  return !cocclCompressorSupports(
+             compressor, cocclCompressorCapabilityFramed) &&
+          output->bytes > input.bytes
       ? copyInputAsRawPassthrough(input, output, stream)
       : ncclSuccess;
 }

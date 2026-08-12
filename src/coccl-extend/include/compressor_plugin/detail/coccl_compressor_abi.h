@@ -10,7 +10,7 @@
 
 // This is the only contract crossing the compressor shared-library boundary.
 // Keep it POD-only: the public C++ SDK adapts user code to these structures.
-constexpr uint32_t COCCL_COMPRESSOR_ABI_VERSION = 6;
+constexpr uint32_t COCCL_COMPRESSOR_ABI_VERSION = 7;
 constexpr uint32_t COCCL_COMPRESSOR_HOST_API_VERSION = 3;
 constexpr const char* COCCL_COMPRESSOR_ENTRY_SYMBOL =
     "cocclGetCompressorPlugin";
@@ -31,6 +31,7 @@ enum cocclCompressorCapability : uint64_t {
   cocclCompressorCapabilityDecompress = 1ULL << 1,
   cocclCompressorCapabilityDecompressReduce = 1ULL << 2,
   cocclCompressorCapabilityDecompressReduceCompress = 1ULL << 3,
+  cocclCompressorCapabilityFramed = 1ULL << 4,
 };
 
 constexpr uint64_t COCCL_COMPRESSOR_REQUIRED_CAPABILITIES =
@@ -58,12 +59,31 @@ struct cocclCompressorConfigContext {
   int devicesPerNode;
 };
 
+enum cocclCompressorFrameEncoding : uint32_t {
+  cocclCompressorFrameEncoded = 0,
+  cocclCompressorFrameRaw = 1,
+};
+
+// Framed compressors keep one fixed-capacity payload slot per logical chunk.
+// The actual wire size and the per-frame raw fallback decision stay in device
+// metadata so compression itself remains fully asynchronous.
+struct cocclCompressorFrameMetadata {
+  uint64_t payloadBytes;
+  uint32_t encoding;
+  uint32_t reserved;
+};
+
+static_assert(sizeof(cocclCompressorFrameMetadata) == 16,
+              "compressor frame metadata is a wire contract");
+
 struct cocclCompressorDataView {
   const void* data;
   size_t bytes;
   size_t elements;
   size_t chunks;
   ncclDataType_t datatype;
+  const cocclCompressorFrameMetadata* frameMetadata;
+  size_t frameStrideBytes;
 };
 
 struct cocclCompressorOutputView {
@@ -73,6 +93,8 @@ struct cocclCompressorOutputView {
   size_t elements;
   size_t chunks;
   ncclDataType_t datatype;
+  cocclCompressorFrameMetadata* frameMetadata;
+  size_t frameStrideBytes;
 };
 
 struct cocclCompressorBufferView {

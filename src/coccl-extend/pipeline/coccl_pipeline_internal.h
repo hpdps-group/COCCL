@@ -24,6 +24,10 @@ struct cocclPipelineTempPlan {
   size_t offset;
   size_t logicalBytes;
   size_t bytes;
+  size_t payloadBytes;
+  size_t frameMetadataOffset;
+  size_t frameMetadataBytes;
+  size_t frameStrideBytes;
   cocclPipelineTempStorage storage;
 };
 

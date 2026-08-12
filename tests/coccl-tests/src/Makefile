@@ -71,7 +71,7 @@ endif
 .PHONY: build clean pipeline-layout-test group-deferred-test \
 	training-classifier-test config-reader-test compressor-sdk-test \
 	compressor-size-test autotune-selector-test pipeline-stage-test \
-	pipeline-plan-test
+	pipeline-plan-test frame-exchange-test dietgpu-codec-test
 
 BUILDDIR ?= ../build
 ifneq ($(NCCL_HOME), "")
@@ -117,6 +117,8 @@ COCCL_COMPRESSOR_SIZE_TEST := $(DST_DIR)/coccl_compressor_size_test
 COCCL_AUTOTUNE_SELECTOR_TEST := $(DST_DIR)/coccl_autotune_selector_test
 COCCL_PIPELINE_STAGE_TEST := $(DST_DIR)/coccl_pipeline_stage_test
 COCCL_PIPELINE_PLAN_TEST := $(DST_DIR)/coccl_pipeline_plan_test
+COCCL_FRAME_EXCHANGE_TEST := $(DST_DIR)/coccl_frame_exchange_test
+COCCL_DIETGPU_CODEC_TEST := $(DST_DIR)/coccl_dietgpu_codec_test
 COCCL_PIPELINE_STAGE_SRC := \
 	../../../src/coccl-extend/pipeline/coccl_pipeline_stage.cc
 COCCL_PIPELINE_PLAN_SRC := \
@@ -148,6 +150,8 @@ compressor-size-test: $(COCCL_COMPRESSOR_SIZE_TEST)
 autotune-selector-test: $(COCCL_AUTOTUNE_SELECTOR_TEST)
 pipeline-stage-test: $(COCCL_PIPELINE_STAGE_TEST)
 pipeline-plan-test: $(COCCL_PIPELINE_PLAN_TEST)
+frame-exchange-test: $(COCCL_FRAME_EXCHANGE_TEST)
+dietgpu-codec-test: $(COCCL_DIETGPU_CODEC_TEST)
 
 $(COCCL_GROUP_TEST): coccl_group_deferred_test.cc
 	@printf "Linking  %-35s > %s\n" $< $@
@@ -217,6 +221,22 @@ $(COCCL_PIPELINE_PLAN_TEST): coccl_pipeline_plan_test.cc \
 		-I$(CUDA_INC) -I$(NCCL_HOME)/include -I../../../src/include \
 		-I../../../src/coccl-extend/include -I../../../src/coccl-extend \
 		-o $@ coccl_pipeline_plan_test.cc $(COCCL_PIPELINE_PLAN_SRC)
+
+$(COCCL_FRAME_EXCHANGE_TEST): coccl_frame_exchange_test.cc \
+		../../../src/coccl-extend/pipeline/coccl_frame_exchange.cc
+	@printf "Linking  %-35s > %s\n" $< $@
+	@mkdir -p ${DST_DIR}
+	$(CXX) $(filter-out -std=c++11,$(CXXFLAGS)) -std=c++17 \
+		-I$(CUDA_INC) -I$(NCCL_HOME)/include -I../../../src/include \
+		-I../../../src/coccl-extend/include -o $@ $^
+
+$(COCCL_DIETGPU_CODEC_TEST): coccl_dietgpu_codec_test.cu \
+		$(COCCL_COMPRESSOR_SDK_HEADERS)
+	@printf "Linking  %-35s > %s\n" $< $@
+	@mkdir -p ${DST_DIR}
+	$(NVCC) $(filter-out -std=c++11,$(NVCUFLAGS)) -std=c++17 \
+		-I$(NCCL_HOME)/include -I../../../src/coccl-extend/include \
+		-o $@ $< -ldl -lcudart
 
 $(COCCL_LAYOUT_TEST): coccl_pipeline_layout_test.cu $(COCCL_LAYOUT_SRC)
 	@printf "Linking  %-35s > %s\n" $< $@

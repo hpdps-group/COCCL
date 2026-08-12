@@ -9,6 +9,8 @@ struct cocclPipelinePlannedEdge {
   size_t totalElements;
   ncclDataType_t datatype;
   size_t logicalChunks;
+  bool framed;
+  size_t frameStrideBytes;
 };
 
 bool cocclPipelineBoundaryTemp(const cocclPipelinePlan& plan, int temp) {
@@ -31,6 +33,31 @@ bool cocclValidLogicalPipelinePlan(const cocclPipelinePlan& plan, int depth) {
     const auto& temp = plan.temps[i];
     if (temp.logicalBytes == 0 || temp.bytes < temp.logicalBytes ||
         temp.bytes % kPipelineBufferAlignment != 0) {
+      return false;
+    }
+    if (temp.frameMetadataBytes == 0) {
+      if (temp.frameMetadataOffset != 0 || temp.frameStrideBytes != 0) {
+        return false;
+      }
+      continue;
+    }
+    if (temp.payloadBytes == 0 || temp.frameStrideBytes == 0 ||
+        temp.frameMetadataOffset % kPipelineBufferAlignment != 0 ||
+        temp.frameMetadataOffset < temp.payloadBytes ||
+        temp.frameMetadataOffset > temp.logicalBytes ||
+        temp.frameMetadataBytes >
+            temp.logicalBytes - temp.frameMetadataOffset ||
+        temp.frameMetadataBytes %
+                sizeof(cocclCompressorFrameMetadata) !=
+            0) {
+      return false;
+    }
+    const size_t frames = temp.frameMetadataBytes /
+        sizeof(cocclCompressorFrameMetadata);
+    size_t expectedPayloadBytes = 0;
+    if (!cocclPipelineCheckedMultiply(
+            frames, temp.frameStrideBytes, &expectedPayloadBytes) ||
+        expectedPayloadBytes != temp.payloadBytes) {
       return false;
     }
   }
@@ -145,13 +172,27 @@ bool cocclStageCreatesTemp(cocclPipelineStageKind kind) {
 }
 
 ncclResult_t cocclAssignPipelineTemp(cocclPipelinePlan* plan,
-                                     size_t logicalBytes,
+                                     const cocclPipelinePlannedEdge& edge,
                                      int* assignedTemp) {
-  if (plan == nullptr || assignedTemp == nullptr || logicalBytes == 0 ||
+  if (plan == nullptr || assignedTemp == nullptr || edge.bytes == 0 ||
       plan->tempCount < 0 || plan->tempCount >= kMaxPipelineTemps) {
     return ncclInvalidArgument;
   }
 
+  size_t logicalBytes = edge.bytes;
+  size_t metadataOffset = 0;
+  size_t metadataBytes = 0;
+  if (edge.framed) {
+    if (edge.frameStrideBytes == 0 || edge.logicalChunks == 0 ||
+        !cocclPipelineCheckedMultiply(
+            edge.logicalChunks, sizeof(cocclCompressorFrameMetadata),
+            &metadataBytes) ||
+        !cocclAlignPipelineBytes(edge.bytes, &metadataOffset) ||
+        !cocclPipelineCheckedAdd(metadataOffset, metadataBytes,
+                                 &logicalBytes)) {
+      return ncclInvalidArgument;
+    }
+  }
   size_t capacity = 0;
   if (!cocclAlignPipelineBytes(logicalBytes, &capacity)) {
     return ncclInvalidArgument;
@@ -159,6 +200,10 @@ ncclResult_t cocclAssignPipelineTemp(cocclPipelinePlan* plan,
   const int temp = plan->tempCount++;
   plan->temps[temp].logicalBytes = logicalBytes;
   plan->temps[temp].bytes = capacity;
+  plan->temps[temp].payloadBytes = edge.bytes;
+  plan->temps[temp].frameMetadataOffset = metadataOffset;
+  plan->temps[temp].frameMetadataBytes = metadataBytes;
+  plan->temps[temp].frameStrideBytes = edge.frameStrideBytes;
   *assignedTemp = temp;
   return ncclSuccess;
 }
@@ -176,7 +221,7 @@ ncclResult_t cocclPlanRawPipelineEdge(
       !cocclPipelineCheckedMultiply(context->rawSliceBytes, chunks, &bytes)) {
     return ncclInvalidArgument;
   }
-  *output = {bytes, elements, context->spec->datatype, chunks};
+  *output = {bytes, elements, context->spec->datatype, chunks, false, 0};
   return ncclSuccess;
 }
 
@@ -203,11 +248,23 @@ ncclResult_t cocclPlanPipelineStageOutput(
       stage, input.logicalChunks, &outputChunks));
   switch (stage.kind) {
     case cocclPipelineStageCompress: {
+      const bool framed = cocclCompressorSupports(
+          context->spec->compressor, cocclCompressorCapabilityFramed);
       size_t encodedBytes = 0;
       NCCLCHECK(cocclQueryPipelineEncodedBound(
           context, cocclCompressorOperationCompress, input, &encodedBytes));
-      encodedBytes = encodedBytes < input.bytes ? encodedBytes : input.bytes;
-      *output = {encodedBytes, encodedBytes, ncclInt8, outputChunks};
+      // Variable-length frames retain one raw-sized slot per chunk. The size
+      // query describes wire bytes, not the physical random-access layout.
+      encodedBytes = framed
+          ? input.bytes
+          : (encodedBytes < input.bytes ? encodedBytes : input.bytes);
+      const size_t frameStride = framed ? input.bytes / input.logicalChunks : 0;
+      if (framed && (input.bytes % input.logicalChunks != 0 ||
+                     frameStride == 0)) {
+        return ncclInvalidArgument;
+      }
+      *output = {encodedBytes, encodedBytes, ncclInt8, outputChunks,
+                 framed, frameStride};
       break;
     }
     case cocclPipelineStageAllToAll:
@@ -228,6 +285,8 @@ ncclResult_t cocclPlanPipelineStageOutput(
       }
       output->datatype = input.datatype;
       output->logicalChunks = outputChunks;
+      output->framed = input.framed;
+      output->frameStrideBytes = input.frameStrideBytes;
       break;
     case cocclPipelineStageDecompReduceComp: {
       cocclPipelinePlannedEdge rawOutput = {};
@@ -251,7 +310,17 @@ ncclResult_t cocclPlanPipelineStageOutput(
           plannedBytes = fusedBytes;
         }
       }
-      *output = {plannedBytes, plannedBytes, ncclInt8, outputChunks};
+      const bool framed = cocclCompressorSupports(
+          context->spec->compressor, cocclCompressorCapabilityFramed);
+      const size_t frameStride =
+          framed ? rawOutput.bytes / rawOutput.logicalChunks : 0;
+      if (framed && (rawOutput.bytes % rawOutput.logicalChunks != 0 ||
+                     frameStride == 0)) {
+        return ncclInvalidArgument;
+      }
+      if (framed) plannedBytes = rawOutput.bytes;
+      *output = {plannedBytes, plannedBytes, ncclInt8, outputChunks,
+                 framed, frameStride};
       break;
     }
     case cocclPipelineStageDecompressReduce:
@@ -266,6 +335,16 @@ ncclResult_t cocclPlanPipelineStageOutput(
       output->logicalChunks != outputChunks ||
       output->totalElements % output->logicalChunks != 0) {
     return ncclInvalidUsage;
+  }
+  if (output->framed) {
+    size_t framedBytes = 0;
+    if (output->datatype != ncclInt8 ||
+        output->totalElements != output->bytes ||
+        !cocclPipelineCheckedMultiply(output->frameStrideBytes,
+                                      output->logicalChunks, &framedBytes) ||
+        framedBytes != output->bytes) {
+      return ncclInvalidUsage;
+    }
   }
   return ncclSuccess;
 }
@@ -284,7 +363,7 @@ ncclResult_t cocclBuildPipelinePlan(cocclPipelineContext* context) {
   NCCLCHECK(cocclPlanRawPipelineEdge(context, spec->inputChunks, &edge));
   if (context->depth > 1 && spec->inputChunks > 1) {
     NCCLCHECK(cocclAssignPipelineTemp(
-        plan, edge.bytes, &plan->inputStagingTemp));
+        plan, edge, &plan->inputStagingTemp));
   }
 
   for (int stageIndex = 0; stageIndex < spec->stageCount; ++stageIndex) {
@@ -296,13 +375,13 @@ ncclResult_t cocclBuildPipelinePlan(cocclPipelineContext* context) {
     if (finalStage) {
       if (context->depth > 1 && output.logicalChunks > 1) {
         NCCLCHECK(cocclAssignPipelineTemp(
-            plan, output.bytes, &plan->outputStagingTemp));
+            plan, output, &plan->outputStagingTemp));
       }
     } else if (!cocclStageCreatesTemp(spec->stages[stageIndex].kind)) {
       return ncclInvalidArgument;
     } else {
       NCCLCHECK(cocclAssignPipelineTemp(
-          plan, output.bytes, &plan->stageOutputTemp[stageIndex]));
+          plan, output, &plan->stageOutputTemp[stageIndex]));
     }
     edge = output;
   }
@@ -478,6 +557,7 @@ ncclResult_t cocclPreparePipeline(cocclPipelineContext* context) {
       context->spec->datatype,
       context->spec->ownerComm,
       context->spec->compressor,
+      nullptr,
   };
   return cocclBuildPipelinePlan(context);
 }

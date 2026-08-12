@@ -159,10 +159,38 @@ int testLayoutSpans() {
                            overflowEdge, ncclInvalidArgument, 0, 0);
 }
 
+int testFrameExchangeRouting() {
+  ncclComm_t comm = (ncclComm_t)calloc(1, sizeof(ncclComm));
+  if (comm == nullptr) return 1;
+  comm->nRanks = 4;
+
+  cocclCompressorFrameMetadata metadata = {};
+  cocclPipelineEdge framed = {};
+  framed.frameMetadata = &metadata;
+  framed.frameStrideBytes = 64;
+  const cocclPipelineEdge fixed = {};
+  const bool valid =
+      cocclPipelineStageUsesFrameExchange(
+          cocclPipelineAllToAll(comm), framed) &&
+      cocclPipelineStageUsesFrameExchange(
+          cocclPipelineAllGather(comm), framed) &&
+      !cocclPipelineStageUsesFrameExchange(
+          cocclPipelineCompress(), framed) &&
+      !cocclPipelineStageUsesFrameExchange(
+          cocclPipelineAllToAll(comm), fixed);
+  free(comm);
+  if (!valid) {
+    fprintf(stderr, "framed communication stage routing is incorrect\n");
+    return 1;
+  }
+  return 0;
+}
+
 }  // namespace
 
 int main() {
-  if (testChunkPropagation() || testLayoutSpans()) {
+  if (testChunkPropagation() || testLayoutSpans() ||
+      testFrameExchangeRouting()) {
     return 1;
   }
   printf("coccl pipeline stage tests passed\n");

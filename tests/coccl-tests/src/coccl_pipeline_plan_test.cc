@@ -18,6 +18,14 @@ int validateLayout(const char* name, const cocclPipelinePlan& plan) {
       fprintf(stderr, "%s: temp %d is not aligned\n", name, i);
       return 1;
     }
+    if (temp.logicalBytes > temp.bytes ||
+        (temp.frameMetadataBytes != 0 &&
+         (temp.frameMetadataOffset < temp.payloadBytes ||
+          temp.frameMetadataOffset + temp.frameMetadataBytes >
+              temp.logicalBytes))) {
+      fprintf(stderr, "%s: temp %d has an invalid framed layout\n", name, i);
+      return 1;
+    }
     const size_t arenaBytes = temp.storage == cocclPipelineRawRing
         ? plan.rawBytes : plan.registeredSliceBytes;
     const size_t spanBytes = temp.storage == cocclPipelineRawRing
@@ -65,6 +73,7 @@ int expectWorkspace(const char* name, const size_t* buffers, int bufferCount,
   for (int i = 0; i < bufferCount; ++i) {
     plan.temps[i].logicalBytes = buffers[i];
     plan.temps[i].bytes = buffers[i];
+    plan.temps[i].payloadBytes = buffers[i];
   }
 
   const ncclResult_t result = cocclPlanPipelineWorkspace(&plan, depth);
@@ -81,6 +90,45 @@ int expectWorkspace(const char* name, const size_t* buffers, int bufferCount,
     return 1;
   }
   return validateLayout(name, plan);
+}
+
+int testFramedWorkspace() {
+  constexpr size_t rawBytes = 1024;
+  constexpr size_t frameStrideBytes = 256;
+  constexpr size_t metadataBytes =
+      4 * sizeof(cocclCompressorFrameMetadata);
+  constexpr size_t framedBytes = 1280;
+
+  cocclPipelinePlan plan = {};
+  plan.tempCount = 4;
+  plan.inputStagingTemp = 0;
+  plan.outputStagingTemp = 3;
+  for (int i = 0; i < kMaxPipelineStages; ++i) {
+    plan.stageOutputTemp[i] = -1;
+  }
+  plan.temps[0] = {0, rawBytes, rawBytes, rawBytes, 0, 0, 0,
+                   cocclPipelineRegisteredArena};
+  plan.temps[1] = {0, rawBytes + metadataBytes, framedBytes, rawBytes,
+                   rawBytes, metadataBytes, frameStrideBytes,
+                   cocclPipelineRegisteredArena};
+  plan.temps[2] = plan.temps[1];
+  plan.temps[3] = plan.temps[0];
+
+  if (cocclPlanPipelineWorkspace(&plan, 4) != ncclSuccess ||
+      plan.workspaceKind != cocclPipelineWorkspaceUnified ||
+      plan.registeredSliceBytes != 2 * framedBytes ||
+      plan.registeredBytes != 8 * framedBytes || plan.rawBytes != 0 ||
+      validateLayout("framed workspace", plan) != 0) {
+    fprintf(stderr, "framed workspace planning failed\n");
+    return 1;
+  }
+
+  plan.temps[1].frameStrideBytes = frameStrideBytes / 2;
+  if (cocclPlanPipelineWorkspace(&plan, 4) != ncclInvalidArgument) {
+    fprintf(stderr, "inconsistent framed payload layout was accepted\n");
+    return 1;
+  }
+  return 0;
 }
 
 int testWorkspaceSelection() {
@@ -223,7 +271,8 @@ int testInvalidWorkspace() {
 }  // namespace
 
 int main() {
-  if (testWorkspaceSelection() || testUserBufferLayouts() ||
+  if (testWorkspaceSelection() || testFramedWorkspace() ||
+      testUserBufferLayouts() ||
       testInvalidWorkspace()) {
     return 1;
   }
