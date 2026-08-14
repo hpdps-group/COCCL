@@ -10,20 +10,23 @@ COCCL_ROOT ?= $(patsubst %/,%,$(dir $(COCCL_MAKEFILE)))
 NCCLDIR ?= $(abspath $(COCCL_ROOT)/../..)
 
 COCCL_INCLUDE_DIR = $(COCCL_ROOT)/include
-COCCL_INCFLAGS = -I$(COCCL_INCLUDE_DIR)
+COCCL_INCFLAGS = -I$(COCCL_INCLUDE_DIR) -I$(COCCL_ROOT)
 
+COCCL_CORE_HOST_SRCFILES = \
+	$(wildcard $(COCCL_ROOT)/core/runtime/*.cc) \
+	$(wildcard $(COCCL_ROOT)/core/pipeline/*.cc) \
+	$(wildcard $(COCCL_ROOT)/core/compression/*.cc) \
+	$(wildcard $(COCCL_ROOT)/core/memory/*.cc) \
+	$(wildcard $(COCCL_ROOT)/core/config/*.cc) \
+	$(wildcard $(COCCL_ROOT)/core/tuning/*.cc) \
+	$(wildcard $(COCCL_ROOT)/core/training/*.cc)
+COCCL_EXTENSION_HOST_SRCFILES = \
+	$(wildcard $(COCCL_ROOT)/extensions/primitives/*.cc)
 COCCL_HOST_SRCFILES = \
-	$(wildcard $(COCCL_ROOT)/*.cc) \
-	$(wildcard $(COCCL_ROOT)/buffer/*.cc) \
-	$(wildcard $(COCCL_ROOT)/debug/*.cc) \
-	$(wildcard $(COCCL_ROOT)/param/*.cc) \
-	$(wildcard $(COCCL_ROOT)/pipeline/*.cc) \
-	$(wildcard $(COCCL_ROOT)/primitives/*.cc) \
-	$(wildcard $(COCCL_ROOT)/tuning/*.cc) \
-	$(wildcard $(COCCL_ROOT)/training_assist/*.cc)
+	$(COCCL_CORE_HOST_SRCFILES) $(COCCL_EXTENSION_HOST_SRCFILES)
 
 COCCL_OBJDIR ?= $(BUILDDIR)/obj/coccl-extend
-COCCL_DEVICE_DIR = $(COCCL_ROOT)/device
+COCCL_DEVICE_DIR = $(COCCL_ROOT)/core/device
 COCCL_DEVICE_OBJDIR = $(COCCL_OBJDIR)/device
 COCCL_CUDA_SRCFILES = \
 	$(wildcard $(COCCL_DEVICE_DIR)/pipeline/*.cu) \
@@ -32,7 +35,7 @@ COCCL_CUDA_OBJFILES = $(patsubst $(COCCL_ROOT)/%.cu,$(COCCL_OBJDIR)/%.cu.o,$(COC
 # Keep generated dependencies separate from the old device sub-build's *.cu.d
 # files so an incremental build can migrate without reading stale source paths.
 COCCL_CUDA_DEPFILES = $(COCCL_CUDA_OBJFILES:%=%.d)
-COCCL_PLUGIN_DIR = $(COCCL_ROOT)/compressor_plugin
+COCCL_PLUGIN_DIR = $(COCCL_ROOT)/extensions/compressor_plugin
 COCCL_PLUGIN_OBJDIR = $(COCCL_OBJDIR)/compressor_plugin
 COCCL_PLUGIN_LIB_TARGET := coccl-plugin-libs
 COCCL_CONFIG_CHECK_TARGET := coccl-config-check
@@ -40,12 +43,12 @@ COCCL_CONFIG_CHECKER := $(BUILDDIR)/bin/coccl-config-check
 COCCL_NCCL_HEADER := $(BUILDDIR)/include/nccl.h
 COCCL_CONFIG_CHECKER_SRCFILES := \
 	$(COCCL_ROOT)/tools/coccl_config_check/coccl_config_check.cc \
-	$(COCCL_ROOT)/param/coccl_config.cc \
-	$(COCCL_ROOT)/debug/coccl_config_format.cc
+	$(COCCL_ROOT)/core/config/coccl_config.cc \
+	$(COCCL_ROOT)/core/config/coccl_config_format.cc
 COCCL_CONFIG_CHECKER_HEADERS := \
 	$(COCCL_ROOT)/include/compressor_plugin/detail/coccl_compressor_abi.h \
-	$(COCCL_ROOT)/include/config/coccl_config.h \
-	$(COCCL_ROOT)/include/config/coccl_config_debug.h \
+	$(COCCL_ROOT)/core/config/coccl_config.h \
+	$(COCCL_ROOT)/core/config/coccl_config_debug.h \
 	$(COCCL_ROOT)/include/runtime/coccl_operation.h
 COCCL_BUILD_TARGET := coccl-libs
 

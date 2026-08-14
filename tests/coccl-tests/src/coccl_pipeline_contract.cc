@@ -1,4 +1,4 @@
-#include "pipeline/coccl_pipeline.h"
+#include "core/pipeline/coccl_pipeline.h"
 
 // Compile-only contract for the COCCL-private linear pipeline API. Runtime
 // behavior is exercised by the collective-specific overlap performance tests.

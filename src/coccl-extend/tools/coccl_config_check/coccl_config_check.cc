@@ -1,5 +1,5 @@
-#include "config/coccl_config.h"
-#include "config/coccl_config_debug.h"
+#include "core/config/coccl_config.h"
+#include "core/config/coccl_config_debug.h"
 #include "compressor_plugin/detail/coccl_compressor_abi.h"
 
 #include <dlfcn.h>

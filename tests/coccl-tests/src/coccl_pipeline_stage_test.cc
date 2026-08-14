@@ -1,4 +1,4 @@
-#include "pipeline/coccl_pipeline_stage.h"
+#include "core/pipeline/coccl_pipeline_stage.h"
 
 #include "comm.h"
 

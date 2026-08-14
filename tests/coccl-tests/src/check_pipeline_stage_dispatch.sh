@@ -2,8 +2,8 @@
 set -euo pipefail
 
 root=$(cd "$(dirname "$0")/../../.." && pwd)
-executor_file="$root/src/coccl-extend/pipeline/coccl_pipeline_execute.cc"
-stage_file="$root/src/coccl-extend/pipeline/coccl_pipeline_stage.cc"
+executor_file="$root/src/coccl-extend/core/pipeline/coccl_pipeline_execute.cc"
+stage_file="$root/src/coccl-extend/core/pipeline/coccl_pipeline_stage.cc"
 
 for symbol in \
   cocclRunCompressStage \

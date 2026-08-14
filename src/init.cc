@@ -26,7 +26,7 @@
 #include <sys/stat.h>
 #include <unistd.h>
 #include "param.h"
-#include "runtime/coccl_runtime.h"
+#include "runtime/coccl_init.h"
 #define STR2(v) #v
 #define STR(v) STR2(v)
 

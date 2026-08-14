@@ -1,5 +1,7 @@
 #include "runtime/coccl_group.h"
 #include "runtime/coccl_runtime.h"
+#include "core/runtime/coccl_group_internal.h"
+#include "core/runtime/coccl_prepared_call.h"
 
 #include <stdio.h>
 #include <vector>

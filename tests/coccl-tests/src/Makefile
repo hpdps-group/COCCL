@@ -91,6 +91,8 @@ LIBRARIES += nccl
 NVLDFLAGS += $(LIBRARIES:%=-l%)
 
 DST_DIR := $(BUILDDIR)
+COCCL_ROOT := ../../../src/coccl-extend
+COCCL_INC := -I$(COCCL_ROOT)/include -I$(COCCL_ROOT)
 SRC_FILES := $(wildcard *.cu)
 OBJ_FILES := $(SRC_FILES:%.cu=${DST_DIR}/%.o)
 BIN_FILES_LIST := all_reduce all_gather broadcast reduce_scatter reduce alltoall scatter gather sendrecv hypercube \
@@ -102,8 +104,8 @@ BIN_FILES := $(BIN_FILES_LIST:%=${DST_DIR}/%_perf)
 build: ${BIN_FILES}
 
 COCCL_LAYOUT_TEST := $(DST_DIR)/coccl_pipeline_layout_test
-COCCL_LAYOUT_SRC := ../../../src/coccl-extend/device/pipeline/coccl_pipeline_layout.cu
-COCCL_LAYOUT_INC := ../../../src/coccl-extend/include
+COCCL_LAYOUT_SRC := $(COCCL_ROOT)/core/device/pipeline/coccl_pipeline_layout.cu
+COCCL_LAYOUT_INC := $(COCCL_ROOT)/include
 
 pipeline-layout-test: $(COCCL_LAYOUT_TEST)
 
@@ -119,28 +121,28 @@ COCCL_PIPELINE_PLAN_TEST := $(DST_DIR)/coccl_pipeline_plan_test
 COCCL_FRAME_EXCHANGE_TEST := $(DST_DIR)/coccl_frame_exchange_test
 COCCL_DIETGPU_CODEC_TEST := $(DST_DIR)/coccl_dietgpu_codec_test
 COCCL_PIPELINE_STAGE_SRC := \
-	../../../src/coccl-extend/pipeline/coccl_pipeline_stage.cc
+	$(COCCL_ROOT)/core/pipeline/coccl_pipeline_stage.cc
 COCCL_PIPELINE_PLAN_SRC := \
-	../../../src/coccl-extend/pipeline/coccl_pipeline_plan.cc
+	$(COCCL_ROOT)/core/pipeline/coccl_pipeline_plan.cc
 COCCL_PIPELINE_INTERNAL_HEADER := \
-	../../../src/coccl-extend/pipeline/coccl_pipeline_internal.h
+	$(COCCL_ROOT)/core/pipeline/coccl_pipeline_internal.h
 COCCL_AUTOTUNE_COST_MODEL_SRC := \
-	../../../src/coccl-extend/tuning/coccl_autotune_cost_model.cc
+	$(COCCL_ROOT)/core/tuning/coccl_autotune_cost_model.cc
 COCCL_AUTOTUNE_INTERNAL_HEADER := \
-	../../../src/coccl-extend/tuning/coccl_autotune_internal.h
+	$(COCCL_ROOT)/core/tuning/coccl_autotune_internal.h
 COCCL_COMPRESSOR_SDK_HEADERS := \
-	../../../src/coccl-extend/include/compressor_plugin/coccl_compressor_plugin.h \
-	../../../src/coccl-extend/include/compressor_plugin/detail/coccl_compressor_abi.h
+	$(COCCL_ROOT)/include/compressor_plugin/coccl_compressor_plugin.h \
+	$(COCCL_ROOT)/include/compressor_plugin/detail/coccl_compressor_abi.h
 
 COCCL_TRAINING_SRC := \
-	../../../src/coccl-extend/param/coccl_config.cc \
-	../../../src/coccl-extend/debug/coccl_config_format.cc \
-	../../../src/coccl-extend/debug/coccl_config_log.cc \
-	../../../src/coccl-extend/training_assist/coccl_training_assist.cc \
-	../../../src/coccl-extend/training_assist/coccl_training_classifier.cc \
-	../../../src/coccl-extend/coccl_operation.cc \
-	../../../src/coccl-extend/coccl_comm.cc \
-	../../../src/coccl-extend/coccl_runtime.cc
+	$(COCCL_ROOT)/core/config/coccl_config.cc \
+	$(COCCL_ROOT)/core/config/coccl_config_format.cc \
+	$(COCCL_ROOT)/core/config/coccl_config_log.cc \
+	$(COCCL_ROOT)/core/training/coccl_training_assist.cc \
+	$(COCCL_ROOT)/core/training/coccl_training_classifier.cc \
+	$(COCCL_ROOT)/core/runtime/coccl_operation.cc \
+	$(COCCL_ROOT)/core/runtime/coccl_comm.cc \
+	$(COCCL_ROOT)/core/runtime/coccl_runtime.cc
 
 group-deferred-test: $(COCCL_GROUP_TEST)
 group-batch-test: $(COCCL_GROUP_BATCH_TEST)
@@ -161,13 +163,13 @@ $(COCCL_GROUP_TEST): coccl_group_deferred_test.cc
 		-L$(NCCL_HOME)/lib -lnccl $(LDFLAGS) -pthread
 
 $(COCCL_GROUP_BATCH_TEST): coccl_group_batch_test.cc \
-		../../../src/coccl-extend/coccl_group.cc
+		$(COCCL_ROOT)/core/runtime/coccl_group.cc
 	@printf "Linking  %-35s > %s\n" $< $@
 	@mkdir -p ${DST_DIR}
 	$(CXX) $(filter-out -std=c++11,$(CXXFLAGS)) -std=c++17 \
 		-ffunction-sections -fdata-sections -Wl,--gc-sections \
 		-I$(CUDA_INC) -I$(NCCL_HOME)/include -I../../../src/include \
-		-I../../../src/coccl-extend/include -o $@ $^
+		$(COCCL_INC) -o $@ $^
 
 $(COCCL_TRAINING_TEST): coccl_training_classifier_test.cc $(COCCL_TRAINING_SRC)
 	@printf "Linking  %-35s > %s\n" $< $@
@@ -175,8 +177,8 @@ $(COCCL_TRAINING_TEST): coccl_training_classifier_test.cc $(COCCL_TRAINING_SRC)
 	$(CXX) $(filter-out -std=c++11,$(CXXFLAGS)) -std=c++17 \
 		-ffunction-sections -fdata-sections -Wl,--gc-sections \
 		-I$(CUDA_INC) -I$(NCCL_HOME)/include -I../../../src/include \
-		-I../../../src/coccl-extend/include \
-		-DCOCCL_TEST_CONFIG_FILE=\"$(abspath ../../../src/coccl-extend/configs/training.toml)\" \
+		$(COCCL_INC) \
+		-DCOCCL_TEST_CONFIG_FILE=\"$(abspath $(COCCL_ROOT)/extensions/configs/training.toml)\" \
 		-o $@ $^ -pthread
 
 $(COCCL_CONFIG_READER_TEST): coccl_config_reader_test.cc \
@@ -185,7 +187,7 @@ $(COCCL_CONFIG_READER_TEST): coccl_config_reader_test.cc \
 	@mkdir -p ${DST_DIR}
 	$(CXX) $(filter-out -std=c++11,$(CXXFLAGS)) -std=c++17 \
 		-I$(CUDA_INC) -I$(NCCL_HOME)/include \
-		-I../../../src/coccl-extend/include -o $@ $<
+		$(COCCL_INC) -o $@ $<
 
 $(COCCL_COMPRESSOR_SDK_TEST): coccl_compressor_sdk_test.cc \
 	$(COCCL_COMPRESSOR_SDK_HEADERS)
@@ -193,7 +195,7 @@ $(COCCL_COMPRESSOR_SDK_TEST): coccl_compressor_sdk_test.cc \
 	@mkdir -p ${DST_DIR}
 	$(CXX) $(filter-out -std=c++11,$(CXXFLAGS)) -std=c++17 \
 		-I$(CUDA_INC) -I$(NCCL_HOME)/include \
-		-I../../../src/coccl-extend/include -o $@ $<
+		$(COCCL_INC) -o $@ $<
 
 $(COCCL_COMPRESSOR_SIZE_TEST): coccl_compressor_size_test.cc \
 	$(COCCL_COMPRESSOR_SDK_HEADERS)
@@ -201,7 +203,7 @@ $(COCCL_COMPRESSOR_SIZE_TEST): coccl_compressor_size_test.cc \
 	@mkdir -p ${DST_DIR}
 	$(CXX) $(filter-out -std=c++11,$(CXXFLAGS)) -std=c++17 \
 		-I$(CUDA_INC) -I$(NCCL_HOME)/include \
-		-I../../../src/coccl-extend/include -o $@ $< -ldl
+		$(COCCL_INC) -o $@ $< -ldl
 
 $(COCCL_AUTOTUNE_SELECTOR_TEST): coccl_autotune_selector_test.cc \
 	$(COCCL_AUTOTUNE_COST_MODEL_SRC) $(COCCL_AUTOTUNE_INTERNAL_HEADER)
@@ -209,8 +211,7 @@ $(COCCL_AUTOTUNE_SELECTOR_TEST): coccl_autotune_selector_test.cc \
 	@mkdir -p ${DST_DIR}
 	$(CXX) $(filter-out -std=c++11,$(CXXFLAGS)) -std=c++17 \
 		-I$(CUDA_INC) -I$(NCCL_HOME)/include -I../../../src/include \
-		-I../../../src/coccl-extend/include \
-		-I../../../src/coccl-extend -o $@ $< \
+		$(COCCL_INC) -o $@ $< \
 		$(COCCL_AUTOTUNE_COST_MODEL_SRC)
 
 $(COCCL_PIPELINE_STAGE_TEST): coccl_pipeline_stage_test.cc \
@@ -220,7 +221,7 @@ $(COCCL_PIPELINE_STAGE_TEST): coccl_pipeline_stage_test.cc \
 	$(CXX) $(filter-out -std=c++11,$(CXXFLAGS)) -std=c++17 \
 		-ffunction-sections -fdata-sections -Wl,--gc-sections \
 		-I$(CUDA_INC) -I$(NCCL_HOME)/include -I../../../src/include \
-		-I../../../src/coccl-extend/include -o $@ $^
+		$(COCCL_INC) -o $@ $^
 
 $(COCCL_PIPELINE_PLAN_TEST): coccl_pipeline_plan_test.cc \
 		$(COCCL_PIPELINE_PLAN_SRC) $(COCCL_PIPELINE_INTERNAL_HEADER)
@@ -229,29 +230,29 @@ $(COCCL_PIPELINE_PLAN_TEST): coccl_pipeline_plan_test.cc \
 	$(CXX) $(filter-out -std=c++11,$(CXXFLAGS)) -std=c++17 \
 		-ffunction-sections -fdata-sections -Wl,--gc-sections \
 		-I$(CUDA_INC) -I$(NCCL_HOME)/include -I../../../src/include \
-		-I../../../src/coccl-extend/include -I../../../src/coccl-extend \
+		$(COCCL_INC) \
 		-o $@ coccl_pipeline_plan_test.cc $(COCCL_PIPELINE_PLAN_SRC)
 
 $(COCCL_FRAME_EXCHANGE_TEST): coccl_frame_exchange_test.cc \
-		../../../src/coccl-extend/pipeline/coccl_frame_exchange.cc
+		$(COCCL_ROOT)/core/pipeline/coccl_frame_exchange.cc
 	@printf "Linking  %-35s > %s\n" $< $@
 	@mkdir -p ${DST_DIR}
 	$(CXX) $(filter-out -std=c++11,$(CXXFLAGS)) -std=c++17 \
 		-I$(CUDA_INC) -I$(NCCL_HOME)/include -I../../../src/include \
-		-I../../../src/coccl-extend/include -o $@ $^
+		$(COCCL_INC) -o $@ $^
 
 $(COCCL_DIETGPU_CODEC_TEST): coccl_dietgpu_codec_test.cu \
 		$(COCCL_COMPRESSOR_SDK_HEADERS)
 	@printf "Linking  %-35s > %s\n" $< $@
 	@mkdir -p ${DST_DIR}
 	$(NVCC) $(filter-out -std=c++11,$(NVCUFLAGS)) -std=c++17 \
-		-I$(NCCL_HOME)/include -I../../../src/coccl-extend/include \
+		-I$(NCCL_HOME)/include $(COCCL_INC) \
 		-o $@ $< -ldl -lcudart
 
 $(COCCL_LAYOUT_TEST): coccl_pipeline_layout_test.cu $(COCCL_LAYOUT_SRC)
 	@printf "Linking  %-35s > %s\n" $< $@
 	@mkdir -p ${DST_DIR}
-	$(NVCC) -o $@ $(NVCUFLAGS) -I$(COCCL_LAYOUT_INC) \
+	$(NVCC) -o $@ $(NVCUFLAGS) $(COCCL_INC) \
 		-I$(NCCL_HOME)/include -I../../../src/include \
 		$^ -L$(NCCL_HOME)/lib -lnccl -lcudart -lrt
 

@@ -1,4 +1,4 @@
-#include "pipeline/coccl_pipeline_internal.h"
+#include "core/pipeline/coccl_pipeline_internal.h"
 
 #include <stdio.h>
 

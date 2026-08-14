@@ -1,0 +1,43 @@
+schema_version = 2
+
+[runtime]
+mode = "normal"
+compression_threshold_bytes = 8388608
+
+[compressor_plugins]
+compressors = ["zfp", "taco"]
+library_path = "../../../../build/obj/coccl-extend/compressor_plugin/libcompress"
+
+[pipeline]
+depth = 4
+
+[buffer]
+pool_limit_bytes = 0
+legacy_block_bytes = 0
+physical_chunk_bytes = 8388608
+
+[autotune]
+enabled = false
+profile_min_bytes = 262144
+profile_max_bytes = 8589934592
+warmup = 3
+iterations = 10
+reduce_scatter_algorithm = "auto"
+all_reduce_algorithm = "auto"
+
+[normal.all_gather]
+compressor = "zfp"
+
+[normal.all_gather.config.default]
+rate = 4
+
+[normal.all_to_all]
+compressor = "taco"
+
+[normal.all_to_all.config.default]
+fp8Format = "E4M3"
+saturate = true
+groupSize = 128
+targetRange = 448.0
+lambda = 0.000001
+fp8MaxValue = 0.0

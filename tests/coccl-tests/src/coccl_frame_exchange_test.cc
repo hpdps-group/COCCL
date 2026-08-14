@@ -1,4 +1,4 @@
-#include "pipeline/coccl_frame_exchange.h"
+#include "core/pipeline/coccl_frame_exchange.h"
 
 #include "comm.h"
 #include "runtime/coccl_runtime.h"

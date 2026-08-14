@@ -7,7 +7,7 @@
 #include <cstring>
 #include <vector>
 
-#include "pipeline/coccl_pipeline_layout.h"
+#include "core/pipeline/coccl_pipeline_layout.h"
 
 namespace {
 
