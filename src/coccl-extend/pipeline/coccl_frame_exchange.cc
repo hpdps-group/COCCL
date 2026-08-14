@@ -2,6 +2,8 @@
 
 #include "collectives.h"
 #include "comm.h"
+#include "runtime/coccl_group.h"
+#include "runtime/coccl_runtime.h"
 
 #include <stdint.h>
 
@@ -9,17 +11,7 @@ namespace {
 
 bool cocclValidSlot(const void* slot, size_t bytes, size_t slotBytes) {
   if (bytes == 0) return slot == nullptr || slotBytes != 0;
-  if (slot == nullptr || slotBytes == 0 || bytes > slotBytes) return false;
-  return slotBytes <= UINTPTR_MAX - (uintptr_t)slot;
-}
-
-bool cocclValidFrameMetadata(const cocclCompressorFrameMetadata& metadata,
-                             size_t strideBytes) {
-  return metadata.payloadBytes > 0 &&
-      metadata.payloadBytes <= strideBytes && metadata.reserved == 0 &&
-      (metadata.encoding == cocclCompressorFrameEncoded ||
-       (metadata.encoding == cocclCompressorFrameRaw &&
-        metadata.payloadBytes == strideBytes));
+  return slot != nullptr && slotBytes != 0 && bytes <= slotBytes;
 }
 
 bool cocclFrameSlot(const void* base, size_t frame, size_t strideBytes,
@@ -29,7 +21,6 @@ bool cocclFrameSlot(const void* base, size_t frame, size_t strideBytes,
     return false;
   }
   const size_t offset = frame * strideBytes;
-  if (offset > UINTPTR_MAX - (uintptr_t)base) return false;
   *slot = (const char*)base + offset;
   return true;
 }
@@ -45,6 +36,15 @@ bool cocclFrameSlot(void* base, size_t frame, size_t strideBytes,
 }
 
 }  // namespace
+
+bool cocclFrameMetadataValid(
+    const cocclCompressorFrameMetadata& metadata, size_t frameStrideBytes) {
+  return metadata.payloadBytes > 0 &&
+      metadata.payloadBytes <= frameStrideBytes &&
+      (metadata.encoding == cocclCompressorFrameEncoded ||
+       (metadata.encoding == cocclCompressorFrameRaw &&
+        metadata.payloadBytes == frameStrideBytes));
+}
 
 ncclResult_t cocclBuildAllToAllFrameExchanges(
     const void* sendBase, void* recvBase, size_t frames,
@@ -69,8 +69,8 @@ ncclResult_t cocclBuildAllToAllFrameExchanges(
       const auto& recv = recvMetadata[frameIndex];
       const void* sendSlot = nullptr;
       void* recvSlot = nullptr;
-      if (!cocclValidFrameMetadata(send, frameStrideBytes) ||
-          !cocclValidFrameMetadata(recv, frameStrideBytes) ||
+      if (!cocclFrameMetadataValid(send, frameStrideBytes) ||
+          !cocclFrameMetadataValid(recv, frameStrideBytes) ||
           !cocclFrameSlot(sendBase, frameIndex, frameStrideBytes,
                           &sendSlot) ||
           !cocclFrameSlot(recvBase, frameIndex, frameStrideBytes,
@@ -110,8 +110,8 @@ ncclResult_t cocclBuildAllGatherFrameExchanges(
       const auto& recv = recvMetadata[recvIndex];
       const void* sendSlot = nullptr;
       void* recvSlot = nullptr;
-      if (!cocclValidFrameMetadata(send, frameStrideBytes) ||
-          !cocclValidFrameMetadata(recv, frameStrideBytes) ||
+      if (!cocclFrameMetadataValid(send, frameStrideBytes) ||
+          !cocclFrameMetadataValid(recv, frameStrideBytes) ||
           !cocclFrameSlot(sendBase, frame, frameStrideBytes, &sendSlot) ||
           !cocclFrameSlot(recvBase, recvIndex, frameStrideBytes,
                           &recvSlot)) {
@@ -128,12 +128,15 @@ ncclResult_t cocclBuildAllGatherFrameExchanges(
 ncclResult_t cocclCommitFrameExchange(
     const cocclFrameExchange* exchanges, size_t count,
     ncclComm_t comm, cudaStream_t stream) {
-  if (exchanges == nullptr || count == 0 || comm == nullptr) {
+  if (exchanges == nullptr || count == 0) {
     return ncclInvalidArgument;
   }
   for (size_t i = 0; i < count; ++i) {
     const auto& exchange = exchanges[i];
-    if (exchange.peer < 0 || exchange.peer >= comm->nRanks ||
+    ncclComm_t exchangeComm =
+        exchange.comm == nullptr ? comm : exchange.comm;
+    if (exchangeComm == nullptr || exchange.peer < 0 ||
+        exchange.peer >= exchangeComm->nRanks ||
         (exchange.sendBytes == 0 && exchange.recvBytes == 0) ||
         !cocclValidSlot(exchange.sendSlot, exchange.sendBytes,
                         exchange.slotBytes) ||
@@ -147,16 +150,34 @@ ncclResult_t cocclCommitFrameExchange(
   if (ret != ncclSuccess) return ret;
   for (size_t i = 0; i < count; ++i) {
     const auto& exchange = exchanges[i];
+    ncclComm_t exchangeComm =
+        exchange.comm == nullptr ? comm : exchange.comm;
+    cudaStream_t exchangeStream =
+        exchange.comm == nullptr ? stream : exchange.stream;
     if (exchange.recvBytes != 0) {
-      ret = ncclRecvNaive(
-          exchange.recvSlot, exchange.recvBytes, ncclInt8,
-          exchange.peer, comm, stream);
+      cocclInfo info;
+      info.recvbuff = exchange.recvSlot;
+      info.count = exchange.recvBytes;
+      info.datatype = ncclInt8;
+      info.peer = exchange.peer;
+      info.func = ncclFuncRecv;
+      info.operation = cocclOperation::SendRecv;
+      info.comm = exchangeComm;
+      info.stream = exchangeStream;
+      ret = cocclReplayNativeCall(info);
       if (ret != ncclSuccess) break;
     }
     if (exchange.sendBytes != 0) {
-      ret = ncclSendNaive(
-          exchange.sendSlot, exchange.sendBytes, ncclInt8,
-          exchange.peer, comm, stream);
+      cocclInfo info;
+      info.sendbuff = exchange.sendSlot;
+      info.count = exchange.sendBytes;
+      info.datatype = ncclInt8;
+      info.peer = exchange.peer;
+      info.func = ncclFuncSend;
+      info.operation = cocclOperation::SendRecv;
+      info.comm = exchangeComm;
+      info.stream = exchangeStream;
+      ret = cocclReplayNativeCall(info);
       if (ret != ncclSuccess) break;
     }
   }

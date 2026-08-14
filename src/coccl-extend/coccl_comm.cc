@@ -75,15 +75,6 @@ static bool validPolicyKey(cocclPolicyKey key) {
       cocclGetOperationDescriptor(key.operation), key.variant);
 }
 
-static bool compressionDatatypeSupported(ncclDataType_t datatype) {
-  if (datatype == ncclFloat16 || datatype == ncclFloat32) return true;
-#if defined(__CUDA_BF16_TYPES_EXIST__)
-  return datatype == ncclBfloat16;
-#else
-  return false;
-#endif
-}
-
 static ncclResult_t destroyHierarchicalComms(cocclHierarchicalCommState* hierarchy);
 
 static void recordNcclCleanup(ncclResult_t status, ncclResult_t* ret) {
@@ -241,9 +232,6 @@ exit:
 ncclResult_t cocclCommCopyCompressorPolicy(
     ncclComm_t comm, cocclTrainingRole role, cocclPolicyKey destination,
     cocclPolicyKey source) {
-  if (!validPolicyKey(destination) || !validPolicyKey(source)) {
-    return ncclInvalidArgument;
-  }
   ncclResult_t ret = ncclSuccess;
   pthread_mutex_lock(&cocclCommLock);
   cocclComm* coccl = findCocclCommLocked(comm);
@@ -269,7 +257,7 @@ exit:
 ncclResult_t cocclCommResolveCompressorPolicy(
     ncclComm_t comm, cocclTrainingRole role, cocclPolicyKey key,
     cocclResolvedCompressorPolicy* resolved) {
-  if (comm == nullptr || resolved == nullptr || !validPolicyKey(key)) {
+  if (comm == nullptr || resolved == nullptr) {
     return ncclInvalidArgument;
   }
   *resolved = {};
@@ -295,80 +283,37 @@ ncclResult_t cocclCommResolveCompressorPolicy(
   return ret;
 }
 
-bool cocclCommShouldCompress(
-    ncclComm_t comm, cocclTrainingRole role, cocclPolicyKey key,
-    size_t totalBytes, ncclDataType_t datatype, ncclRedOp_t reductionOp) {
-  const cocclOperationDescriptor* descriptor =
-      cocclGetOperationDescriptor(key.operation);
-  if (comm == nullptr || comm->nRanks <= 1 || descriptor == nullptr ||
-      !compressionDatatypeSupported(datatype) ||
-      (cocclOperationHasTrait(descriptor, cocclOperationTraitReduction) &&
-       reductionOp != ncclSum)) {
-    return false;
-  }
-  cocclResolvedCompressorPolicy resolved;
-  return cocclCommResolveCompressorPolicy(
-             comm, role, key, &resolved) == ncclSuccess &&
-         totalBytes > resolved.thresholdBytes;
-}
-
 ncclResult_t cocclCommGetHierarchicalComms(ncclComm_t comm, cocclHierarchicalComms* resource) {
   // Keep ncclCommSplit outside cocclCommLock; split creation can trigger NCCL
   // init/destroy callbacks that need to re-enter the COCCL registry.
   if (comm == nullptr || resource == nullptr) return ncclInvalidArgument;
 
   ncclResult_t ret = ncclSuccess;
-  cocclHierarchicalCommState newHierarchy = {};
-  bool createdHierarchy = false;
-  bool needHierarchy = false;
-
   *resource = {};
 
   pthread_mutex_lock(&cocclCommLock);
-  {
-    cocclComm* coccl = findCocclCommLocked(comm);
-    if (coccl == nullptr) {
-      ret = ncclInvalidArgument;
-    } else {
-      needHierarchy = coccl->hierarchicalComms.intraComm == nullptr ||
-                      coccl->hierarchicalComms.interComm == nullptr;
-    }
+  cocclComm* coccl = findCocclCommLocked(comm);
+  if (coccl == nullptr) {
+    ret = ncclInvalidArgument;
+  } else if (coccl->hierarchicalComms.intraComm != nullptr) {
+    resource->ownerComm = comm;
+    resource->intraComm = coccl->hierarchicalComms.intraComm;
+    resource->interComm = coccl->hierarchicalComms.interComm;
   }
   pthread_mutex_unlock(&cocclCommLock);
   if (ret != ncclSuccess) return ret;
+  if (resource->intraComm != nullptr) return ncclSuccess;
 
-  if (needHierarchy) {
-    NCCLCHECKGOTO(createHierarchicalComms(comm, &newHierarchy), ret, fail);
-    createdHierarchy = true;
-  }
+  cocclHierarchicalCommState hierarchy = {};
+  NCCLCHECK(createHierarchicalComms(comm, &hierarchy));
 
   pthread_mutex_lock(&cocclCommLock);
-  {
-    cocclComm* coccl = findCocclCommLocked(comm);
-    if (coccl == nullptr) {
-      ret = ncclInvalidArgument;
-    } else {
-      if ((coccl->hierarchicalComms.intraComm == nullptr ||
-           coccl->hierarchicalComms.interComm == nullptr) && createdHierarchy) {
-        coccl->hierarchicalComms = newHierarchy;
-        newHierarchy = {};
-        createdHierarchy = false;
-      }
-      resource->ownerComm = comm;
-      resource->intraComm = coccl->hierarchicalComms.intraComm;
-      resource->interComm = coccl->hierarchicalComms.interComm;
-    }
-  }
+  coccl->hierarchicalComms = hierarchy;
+  resource->ownerComm = comm;
+  resource->intraComm = hierarchy.intraComm;
+  resource->interComm = hierarchy.interComm;
   pthread_mutex_unlock(&cocclCommLock);
-
-exit:
-  if (createdHierarchy) {
-    ncclResult_t cleanupRet = destroyHierarchicalComms(&newHierarchy);
-    if (ret == ncclSuccess) ret = cleanupRet;
-  }
-  return ret;
-fail:
-  goto exit;
+  return ncclSuccess;
 }
 
 ncclResult_t cocclCommGetCompressor(

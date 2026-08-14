@@ -101,10 +101,10 @@ ncclResult_t ncclGroupEnd() {
   NVTX3_FUNC_RANGE_IN(nccl_domain);
 
   const bool outermost = ncclGroupDepth == 1;
-  if (outermost && cocclGroupHasPending() &&
-      ncclGroupHasNativePendingWork()) {
-    WARN("COCCL does not support mixing deferred COCCL collectives and native NCCL work in one group");
-    if (ncclGroupError == ncclSuccess) ncclGroupError = ncclInvalidUsage;
+  if (outermost && cocclGroupHasPending()) {
+    const ncclResult_t prepareResult =
+        cocclGroupPrepareEnd(ncclGroupHasNativePendingWork());
+    if (ncclGroupError == ncclSuccess) ncclGroupError = prepareResult;
   }
 
   NCCLCHECKGOTO(ncclGroupEndInternal(), ret, exit);

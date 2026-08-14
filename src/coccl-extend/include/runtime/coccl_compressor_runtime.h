@@ -45,7 +45,7 @@ ncclResult_t cocclGetCompressorEncodedSizeBound(
 ncclResult_t cocclExecuteCompressor(
     const cocclCompressorHandle& handle,
     cocclCompressorOperation operation,
-    const cocclCompressorDataView& input, cocclCompressorOutputView* output,
+    const cocclCompressorView& input, cocclCompressorView* output,
     int rank, size_t reduceChunks, ncclDataType_t originalDatatype,
     size_t originalElements, cudaStream_t stream);
 

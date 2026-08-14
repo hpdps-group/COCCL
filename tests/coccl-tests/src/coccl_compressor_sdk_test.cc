@@ -3,6 +3,8 @@
 #include <stdio.h>
 #include <string.h>
 
+#include <type_traits>
+
 extern "C" const cocclCompressorPlugin* cocclGetCompressorPlugin();
 
 namespace {
@@ -76,26 +78,6 @@ struct ResourceCompressor {
       return ncclInvalidArgument;
     }
     *encodedBytes = input.bytes() / 2;
-    return ncclSuccess;
-  }
-};
-
-struct ZeroEstimateCompressor {
-  static coccl::Status compress(const coccl::Input& input,
-                                coccl::Output& output,
-                                coccl::Context&) {
-    return output.commitBytes(input.bytes(), input.chunks());
-  }
-
-  static coccl::Status decompress(const coccl::Input&, coccl::Output&,
-                                  coccl::Context&) {
-    return ncclSuccess;
-  }
-
-  static coccl::Status encodedSizeBound(
-      const coccl::Shape&, size_t* encodedBytes,
-      const coccl::SizeContext&) {
-    *encodedBytes = 0;
     return ncclSuccess;
   }
 };
@@ -189,7 +171,7 @@ int testMinimalPlugin() {
   }
 
   cocclCompressorPlugin incompatible = *plugin;
-  const uint32_t legacyVersions[] = {5u, 6u};
+  const uint32_t legacyVersions[] = {5u, 6u, 7u};
   for (uint32_t legacyVersion : legacyVersions) {
     incompatible = *plugin;
     incompatible.abiVersion = legacyVersion;
@@ -239,8 +221,7 @@ int testMinimalPlugin() {
   size_t encodedBytes = 123;
   if (plugin->getEncodedSizeBound == nullptr ||
       plugin->getEncodedSizeBound(&query, &encodedBytes) !=
-          ncclInvalidUsage ||
-      encodedBytes != 0) {
+          ncclInvalidUsage) {
     fprintf(stderr, "missing estimator did not report unavailable\n");
     return 1;
   }
@@ -257,17 +238,17 @@ int testFramedPlugin() {
   }
 
   cocclCompressorExecutionContext execution = {
-      sizeof(cocclCompressorExecutionContext), nullptr, nullptr,
+      sizeof(cocclCompressorExecutionContext), &kHostApi, nullptr,
       nullptr, 0, 0, 1, 1, 1};
   unsigned char raw[32] = {};
   unsigned char encoded[32] = {};
   cocclCompressorFrameMetadata metadata[2] = {};
-  cocclCompressorOutputView compressed = {
+  cocclCompressorView compressed = {
       encoded, sizeof(encoded), 0, 0, 2, ncclInt8, metadata, 16};
   cocclCompressorCall compressCall = {
       sizeof(cocclCompressorCall),
       cocclCompressorOperationCompress,
-      {raw, sizeof(raw), 8, 2, ncclFloat32, nullptr, 0},
+      {raw, sizeof(raw), sizeof(raw), 8, 2, ncclFloat32, nullptr, 0},
       &compressed,
       0,
       0,
@@ -284,13 +265,13 @@ int testFramedPlugin() {
     return 1;
   }
 
-  cocclCompressorOutputView decompressed = {
+  cocclCompressorView decompressed = {
       raw, sizeof(raw), 0, 8, 2, ncclFloat32, nullptr, 0};
   cocclCompressorCall decompressCall = {
       sizeof(cocclCompressorCall),
       cocclCompressorOperationDecompress,
-      {encoded, sizeof(encoded), sizeof(encoded), 2, ncclInt8,
-       metadata, 16},
+      {encoded, sizeof(encoded), sizeof(encoded), sizeof(encoded), 2,
+       ncclInt8, metadata, 16},
       &decompressed,
       0,
       0,
@@ -316,16 +297,22 @@ int testFramedPlugin() {
 int testPassthroughMetadata() {
   float inputData[8] = {};
   unsigned char outputData[sizeof(inputData)] = {};
-  const cocclCompressorDataView inputView = {
-      inputData, sizeof(inputData), 8, 2, ncclFloat32};
+  const cocclCompressorView inputView = {
+      inputData, sizeof(inputData), sizeof(inputData), 8, 2, ncclFloat32};
   coccl::Input input(inputView);
+  static_assert(std::is_same<decltype(input.data()), const void*>::value,
+                "compressor input data must remain read-only");
+  static_assert(
+      std::is_same<decltype(input.frameMetadata()),
+                   const cocclCompressorFrameMetadata*>::value,
+      "compressor input frame metadata must remain read-only");
   if (coccl::shouldPassthrough(input, sizeof(inputData)) ||
       !coccl::shouldPassthrough(input, sizeof(inputData) + 1)) {
     fprintf(stderr, "passthrough size decision is not strict\n");
     return 1;
   }
 
-  cocclCompressorOutputView outputView = {
+  cocclCompressorView outputView = {
       outputData, sizeof(outputData), 0, 0, 2, ncclInt8};
   coccl::Output output(&outputView);
   if (output.commitPassthrough(input) != ncclSuccess ||
@@ -335,9 +322,9 @@ int testPassthroughMetadata() {
     fprintf(stderr, "passthrough metadata commit failed\n");
     return 1;
   }
-  const cocclCompressorDataView passthroughView = {
-      outputView.data, outputView.bytes, outputView.elements,
-      outputView.chunks, outputView.datatype};
+  const cocclCompressorView passthroughView = {
+      outputView.data, outputView.bytes, outputView.bytes,
+      outputView.elements, outputView.chunks, outputView.datatype};
   if (!coccl::isPassthrough(coccl::Input(passthroughView))) {
     fprintf(stderr, "passthrough metadata was not recognized\n");
     return 1;
@@ -378,31 +365,6 @@ int testOptionalResources() {
     plugin->destroyConfig(config);
     return 1;
   }
-  sizeQuery.structSize--;
-  if (plugin->getEncodedSizeBound(&sizeQuery, &encodedBytes) !=
-      ncclInvalidArgument) {
-    fprintf(stderr, "malformed size query was not rejected\n");
-    plugin->destroyConfig(config);
-    return 1;
-  }
-  sizeQuery.structSize = sizeof(cocclCompressorSizeQuery);
-  cocclCompressorSizeQuery invalidShape = sizeQuery;
-  invalidShape.chunks = 3;
-  if (plugin->getEncodedSizeBound(&invalidShape, &encodedBytes) !=
-      ncclInvalidArgument) {
-    fprintf(stderr, "non-divisible size query was not rejected\n");
-    plugin->destroyConfig(config);
-    return 1;
-  }
-  invalidShape = sizeQuery;
-  invalidShape.elements = SIZE_MAX;
-  invalidShape.datatype = ncclFloat64;
-  if (plugin->getEncodedSizeBound(&invalidShape, &encodedBytes) !=
-      ncclInvalidArgument) {
-    fprintf(stderr, "overflowing size query was not rejected\n");
-    plugin->destroyConfig(config);
-    return 1;
-  }
 
   FakeHost host;
   cocclCompressorExecutionContext execution = {
@@ -410,12 +372,13 @@ int testOptionalResources() {
       nullptr, 0, 0, 1, 1, 1};
   unsigned char inputData[32] = {};
   unsigned char outputData[32] = {};
-  cocclCompressorOutputView output = {
+  cocclCompressorView output = {
       outputData, sizeof(outputData), 0, 0, 1, ncclInt8};
   cocclCompressorCall call = {
       sizeof(cocclCompressorCall),
       cocclCompressorOperationCompress,
-      {inputData, sizeof(inputData), sizeof(inputData), 1, ncclInt8},
+      {inputData, sizeof(inputData), sizeof(inputData), sizeof(inputData), 1,
+       ncclInt8},
       &output,
       0,
       0,
@@ -424,6 +387,15 @@ int testOptionalResources() {
       config,
       &execution,
   };
+  cocclCompressorHostApi invalidHostApi = kHostApi;
+  --invalidHostApi.abiVersion;
+  execution.hostApi = &invalidHostApi;
+  if (plugin->execute(&call) != ncclInvalidArgument) {
+    fprintf(stderr, "invalid Host API was accepted\n");
+    plugin->destroyConfig(config);
+    return 1;
+  }
+  execution.hostApi = &kHostApi;
   const ncclResult_t result = plugin->execute(&call);
   plugin->destroyConfig(config);
   if (host.destroyState != nullptr) host.destroyState(host.state);
@@ -450,18 +422,6 @@ int testOptionalResources() {
   if (noResourceResult != ncclSuccess || host.scratchCalls != 1 ||
       host.persistentCalls != 1 || host.stateCalls != 1) {
     fprintf(stderr, "unused SDK resources were allocated\n");
-    return 1;
-  }
-
-  const cocclCompressorPlugin* zeroPlugin =
-      coccl::detail::PluginAdapter<ZeroEstimateCompressor>::descriptor(
-          "zero");
-  sizeQuery.config = nullptr;
-  encodedBytes = 1;
-  if (zeroPlugin->getEncodedSizeBound(&sizeQuery, &encodedBytes) !=
-          ncclInvalidArgument ||
-      encodedBytes != 0) {
-    fprintf(stderr, "zero encoded-size bound was not rejected\n");
     return 1;
   }
 

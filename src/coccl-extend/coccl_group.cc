@@ -2,16 +2,12 @@
 
 #include "runtime/coccl_runtime.h"
 
-#include "comm.h"
-#include "debug.h"
-
 #include <vector>
 
 namespace {
 
 struct cocclDeferredGroupState {
   std::vector<cocclPreparedCall> pending;
-  bool draining = false;
 };
 
 thread_local cocclDeferredGroupState cocclGroupState;
@@ -23,38 +19,51 @@ bool cocclGroupHasPending() {
 }
 
 ncclResult_t cocclGroupEnqueue(const cocclPreparedCall* prepared) {
-  if (prepared == nullptr || prepared->info.comm == nullptr ||
-      prepared->descriptor == nullptr || !prepared->compressor) {
-    return ncclInvalidArgument;
-  }
-  if (cocclGroupState.draining) return ncclInvalidUsage;
-
-  // COCCL's deferred replay contract is one host thread per rank. Reject the
-  // multi-local-GPU pattern that would otherwise replay one blocking rank
-  // before its peers have entered the internal collective.
-  if (!cocclGroupState.pending.empty() &&
-      cocclGroupState.pending.front().info.comm->cudaDev !=
-          prepared->info.comm->cudaDev) {
-    WARN("COCCL grouped calls require one host thread per rank");
-    return ncclInvalidUsage;
-  }
-
   // Buffer pointers, communicator and stream follow NCCL group semantics: the
   // caller must keep them valid until ncclGroupEnd returns.
   cocclGroupState.pending.push_back(*prepared);
   return ncclSuccess;
 }
 
-ncclResult_t cocclGroupDrain() {
-  if (cocclGroupState.draining || cocclGroupState.pending.empty()) {
-    return ncclSuccess;
+ncclResult_t cocclGroupEnqueueNative(const cocclInfo* info) {
+  cocclPreparedCall pending;
+  pending.info = *info;
+  cocclGroupState.pending.push_back(pending);
+  return ncclSuccess;
+}
+
+ncclResult_t cocclGroupPrepareEnd(bool nativePending) {
+  bool hasSendRecv = false;
+  bool hasCollective = false;
+  bool replayNative = nativePending;
+  for (const cocclPreparedCall& pending : cocclGroupState.pending) {
+    hasSendRecv |= pending.info.operation == cocclOperation::SendRecv;
+    hasCollective |= pending.info.operation != cocclOperation::SendRecv;
+    replayNative |= !pending.compressor;
   }
+  replayNative |= hasSendRecv && hasCollective;
+  if (!replayNative) return ncclSuccess;
+
+  std::vector<cocclPreparedCall> batch;
+  batch.swap(cocclGroupState.pending);
+  for (const cocclPreparedCall& pending : batch) {
+    ncclResult_t ret = cocclReplayNativeCall(pending.info);
+    if (ret != ncclSuccess) return ret;
+  }
+  return ncclSuccess;
+}
+
+ncclResult_t cocclGroupDrain() {
+  if (cocclGroupState.pending.empty()) return ncclSuccess;
 
   // Detach the batch before replay. Internal groups created by a primitive see
   // an empty pending queue and therefore cannot recursively drain this batch.
   std::vector<cocclPreparedCall> batch;
   batch.swap(cocclGroupState.pending);
-  cocclGroupState.draining = true;
+
+  if (batch.front().info.operation == cocclOperation::SendRecv) {
+    return cocclExecuteSendRecvBatch(batch.data(), batch.size());
+  }
 
   ncclResult_t ret = ncclSuccess;
   for (const cocclPreparedCall& pending : batch) {
@@ -62,7 +71,6 @@ ncclResult_t cocclGroupDrain() {
     if (ret != ncclSuccess) break;
   }
 
-  cocclGroupState.draining = false;
   return ret;
 }
 

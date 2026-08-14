@@ -341,12 +341,13 @@ ncclResult_t finishInvocation(cocclCompressorInvocation* invocation,
 
 ncclResult_t validateExecution(const cocclCompressorHandle& handle,
                                cocclCompressorOperation operation,
-                               const cocclCompressorDataView& input,
-                               cocclCompressorOutputView* output,
+                               const cocclCompressorView& input,
+                               cocclCompressorView* output,
                                cocclCompressorRuntimeState** state) {
   if (!handle || output == nullptr || state == nullptr ||
       input.data == nullptr || output->data == nullptr ||
-      input.chunks == 0 || input.elements % input.chunks != 0) {
+      input.capacityBytes != input.bytes || input.chunks == 0 ||
+      output->chunks == 0 || input.elements % input.chunks != 0) {
     return ncclInvalidArgument;
   }
   *state = handle.state.get();
@@ -366,6 +367,8 @@ ncclResult_t validateExecution(const cocclCompressorHandle& handle,
     return ncclInvalidArgument;
   }
   const bool encodedInput = operation != cocclCompressorOperationCompress;
+  // Encoded datatype is plugin-defined: besides byte streams and raw fallback,
+  // stateful codecs may emit a typed bootstrap frame. Decoded output is fixed.
   const bool encodedOutput =
       operation == cocclCompressorOperationCompress ||
       operation == cocclCompressorOperationDecompressReduceCompress;
@@ -404,14 +407,24 @@ ncclResult_t validateExecution(const cocclCompressorHandle& handle,
   return ncclSuccess;
 }
 
-ncclResult_t validateOutput(void* expectedData,
+ncclResult_t validateOutput(cocclCompressorOperation operation,
+                            void* expectedData,
+                            size_t expectedCapacityBytes,
                             cocclCompressorFrameMetadata* expectedMetadata,
                             size_t expectedFrameStride,
-                            const cocclCompressorOutputView* output) {
+                            size_t expectedChunks,
+                            ncclDataType_t expectedDatatype,
+                            const cocclCompressorView* output) {
+  const bool encodedOutput =
+      operation == cocclCompressorOperationCompress ||
+      operation == cocclCompressorOperationDecompressReduceCompress;
   if (output == nullptr || output->data != expectedData ||
+      output->capacityBytes != expectedCapacityBytes ||
       output->frameMetadata != expectedMetadata ||
       output->frameStrideBytes != expectedFrameStride ||
-      output->bytes > output->capacityBytes || output->chunks == 0 ||
+      output->chunks != expectedChunks ||
+      (!encodedOutput && output->datatype != expectedDatatype) ||
+      output->bytes > expectedCapacityBytes ||
       output->elements % output->chunks != 0) {
     return ncclInvalidArgument;
   }
@@ -516,7 +529,7 @@ ncclResult_t cocclGetCompressorEncodedSizeBound(
 ncclResult_t cocclExecuteCompressor(
     const cocclCompressorHandle& handle,
     cocclCompressorOperation operation,
-    const cocclCompressorDataView& input, cocclCompressorOutputView* output,
+    const cocclCompressorView& input, cocclCompressorView* output,
     int rank, size_t reduceChunks, ncclDataType_t originalDatatype,
     size_t originalElements, cudaStream_t stream) {
   cocclCompressorRuntimeState* state = nullptr;
@@ -529,8 +542,11 @@ ncclResult_t cocclExecuteCompressor(
   }
 
   void* expectedData = output->data;
+  const size_t expectedCapacityBytes = output->capacityBytes;
   cocclCompressorFrameMetadata* expectedMetadata = output->frameMetadata;
   const size_t expectedFrameStride = output->frameStrideBytes;
+  const size_t expectedChunks = output->chunks;
+  const ncclDataType_t expectedDatatype = output->datatype;
   cocclCompressorInvocation invocation = {state, stream};
   cocclCompressorExecutionContext execution = {
       sizeof(cocclCompressorExecutionContext),
@@ -551,7 +567,8 @@ ncclResult_t cocclExecuteCompressor(
   ncclResult_t ret = finishInvocation(
       &invocation, state->compressor->execute(&call));
   return ret == ncclSuccess
-      ? validateOutput(expectedData, expectedMetadata, expectedFrameStride,
-                       output)
+      ? validateOutput(operation, expectedData, expectedCapacityBytes,
+                       expectedMetadata, expectedFrameStride, expectedChunks,
+                       expectedDatatype, output)
       : ret;
 }

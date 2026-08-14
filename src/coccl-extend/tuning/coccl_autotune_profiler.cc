@@ -6,6 +6,8 @@
 #include "runtime/coccl_compressor_runtime.h"
 #include "config/coccl_config.h"
 #include "runtime/coccl_comm.h"
+#include "runtime/coccl_group.h"
+#include "runtime/coccl_runtime.h"
 #include "comm.h"
 #include "debug.h"
 
@@ -192,14 +194,30 @@ ncclResult_t enqueueP2pExchange(ncclComm_t comm, const void* sendBuffer,
                                 int recvPeer, cudaStream_t stream) {
   ncclResult_t ret = ncclSuccess;
   NCCLCHECKGOTO(ncclGroupStart(), ret, exit);
-  NCCLCHECKGOTO(
-      ncclRecvNaive(
-          recvBuffer, bytes, ncclInt8, recvPeer, comm, stream),
-      ret, group_exit);
-  NCCLCHECKGOTO(
-      ncclSendNaive(
-          sendBuffer, bytes, ncclInt8, sendPeer, comm, stream),
-      ret, group_exit);
+  {
+    cocclInfo info;
+    info.recvbuff = recvBuffer;
+    info.count = bytes;
+    info.datatype = ncclInt8;
+    info.peer = recvPeer;
+    info.func = ncclFuncRecv;
+    info.operation = cocclOperation::SendRecv;
+    info.comm = comm;
+    info.stream = stream;
+    NCCLCHECKGOTO(cocclReplayNativeCall(info), ret, group_exit);
+  }
+  {
+    cocclInfo info;
+    info.sendbuff = sendBuffer;
+    info.count = bytes;
+    info.datatype = ncclInt8;
+    info.peer = sendPeer;
+    info.func = ncclFuncSend;
+    info.operation = cocclOperation::SendRecv;
+    info.comm = comm;
+    info.stream = stream;
+    NCCLCHECKGOTO(cocclReplayNativeCall(info), ret, group_exit);
+  }
 group_exit:
   {
     ncclResult_t groupRet = ncclGroupEnd();
@@ -330,9 +348,9 @@ bool runCompressorIteration(
     return false;
   }
   size_t elementCount = bytes / sizeof(float);
-  const cocclCompressorDataView input = {
-      rawBuffer, bytes, elementCount, 1, ncclFloat32};
-  cocclCompressorOutputView compressed = {
+  const cocclCompressorView input = {
+      rawBuffer, bytes, bytes, elementCount, 1, ncclFloat32};
+  cocclCompressorView compressed = {
       compressedStorage, compressedCapacity, 0, 0, 1, ncclInt8,
       frameMetadata, frameMetadata == nullptr ? 0 : bytes};
   if (ncclCompress(compressor, input, &compressed, measurementComm->rank,
@@ -344,11 +362,11 @@ bool runCompressorIteration(
 
   // Compression and decompression use the same stream, so decompression may
   // safely overwrite the raw scratch after compression has consumed it.
-  const cocclCompressorDataView compressedInput = {
-      compressed.data, compressed.bytes, compressed.elements,
-      compressed.chunks, compressed.datatype, compressed.frameMetadata,
-      compressed.frameStrideBytes};
-  cocclCompressorOutputView decompressed = {
+  const cocclCompressorView compressedInput = {
+      compressed.data, compressed.bytes, compressed.bytes,
+      compressed.elements, compressed.chunks, compressed.datatype,
+      compressed.frameMetadata, compressed.frameStrideBytes};
+  cocclCompressorView decompressed = {
       rawBuffer, bytes, 0, elementCount, 1, ncclFloat32};
   return ncclDecompress(compressor, compressedInput, &decompressed,
                         stream) == ncclSuccess;
@@ -474,7 +492,6 @@ ncclResult_t profileCompressor(
                      cudaMemcpyDeviceToHost) != cudaSuccess ||
           hostFrameMetadata->payloadBytes == 0 ||
           hostFrameMetadata->payloadBytes > bytes ||
-          hostFrameMetadata->reserved != 0 ||
           (hostFrameMetadata->encoding != cocclCompressorFrameEncoded &&
            !(hostFrameMetadata->encoding == cocclCompressorFrameRaw &&
              hostFrameMetadata->payloadBytes == bytes))) {

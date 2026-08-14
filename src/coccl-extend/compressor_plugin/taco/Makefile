@@ -28,7 +28,7 @@ $(OBJDIR)/taco.o: taco.cu
 
 $(PLUGIN_SO): $(OBJDIR)/taco.o
 	@mkdir -p $(dir $@)
-	$(NVCC) -shared $< $(LDFLAGS) -o $@
+	$(NVCC) $(NVCC_GENCODE) -shared $< $(LDFLAGS) -o $@
 
 .PHONY: clean
 clean:

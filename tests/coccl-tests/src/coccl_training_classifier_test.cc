@@ -24,6 +24,40 @@ thread_local int ncclDebugNoWarn = 0;
 // destroy entry point. This host-only test never creates a split communicator.
 ncclResult_t ncclCommDestroy(ncclComm_t) { return ncclSuccess; }
 
+// Runtime dependencies below the threshold gate must never execute in this
+// host-only test. Returning an error makes a missed gate fail the assertion.
+__thread int ncclGroupDepth = 0;
+__thread ncclResult_t ncclGroupError = ncclSuccess;
+struct ncclCudaGraph;
+bool cocclCompressionEnabled() { return true; }
+ncclResult_t ncclCudaGetCapturingGraph(ncclCudaGraph*, cudaStream_t) {
+  return ncclSuccess;
+}
+ncclResult_t cocclSelectAlgorithm(cocclPreparedCall*) {
+  return ncclInternalError;
+}
+ncclResult_t cocclGroupEnqueue(const cocclPreparedCall*) {
+  return ncclInternalError;
+}
+ncclResult_t cocclGroupEnqueueNative(const cocclInfo*) {
+  return ncclInternalError;
+}
+ncclResult_t cocclExecuteAllGather(const cocclPreparedCall*) {
+  return ncclInternalError;
+}
+ncclResult_t cocclExecuteReduceScatter(const cocclPreparedCall*) {
+  return ncclInternalError;
+}
+ncclResult_t cocclExecuteAllReduce(const cocclPreparedCall*) {
+  return ncclInternalError;
+}
+ncclResult_t cocclExecuteAllToAll(const cocclPreparedCall*) {
+  return ncclInternalError;
+}
+ncclResult_t cocclExecuteSendRecv(const cocclPreparedCall*) {
+  return ncclInternalError;
+}
+
 namespace {
 
 struct TraceBuilder {
@@ -322,6 +356,7 @@ static int expectConfiguredCompressor(
 }
 
 static int testRoleSpecificCompressorSelection() {
+  constexpr size_t kExplicitBypassThreshold = 1ULL << 30;
   ncclComm comm = {};
   comm.rank = 0;
   comm.nRanks = 8;
@@ -350,7 +385,7 @@ static int testRoleSpecificCompressorSelection() {
       cocclCommSetCompressorPolicy(
           &comm, cocclTrainingRoleDataParallel,
           cocclDefaultPolicy(cocclOperation::ReduceScatter),
-          1024, dpCompressor) != ncclSuccess ||
+          kExplicitBypassThreshold, dpCompressor) != ncclSuccess ||
       cocclCommSetCompressorPolicy(
           &comm, cocclTrainingRoleDataParallel,
           cocclDefaultPolicy(cocclOperation::AllGather),
@@ -397,70 +432,48 @@ static int testRoleSpecificCompressorSelection() {
     fprintf(stderr, "role-specific chain test did not classify DP\n");
     return 1;
   }
-  if (!cocclCommShouldCompress(
+  cocclResolvedCompressorPolicy resolved;
+  if (cocclCommResolveCompressorPolicy(
           &comm, classification.role,
-          cocclDefaultPolicy(cocclOperation::ReduceScatter), 1025,
-          ncclFloat16, ncclSum) ||
-      !cocclCommShouldCompress(
-          &comm, classification.role,
-          cocclDefaultPolicy(cocclOperation::ReduceScatter), 1025,
-          ncclFloat32, ncclSum) ||
-      cocclCommShouldCompress(
-          &comm, classification.role,
-          cocclDefaultPolicy(cocclOperation::ReduceScatter), 1024,
-          ncclFloat32, ncclSum) ||
-      cocclCommShouldCompress(
-          &comm, classification.role,
-          cocclDefaultPolicy(cocclOperation::ReduceScatter), 2048,
-          ncclFloat64, ncclSum) ||
-      cocclCommShouldCompress(
-          &comm, classification.role,
-          cocclDefaultPolicy(cocclOperation::ReduceScatter), 2048,
-          ncclFloat32, ncclProd)) {
-    fprintf(stderr, "unified compression predicate has incorrect threshold, datatype, or reduction-op behavior\n");
+          cocclDefaultPolicy(cocclOperation::ReduceScatter), &resolved) !=
+          ncclSuccess ||
+      resolved.compressor.state.get() != dpCompressor.state.get() ||
+      resolved.thresholdBytes != kExplicitBypassThreshold) {
+    fprintf(stderr, "classified DP policy did not resolve correctly\n");
     return 1;
   }
-#if defined(__CUDA_BF16_TYPES_EXIST__)
-  if (!cocclCommShouldCompress(
-          &comm, classification.role,
-          cocclDefaultPolicy(cocclOperation::ReduceScatter), 1025,
-          ncclBfloat16, ncclSum)) {
-    fprintf(stderr, "unified compression predicate rejected BF16\n");
+  float sendbuff[512] = {};
+  float recvbuff[64] = {};
+  cocclInfo routed = {};
+  routed.sendbuff = sendbuff;
+  routed.recvbuff = recvbuff;
+  routed.count = 64;
+  routed.datatype = ncclFloat32;
+  routed.op = ncclSum;
+  routed.func = ncclFuncReduceScatter;
+  routed.operation = cocclOperation::ReduceScatter;
+  routed.comm = &comm;
+  bool isEnqueued = true;
+  if (cocclEnqueueCheck(&routed, &isEnqueued) != ncclSuccess || isEnqueued) {
+    fprintf(stderr, "automatic routing ignored the compression threshold\n");
     return 1;
   }
-#endif
-  comm.nRanks = 1;
-  bool compressedSingleRank = cocclCommShouldCompress(
-      &comm, classification.role,
-      cocclDefaultPolicy(cocclOperation::ReduceScatter), 2048,
-      ncclFloat32, ncclSum);
-  comm.nRanks = 8;
-  if (compressedSingleRank) {
-    fprintf(stderr, "unified compression predicate accepted one rank\n");
-    return 1;
-  }
+  // Direct lookup is used by explicit nccl*Comp* primitives and must not
+  // filter a compressor merely because this message is below threshold.
   int result = expectConfiguredCompressor(
       &comm, cocclDefaultPolicy(cocclOperation::ReduceScatter),
       dpCompressor, "classified DP policy");
   if (result == 0 &&
-      (!cocclCommShouldCompress(
-           &comm, classification.role,
-           cocclDefaultPolicy(cocclOperation::AllGather), 1,
-           ncclFloat32, ncclSum) ||
-       expectConfiguredCompressor(
+      expectConfiguredCompressor(
            &comm, cocclDefaultPolicy(cocclOperation::AllGather),
            dpAllGatherCompressor,
-           "zero-threshold DP AllGather policy"))) {
+           "zero-threshold DP AllGather policy")) {
     fprintf(stderr, "zero-threshold role/op policy was not enabled\n");
     result = 1;
   }
   selected = {};
   if (result == 0 &&
-      (cocclCommShouldCompress(
-           &comm, classification.role,
-           cocclDefaultPolicy(cocclOperation::AllReduce), 2048,
-           ncclFloat32, ncclSum) ||
-       cocclCommGetCompressor(
+      (cocclCommGetCompressor(
            &comm, cocclDefaultPolicy(cocclOperation::AllReduce),
            &selected) !=
            ncclInvalidUsage ||
@@ -527,7 +540,7 @@ static int testOperationDescriptors() {
           reduceScatter, cocclOperationTraitReduction) ||
       !cocclOperationHasTrait(
           reduceScatter, cocclOperationTraitHierarchicalPolicy) ||
-      cocclOperationHasTrait(sendRecv, cocclOperationTraitGrouped) ||
+      !cocclOperationHasTrait(sendRecv, cocclOperationTraitGrouped) ||
       !cocclOperationSupportsPolicy(
           sendRecv, cocclPolicyVariant::Forward) ||
       cocclOperationSupportsPolicy(

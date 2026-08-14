@@ -1,18 +1,11 @@
 #include "compression/compress.h"
 
 #include "buffer/coccl_buffer_management.h"
-#include "runtime/coccl_comm.h"
 #include "compression/reduce_extend.h"
 
 #include <limits>
 
 namespace {
-
-ncclResult_t resolveCompressorForExecution(
-    ncclComm_t comm, cocclPolicyKey policy,
-    cocclCompressorHandle* compressor) {
-  return cocclCommGetCompressor(comm, policy, compressor);
-}
 
 bool checkedMultiply(size_t lhs, size_t rhs, size_t* result) {
   if (result == nullptr || (lhs != 0 && rhs > SIZE_MAX / lhs)) return false;
@@ -29,13 +22,13 @@ ncclResult_t typedBytes(size_t elements, ncclDataType_t datatype,
       : ncclSuccess;
 }
 
-bool isRawPassthrough(const cocclCompressorDataView& input) {
+bool isRawPassthrough(const cocclCompressorView& input) {
   return input.datatype == COCCL_COMPRESSOR_RAW_PASSTHROUGH;
 }
 
 ncclResult_t copyInputAsRawPassthrough(
-    const cocclCompressorDataView& input,
-    cocclCompressorOutputView* output, cudaStream_t stream) {
+    const cocclCompressorView& input,
+    cocclCompressorView* output, cudaStream_t stream) {
   if (output == nullptr || output->data == nullptr || input.data == nullptr ||
       input.chunks == 0 || input.bytes > output->capacityBytes ||
       input.bytes % input.chunks != 0) {
@@ -55,8 +48,8 @@ ncclResult_t copyInputAsRawPassthrough(
 }
 
 ncclResult_t copyRawPassthroughToOutput(
-    const cocclCompressorDataView& input,
-    cocclCompressorOutputView* output, cudaStream_t stream) {
+    const cocclCompressorView& input,
+    cocclCompressorView* output, cudaStream_t stream) {
   size_t outputBytes = 0;
   if (!isRawPassthrough(input) || output == nullptr ||
       input.data == nullptr || output->data == nullptr ||
@@ -89,8 +82,8 @@ ncclResult_t releaseWorkspace(cocclBufferHandle* buffer,
 
 ncclResult_t ncclCompress(
     const cocclCompressorHandle& compressor,
-    const cocclCompressorDataView& input,
-    cocclCompressorOutputView* output, int rank, cudaStream_t stream) {
+    const cocclCompressorView& input,
+    cocclCompressorView* output, int rank, cudaStream_t stream) {
   NCCLCHECK(cocclExecuteCompressor(
       compressor, cocclCompressorOperationCompress, input, output, rank, 0,
       ncclInt8, 0, stream));
@@ -103,8 +96,8 @@ ncclResult_t ncclCompress(
 
 ncclResult_t ncclDecompress(
     const cocclCompressorHandle& compressor,
-    const cocclCompressorDataView& input,
-    cocclCompressorOutputView* output, cudaStream_t stream) {
+    const cocclCompressorView& input,
+    cocclCompressorView* output, cudaStream_t stream) {
   if (isRawPassthrough(input)) {
     return copyRawPassthroughToOutput(input, output, stream);
   }
@@ -116,8 +109,8 @@ ncclResult_t ncclDecompress(
 
 ncclResult_t ncclDecompressReduce(
     const cocclCompressorHandle& compressor, ncclComm_t ownerComm,
-    const cocclCompressorDataView& input,
-    cocclCompressorOutputView* output, size_t reduceChunks,
+    const cocclCompressorView& input,
+    cocclCompressorView* output, size_t reduceChunks,
     cudaStream_t stream) {
   if (ownerComm == nullptr || output == nullptr || reduceChunks == 0) {
     return ncclInvalidArgument;
@@ -145,7 +138,7 @@ ncclResult_t ncclDecompressReduce(
                     ownerComm, decompressedBytes, &workspace),
                 ret, exit);
   {
-    cocclCompressorOutputView decompressed = {
+    cocclCompressorView decompressed = {
         workspace.ptr, workspace.bytes, decompressedBytes,
         decompressedElements, input.chunks, output->datatype};
     NCCLCHECKGOTO(ncclDecompress(
@@ -167,8 +160,8 @@ exit:
 
 ncclResult_t ncclDecompReduceComp(
     const cocclCompressorHandle& compressor, ncclComm_t ownerComm,
-    const cocclCompressorDataView& input,
-    cocclCompressorOutputView* output, size_t reduceChunks,
+    const cocclCompressorView& input,
+    cocclCompressorView* output, size_t reduceChunks,
     ncclDataType_t originalDatatype, size_t originalElements,
     cudaStream_t stream) {
   if (ownerComm == nullptr || output == nullptr || reduceChunks == 0 ||
@@ -218,7 +211,7 @@ ncclResult_t ncclDecompReduceComp(
                     ownerComm, decompressedBytes, &workspace),
                 ret, exit);
   {
-    cocclCompressorOutputView decompressed = {
+    cocclCompressorView decompressed = {
         workspace.ptr, workspace.bytes, decompressedBytes,
         decompressedElements, input.chunks, originalDatatype};
     NCCLCHECKGOTO(ncclDecompress(
@@ -230,8 +223,9 @@ ncclResult_t ncclDecompReduceComp(
                       originalDatatype, reduceChunks, stream),
       ret, exit);
   {
-    const cocclCompressorDataView reduced = {
-        workspace.ptr, reducedBytes, originalElements, outputChunks,
+    const cocclCompressorView reduced = {
+        workspace.ptr, reducedBytes, reducedBytes, originalElements,
+        outputChunks,
         originalDatatype};
     NCCLCHECKGOTO(ncclCompress(
                       compressor, reduced, output, 0, stream),
@@ -243,124 +237,4 @@ exit:
   return workspace.ptr == nullptr
       ? ret
       : releaseWorkspace(&workspace, stream, ret);
-}
-
-ncclResult_t ncclCompress(
-    const void* orgbuff, void** compbuff, const size_t orgChunkCount,
-    ncclDataType_t orgDatatype, size_t* compChunkCount,
-    ncclDataType_t* compDatatype, const size_t numChunks, const int rank,
-    ncclComm_t comm, cocclPolicyKey policy, cudaStream_t stream) {
-  if (orgbuff == nullptr || compbuff == nullptr || *compbuff == nullptr ||
-      compChunkCount == nullptr || compDatatype == nullptr ||
-      numChunks == 0) {
-    return ncclInvalidArgument;
-  }
-  cocclCompressorHandle compressor;
-  NCCLCHECK(resolveCompressorForExecution(comm, policy, &compressor));
-
-  size_t totalElements = 0;
-  size_t totalBytes = 0;
-  if (!checkedMultiply(orgChunkCount, numChunks, &totalElements)) {
-    return ncclInvalidArgument;
-  }
-  NCCLCHECK(typedBytes(totalElements, orgDatatype, &totalBytes));
-  const cocclCompressorDataView input = {
-      orgbuff, totalBytes, totalElements, numChunks, orgDatatype};
-  cocclCompressorOutputView output = {
-      *compbuff, totalBytes, 0, 0, numChunks, ncclInt8};
-  NCCLCHECK(ncclCompress(compressor, input, &output, rank, stream));
-  if (output.elements % output.chunks != 0) return ncclInvalidArgument;
-  *compbuff = output.data;
-  *compChunkCount = output.elements / output.chunks;
-  *compDatatype = output.datatype;
-  return ncclSuccess;
-}
-
-ncclResult_t ncclDecompress(
-    void* decompbuff, const void* compbuff,
-    const size_t decompChunkCount, ncclDataType_t decompDatatype,
-    const size_t compChunkCount, ncclDataType_t compDatatype,
-    const size_t numChunks, ncclComm_t comm, cocclPolicyKey policy,
-    cudaStream_t stream) {
-  if (decompbuff == nullptr || compbuff == nullptr || numChunks == 0) {
-    return ncclInvalidArgument;
-  }
-  cocclCompressorHandle compressor;
-  NCCLCHECK(resolveCompressorForExecution(comm, policy, &compressor));
-
-  size_t inputElements = 0;
-  size_t inputBytes = 0;
-  size_t outputElements = 0;
-  size_t outputBytes = 0;
-  if (!checkedMultiply(compChunkCount, numChunks, &inputElements) ||
-      !checkedMultiply(decompChunkCount, numChunks, &outputElements)) {
-    return ncclInvalidArgument;
-  }
-  NCCLCHECK(typedBytes(inputElements, compDatatype, &inputBytes));
-  NCCLCHECK(typedBytes(outputElements, decompDatatype, &outputBytes));
-  const cocclCompressorDataView input = {
-      compbuff, inputBytes, inputElements, numChunks, compDatatype};
-  cocclCompressorOutputView output = {
-      decompbuff, outputBytes, 0, outputElements, numChunks,
-      decompDatatype};
-  return ncclDecompress(compressor, input, &output, stream);
-}
-
-ncclResult_t ncclDecompressReduce(
-    void* reducebuff, const void* compbuff,
-    const size_t compChunkCount, ncclDataType_t compDatatype,
-    const size_t reduceChunkCount, ncclDataType_t reduceDataType,
-    const size_t numChunks, ncclComm_t comm, cocclPolicyKey policy,
-    cudaStream_t stream) {
-  cocclCompressorHandle compressor;
-  NCCLCHECK(resolveCompressorForExecution(comm, policy, &compressor));
-
-  size_t inputElements = 0;
-  size_t inputBytes = 0;
-  size_t outputBytes = 0;
-  if (!checkedMultiply(compChunkCount, numChunks, &inputElements)) {
-    return ncclInvalidArgument;
-  }
-  NCCLCHECK(typedBytes(inputElements, compDatatype, &inputBytes));
-  NCCLCHECK(typedBytes(reduceChunkCount, reduceDataType, &outputBytes));
-  const cocclCompressorDataView input = {
-      compbuff, inputBytes, inputElements, numChunks, compDatatype};
-  cocclCompressorOutputView output = {
-      reducebuff, outputBytes, 0, reduceChunkCount, 1, reduceDataType};
-  return ncclDecompressReduce(
-      compressor, comm, input, &output, numChunks, stream);
-}
-
-ncclResult_t ncclDecompReduceComp(
-    const void* compbuff, void** recompbuff, const size_t orgChunkCount,
-    ncclDataType_t orgDatatype, const size_t compChunkCount,
-    ncclDataType_t compDatatype, size_t* reCompChunkCount,
-    ncclDataType_t* reCompDatatype, const size_t numChunks,
-    ncclComm_t comm, cocclPolicyKey policy, cudaStream_t stream) {
-  if (recompbuff == nullptr || *recompbuff == nullptr ||
-      reCompChunkCount == nullptr || reCompDatatype == nullptr) {
-    return ncclInvalidArgument;
-  }
-  cocclCompressorHandle compressor;
-  NCCLCHECK(resolveCompressorForExecution(comm, policy, &compressor));
-
-  size_t inputElements = 0;
-  size_t inputBytes = 0;
-  size_t outputCapacity = 0;
-  if (!checkedMultiply(compChunkCount, numChunks, &inputElements)) {
-    return ncclInvalidArgument;
-  }
-  NCCLCHECK(typedBytes(inputElements, compDatatype, &inputBytes));
-  NCCLCHECK(typedBytes(orgChunkCount, orgDatatype, &outputCapacity));
-  const cocclCompressorDataView input = {
-      compbuff, inputBytes, inputElements, numChunks, compDatatype};
-  cocclCompressorOutputView output = {
-      *recompbuff, outputCapacity, 0, 0, 1, ncclInt8};
-  NCCLCHECK(ncclDecompReduceComp(
-      compressor, comm, input, &output, numChunks, orgDatatype,
-      orgChunkCount, stream));
-  *recompbuff = output.data;
-  *reCompChunkCount = output.elements;
-  *reCompDatatype = output.datatype;
-  return ncclSuccess;
 }

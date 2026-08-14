@@ -87,7 +87,7 @@ class Buffer {
 
 class Input {
  public:
-  explicit Input(const cocclCompressorDataView& view) : view_(&view) {}
+  explicit Input(const cocclCompressorView& view) : view_(&view) {}
 
   const void* data() const { return view_->data; }
   size_t bytes() const { return view_->bytes; }
@@ -109,7 +109,7 @@ class Input {
   }
 
  private:
-  const cocclCompressorDataView* view_;
+  const cocclCompressorView* view_;
 };
 
 // Read-only raw shape that the requested encoding operation will produce.
@@ -151,7 +151,7 @@ class SizeContext {
 
 class Output {
  public:
-  explicit Output(cocclCompressorOutputView* view)
+  explicit Output(cocclCompressorView* view)
       : view_(view), plannedElements_(view == nullptr ? 0 : view->elements),
         plannedChunks_(view == nullptr ? 0 : view->chunks),
         plannedDatatype_(view == nullptr ? ncclInt8 : view->datatype) {}
@@ -237,7 +237,7 @@ class Output {
   }
 
  private:
-  cocclCompressorOutputView* view_ = nullptr;
+  cocclCompressorView* view_ = nullptr;
   size_t plannedElements_ = 0;
   size_t plannedChunks_ = 0;
   ncclDataType_t plannedDatatype_ = ncclInt8;
@@ -464,11 +464,6 @@ class Context {
   }
 
   Status scratch(size_t bytes, Buffer* buffer) {
-    if (buffer == nullptr || call_ == nullptr || call_->execution == nullptr ||
-        !validHostApi(call_->execution->hostApi) ||
-        call_->execution->hostApi->allocateScratch == nullptr) {
-      return ncclInvalidArgument;
-    }
     cocclCompressorBufferView view = {};
     Status result = call_->execution->hostApi->allocateScratch(
         call_->execution->hostContext, bytes, &view);
@@ -477,11 +472,6 @@ class Context {
   }
 
   Status persistent(size_t slot, size_t bytes, Buffer* buffer) {
-    if (buffer == nullptr || call_ == nullptr || call_->execution == nullptr ||
-        !validHostApi(call_->execution->hostApi) ||
-        call_->execution->hostApi->acquirePersistent == nullptr) {
-      return ncclInvalidArgument;
-    }
     cocclCompressorBufferView view = {};
     Status result = call_->execution->hostApi->acquirePersistent(
         call_->execution->hostContext, slot, bytes, &view);
@@ -495,11 +485,6 @@ class Context {
                   "compressor State must be default constructible");
     static_assert(std::is_destructible<State>::value,
                   "compressor State must be destructible");
-    if (state == nullptr || call_ == nullptr || call_->execution == nullptr ||
-        !validHostApi(call_->execution->hostApi) ||
-        call_->execution->hostApi->getOrCreateState == nullptr) {
-      return ncclInvalidArgument;
-    }
     static const unsigned char typeKey = 0;
     void* opaque = nullptr;
     Status result = call_->execution->hostApi->getOrCreateState(
@@ -510,15 +495,8 @@ class Context {
   }
 
  private:
-  static bool validHostApi(const cocclCompressorHostApi* api) {
-    return api != nullptr &&
-        api->abiVersion == COCCL_COMPRESSOR_HOST_API_VERSION &&
-        api->structSize == sizeof(cocclCompressorHostApi);
-  }
-
   template <typename State>
   static Status createState(void** state) {
-    if (state == nullptr) return ncclInvalidArgument;
     *state = new (std::nothrow) State();
     return *state == nullptr ? ncclSystemError : ncclSuccess;
   }
@@ -645,34 +623,23 @@ struct PluginAdapter {
 
   static Status execute(cocclCompressorCall* call) {
     if (call == nullptr || call->structSize != sizeof(*call) ||
-        call->input.data == nullptr || call->input.chunks == 0 ||
-        call->input.elements % call->input.chunks != 0 ||
-        call->output == nullptr || call->output->data == nullptr ||
-        call->output->chunks == 0 ||
-        call->output->elements % call->output->chunks != 0 ||
         call->execution == nullptr ||
         call->execution->structSize != sizeof(*call->execution)) {
       return ncclInvalidArgument;
     }
-    const bool inputFramed = call->input.frameMetadata != nullptr;
-    const bool outputFramed = call->output->frameMetadata != nullptr;
-    if (inputFramed != (call->input.frameStrideBytes != 0) ||
-        outputFramed != (call->output->frameStrideBytes != 0)) {
+    const cocclCompressorHostApi* hostApi = call->execution->hostApi;
+    if (hostApi == nullptr ||
+        hostApi->abiVersion != COCCL_COMPRESSOR_HOST_API_VERSION ||
+        hostApi->structSize != sizeof(*hostApi) ||
+        hostApi->allocateScratch == nullptr ||
+        hostApi->acquirePersistent == nullptr ||
+        hostApi->getOrCreateState == nullptr) {
       return ncclInvalidArgument;
     }
-    const bool encodedInput =
-        call->operation != cocclCompressorOperationCompress;
     const bool encodedOutput =
         call->operation == cocclCompressorOperationCompress ||
         call->operation ==
             cocclCompressorOperationDecompressReduceCompress;
-    if (FramedTraits<Compressor>::value) {
-      if (inputFramed != encodedInput || outputFramed != encodedOutput) {
-        return ncclInvalidArgument;
-      }
-    } else if (inputFramed || outputFramed) {
-      return ncclInvalidArgument;
-    }
     Input input(call->input);
     Output output(call->output);
     Context context(call);
@@ -738,31 +705,9 @@ struct PluginAdapter {
 
   static Status getEncodedSizeBound(
       const cocclCompressorSizeQuery* query, size_t* encodedBytes) {
-    if (encodedBytes == nullptr) return ncclInvalidArgument;
-    *encodedBytes = 0;
-    if (query == nullptr || query->structSize != sizeof(*query) ||
-        query->elements == 0 || query->chunks == 0 ||
-        query->elements % query->chunks != 0) {
-      return ncclInvalidArgument;
-    }
-    const size_t typeBytes = dataTypeSize(query->datatype);
-    size_t expectedBytes = 0;
-    if (typeBytes == 0 ||
-        !checkedMultiply(query->elements, typeBytes, &expectedBytes) ||
-        expectedBytes == 0) {
-      return ncclInvalidArgument;
-    }
-    if (query->operation != cocclCompressorOperationCompress &&
-        query->operation !=
-            cocclCompressorOperationDecompressReduceCompress) {
-      return ncclInvalidUsage;
-    }
     const Shape shape(query);
     const SizeContext context(query);
-    const Status result = executeEncodedSizeBound(
-        shape, encodedBytes, context);
-    return result == ncclSuccess && *encodedBytes == 0
-        ? ncclInvalidArgument : result;
+    return executeEncodedSizeBound(shape, encodedBytes, context);
   }
 
   static const cocclCompressorPlugin* descriptor(const char* name) {

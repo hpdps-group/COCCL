@@ -42,12 +42,6 @@ ncclResult_t cocclCommResolveCompressorPolicy(
     ncclComm_t comm, cocclTrainingRole role, cocclPolicyKey key,
     cocclResolvedCompressorPolicy* resolved);
 
-// Policy predicate retained for host-side validation/tests. Runtime dispatch
-// uses cocclCommResolveCompressorPolicy directly so it can reuse the handle.
-bool cocclCommShouldCompress(
-    ncclComm_t comm, cocclTrainingRole role, cocclPolicyKey key,
-    size_t totalBytes, ncclDataType_t datatype, ncclRedOp_t reductionOp);
-
 struct cocclHierarchicalComms {
   // ownerComm provides device/lifetime ownership for shared COCCL workspace.
   ncclComm_t ownerComm = nullptr;
@@ -62,7 +56,8 @@ struct cocclHierarchicalComms {
 ncclResult_t cocclCommGetHierarchicalComms(ncclComm_t comm, cocclHierarchicalComms* resource);
 
 // Resolves the authoritative normal or training role/policy key once. The
-// copied handle can be used without holding cocclCommLock.
+// copied handle can be used without holding cocclCommLock. Explicit coccl*Comp*
+// primitives use this direct lookup and do not apply the routing threshold.
 ncclResult_t cocclCommGetCompressor(
     ncclComm_t comm, cocclPolicyKey key, cocclCompressorHandle* compressor);
 

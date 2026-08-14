@@ -5,7 +5,6 @@
 namespace coccl_buffer {
 
 static ncclResult_t vmmBuildAllocationProp(cocclVmmDeviceBufferPool* pool, CUmemAllocationProp* prop) {
-  if (pool == nullptr || prop == nullptr) return ncclInvalidArgument;
   *prop = {};
   // Use device-local pinned allocations so the resulting VA can participate in
   // GPUDirect-RDMA registration through NCCL when the device supports it.
@@ -19,7 +18,6 @@ static ncclResult_t vmmBuildAllocationProp(cocclVmmDeviceBufferPool* pool, CUmem
 
 static ncclResult_t vmmGetMulticastGranularity(cocclVmmDeviceBufferPool* pool, size_t requestedBytes,
                                                size_t* granularityOut) {
-  if (pool == nullptr || granularityOut == nullptr) return ncclInvalidArgument;
   *granularityOut = 0;
 
 #if CUDART_VERSION >= 12010 && CUDA_VERSION >= 12010
@@ -50,7 +48,6 @@ static ncclResult_t vmmGetMulticastGranularity(cocclVmmDeviceBufferPool* pool, s
 }
 
 ncclResult_t vmmInitPool(cocclVmmDeviceBufferPool* pool, int cudaDev, bool* available) {
-  if (pool == nullptr || available == nullptr) return ncclInvalidArgument;
   *available = false;
 
   if (pool->ready) {
@@ -168,11 +165,6 @@ static ncclResult_t vmmDeregister(ncclComm_t comm, void* handle) {
 
 static ncclResult_t vmmEnsureRegistrationForRange(cocclVmmBackingBlock* block, ncclComm_t ownerComm,
                                                   ncclComm_t registeredComm, void* ptr, size_t bytes) {
-  if (block == nullptr || ownerComm == nullptr || registeredComm == nullptr ||
-      ptr == nullptr || bytes == 0) {
-    return ncclInvalidArgument;
-  }
-
   uintptr_t rangePtr = (uintptr_t)ptr;
   for (const cocclVmmBufferRegistration& registration : block->registrations) {
     if (registration.registeredComm != registeredComm) continue;
@@ -195,7 +187,6 @@ static ncclResult_t vmmEnsureRegistrationForRange(cocclVmmBackingBlock* block, n
 
 static ncclResult_t vmmAcquirePhysicalHandle(cocclVmmDeviceBufferPool* pool,
                                              CUmemGenericAllocationHandle* handleOut) {
-  if (pool == nullptr || handleOut == nullptr) return ncclInvalidArgument;
   if (!pool->freeHandles.empty()) {
     // Reuse a detached physical chunk before asking the driver for a new one.
     *handleOut = pool->freeHandles.back();
@@ -210,18 +201,8 @@ static ncclResult_t vmmAcquirePhysicalHandle(cocclVmmDeviceBufferPool* pool,
   return ncclSuccess;
 }
 
-static ncclResult_t vmmReleasePhysicalHandle(cocclVmmDeviceBufferPool* pool,
-                                             CUmemGenericAllocationHandle handle) {
-  if (pool == nullptr) return ncclInvalidArgument;
-  CUCHECK(cuMemRelease(handle));
-  if (pool->totalPhysicalBytes >= pool->chunkSize) pool->totalPhysicalBytes -= pool->chunkSize;
-  return ncclSuccess;
-}
-
 static ncclResult_t vmmReleaseFreeHandlesToLimit(cocclVmmDeviceBufferPool* pool) {
   ncclResult_t ret = ncclSuccess;
-  if (pool == nullptr) return ncclSuccess;
-
   size_t limit = cocclGetConfig().buffer.poolLimitBytes;
   if (limit == 0) return ncclSuccess;
 
@@ -243,8 +224,6 @@ fail:
 static ncclResult_t vmmSetPeerAccessForBlock(cocclVmmDeviceBufferPool* pool,
                                              CUdeviceptr ptr, size_t bytes) {
   ncclResult_t ret = ncclSuccess;
-  if (pool == nullptr || ptr == 0 || bytes == 0) return ncclInvalidArgument;
-
   int deviceCount = 0;
   CUDACHECKGOTO(cudaGetDeviceCount(&deviceCount), ret, fail);
 
@@ -273,8 +252,6 @@ fail:
 static ncclResult_t vmmReleaseBlockMemory(cocclVmmDeviceBufferPool* pool, cocclVmmBackingBlock* block,
                                           bool releasePhysical) {
   ncclResult_t ret = ncclSuccess;
-  if (pool == nullptr || block == nullptr) return ncclSuccess;
-
   CUDACHECKGOTO(cudaSetDevice(block->cudaDev), ret, fail);
   // NCCL registrations must be removed before unmapping the VA they refer to.
   for (cocclVmmBufferRegistration& registration : block->registrations) {
@@ -321,8 +298,6 @@ fail:
 static ncclResult_t vmmCreateBackingBlock(cocclVmmDeviceBufferPool* pool, size_t bytes,
                                           cocclVmmBackingBlock** blockOut) {
   ncclResult_t ret = ncclSuccess;
-  if (pool == nullptr || blockOut == nullptr || !pool->ready) return ncclInvalidArgument;
-
   // Each block is one contiguous VA reservation sized to full physical chunks.
   size_t blockBytes = alignUp(bytes, pool->chunkSize);
   size_t chunkCount = blockBytes / pool->chunkSize;
@@ -380,8 +355,6 @@ fail:
 
 static ncclResult_t vmmTrimPoolLocked(cocclVmmDeviceBufferPool* pool) {
   ncclResult_t ret = ncclSuccess;
-  if (pool == nullptr || !pool->ready) return ncclSuccess;
-
   size_t limit = cocclGetConfig().buffer.poolLimitBytes;
   if (limit == 0 || pool->totalPhysicalBytes <= limit) return ncclSuccess;
 
@@ -407,8 +380,6 @@ fail:
 
 static ncclResult_t vmmHarvestFreeBlocksLocked(cocclVmmDeviceBufferPool* pool) {
   ncclResult_t ret = ncclSuccess;
-  if (pool == nullptr || !pool->ready) return ncclSuccess;
-
   // Before growing the pool, detach physical chunks from old VA ranges that no
   // communicator has registered and no stream is still using. The handles stay
   // cached in freeHandles, so growth can remap them without a new cuMemCreate.
@@ -432,7 +403,6 @@ fail:
 static ncclResult_t vmmAcquireFromBlock(cocclVmmBackingBlock* block, size_t bytes,
                                         ncclComm_t ownerComm, ncclComm_t registeredComm,
                                         cocclBufferHandle* buffer) {
-  if (block == nullptr || buffer == nullptr) return ncclInvalidArgument;
   vmmMergeFreeSlices(block);
 
   for (auto it = block->slices.begin(); it != block->slices.end(); ++it) {
@@ -478,8 +448,6 @@ static ncclResult_t vmmAcquireFromBlock(cocclVmmBackingBlock* block, size_t byte
 
 ncclResult_t vmmReleaseCommRegistrationsLocked(cocclVmmDeviceBufferPool* pool, ncclComm_t comm) {
   ncclResult_t ret = ncclSuccess;
-  if (pool == nullptr || comm == nullptr || !pool->ready) return ncclSuccess;
-
   CUDACHECKGOTO(cudaSetDevice(pool->cudaDev), ret, fail);
   for (auto& blockPtr : pool->blocks) {
     cocclVmmBackingBlock* block = blockPtr.get();
@@ -520,10 +488,6 @@ ncclResult_t vmmAcquireForComm(cocclVmmDeviceBufferPool* pool, ncclComm_t ownerC
                                ncclComm_t registeredComm, size_t bytes,
                                cocclBufferHandle* buffer) {
   ncclResult_t ret = ncclSuccess;
-  if (pool == nullptr || ownerComm == nullptr || buffer == nullptr) {
-    return ncclInvalidArgument;
-  }
-
   for (auto& blockPtr : pool->blocks) {
     cocclVmmBackingBlock* block = blockPtr.get();
     if (block->capacity < bytes) continue;
@@ -541,25 +505,18 @@ ncclResult_t vmmAcquireForComm(cocclVmmDeviceBufferPool* pool, ncclComm_t ownerC
   return ncclSuccess;
 
 fail:
-  if (buffer != nullptr) *buffer = {};
   return ret;
 }
 
 ncclResult_t vmmRegisterBufferForComm(cocclBufferHandle* buffer, ncclComm_t registeredComm) {
-  if (buffer == nullptr || buffer->block == nullptr || buffer->ownerComm == nullptr || registeredComm == nullptr) {
-    return ncclInvalidArgument;
-  }
   cocclVmmBackingBlock* block = static_cast<cocclVmmBackingBlock*>(buffer->block);
   return vmmEnsureRegistrationForRange(block, buffer->ownerComm, registeredComm, buffer->ptr, buffer->bytes);
 }
 
 ncclResult_t vmmReleaseBuffer(cocclBufferHandle* buffer, cudaStream_t stream) {
   ncclResult_t ret = ncclSuccess;
-  if (buffer == nullptr || buffer->slice == nullptr || buffer->block == nullptr) return ncclSuccess;
-
   cocclVmmBufferSlice* slice = static_cast<cocclVmmBufferSlice*>(buffer->slice);
   cocclVmmBackingBlock* block = static_cast<cocclVmmBackingBlock*>(buffer->block);
-  if (slice == nullptr || block == nullptr || slice->state != SliceState::InUse) return ncclSuccess;
 
   CUDACHECKGOTO(cudaSetDevice(block->cudaDev), ret, fail);
   if (slice->doneEvent == nullptr) {
@@ -580,7 +537,7 @@ fail:
 
 ncclResult_t vmmDestroyPoolLocked(cocclVmmDeviceBufferPool* pool) {
   ncclResult_t ret = ncclSuccess;
-  if (pool == nullptr || !pool->ready) return ncclSuccess;
+  if (!pool->ready) return ncclSuccess;
 
   CUDACHECKGOTO(cudaSetDevice(pool->cudaDev), ret, fail);
   for (auto& blockPtr : pool->blocks) {

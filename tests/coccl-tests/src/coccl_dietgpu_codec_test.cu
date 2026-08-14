@@ -131,9 +131,10 @@ int runRoundTrip(const cocclCompressorPlugin* plugin, int probBits,
     unsigned char* deviceEncoded = deviceEncodedStorage + kGuardBytes;
     unsigned char* deviceDecoded = deviceDecodedStorage + kGuardBytes;
 
-    const cocclCompressorDataView raw = {
-        deviceInput, rawBytes, rawBytes, frames, ncclUint8, nullptr, 0};
-    cocclCompressorOutputView encoded = {
+    const cocclCompressorView raw = {
+        deviceInput, rawBytes, rawBytes, rawBytes, frames, ncclUint8,
+        nullptr, 0};
+    cocclCompressorView encoded = {
         deviceEncoded, rawBytes, 0, 0, frames, ncclInt8,
         deviceMetadata, frameBytes};
     cocclCompressorCall compressCall = {
@@ -144,10 +145,11 @@ int runRoundTrip(const cocclCompressorPlugin* plugin, int probBits,
       goto exit;
     }
 
-    const cocclCompressorDataView compressed = {
-        encoded.data, encoded.bytes, encoded.elements, encoded.chunks,
-        encoded.datatype, encoded.frameMetadata, encoded.frameStrideBytes};
-    cocclCompressorOutputView decoded = {
+    const cocclCompressorView compressed = {
+        encoded.data, encoded.bytes, encoded.bytes, encoded.elements,
+        encoded.chunks, encoded.datatype, encoded.frameMetadata,
+        encoded.frameStrideBytes};
+    cocclCompressorView decoded = {
         deviceDecoded, rawBytes, 0, rawBytes, frames, ncclUint8,
         nullptr, 0};
     cocclCompressorCall decompressCall = {

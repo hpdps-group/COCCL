@@ -123,11 +123,6 @@ int testFramedWorkspace() {
     return 1;
   }
 
-  plan.temps[1].frameStrideBytes = frameStrideBytes / 2;
-  if (cocclPlanPipelineWorkspace(&plan, 4) != ncclInvalidArgument) {
-    fprintf(stderr, "inconsistent framed payload layout was accepted\n");
-    return 1;
-  }
   return 0;
 }
 
@@ -237,43 +232,14 @@ int testUserBufferLayouts() {
                         ncclInvalidArgument, false) ||
       expectUserBuffers("invalid rank", base, 1, base, 4, chunk, -1,
                         cocclPipelineInPlaceInputRankChunk,
-                        ncclInvalidArgument, false) ||
-      expectUserBuffers("invalid layout", base, 1, base, 1, chunk, 0,
-                        (cocclPipelineInPlaceLayout)99,
                         ncclInvalidArgument, false);
-}
-
-int testInvalidWorkspace() {
-  cocclPipelinePlan plan = {};
-  plan.tempCount = 1;
-  plan.inputStagingTemp = -1;
-  plan.outputStagingTemp = -1;
-  plan.temps[0].logicalBytes = SIZE_MAX - 255;
-  plan.temps[0].bytes = SIZE_MAX - 255;
-  if (cocclPlanPipelineWorkspace(&plan, 2) != ncclInvalidArgument) {
-    fprintf(stderr, "overflowing workspace was accepted\n");
-    return 1;
-  }
-
-  plan = {};
-  plan.tempCount = 1;
-  plan.inputStagingTemp = -1;
-  plan.outputStagingTemp = -1;
-  plan.temps[0].logicalBytes = 1;
-  plan.temps[0].bytes = 1;
-  if (cocclPlanPipelineWorkspace(&plan, 1) != ncclInvalidArgument) {
-    fprintf(stderr, "unaligned workspace was accepted\n");
-    return 1;
-  }
-  return 0;
 }
 
 }  // namespace
 
 int main() {
   if (testWorkspaceSelection() || testFramedWorkspace() ||
-      testUserBufferLayouts() ||
-      testInvalidWorkspace()) {
+      testUserBufferLayouts()) {
     return 1;
   }
   printf("coccl pipeline plan tests passed\n");

@@ -25,16 +25,8 @@ testResult_t SendRecvInitData(struct threadArgs* args, ncclDataType_t type, nccl
     int rank = ((args->proc*args->nThreads + args->thread)*args->nGpus + i);
     CUDACHECK(cudaMemset(args->recvbuffs[i], 0, args->expectedBytes));
     void* data = in_place ? args->recvbuffs[i] : args->sendbuffs[i];
-    __nv_bfloat16* hostdata = (__nv_bfloat16*)malloc(sendcount*wordSize(type));
-    for(int ii=0; ii<sendcount; ii++){
-      //  hostdata[ii] = (float) (rank*sendcount + ii);
-        hostdata[ii] = (__nv_bfloat16)ii;
-        if(ii % (128) == 128 / 2){
-          hostdata[ii] = (ii / 128 + 1) * 128 * 2;
-        }
-    }
-    CUDACHECK(cudaMemcpy(data, hostdata, sendcount*wordSize(type), cudaMemcpyHostToDevice));
-    // TESTCHECK(InitData(data, sendcount, rank*sendcount, type, ncclSum, rep, 1, 0));
+    TESTCHECK(InitData(data, sendcount, rank*sendcount, type,
+                       ncclSum, rep, 1, 0));
     int peer = (rank-1+nranks)%nranks;
     TESTCHECK(InitData(args->expected[i], recvcount, peer*recvcount, type, ncclSum, rep, 1, 0));
     CUDACHECK(cudaDeviceSynchronize());
@@ -60,15 +52,10 @@ testResult_t SendRecvRunColl(void* sendbuff, void* recvbuff, size_t count, ncclD
   int recvPeer = (rank-1+nRanks) % nRanks;
   int sendPeer = (rank+1) % nRanks;
 
-  // NCCLCHECK(ncclGroupStart());
-  if(rank == 0){
-    NCCLCHECK(ncclSendComp(sendbuff, count, type, sendPeer, comm, stream));
-  }
-  else{
-    NCCLCHECK(ncclRecvDecomp(recvbuff, count, type, recvPeer, comm, stream));
-  }
-  // NCCLCHECK(ncclSendComp(sendbuff, count, type, sendPeer, comm, stream));
-  // NCCLCHECK(ncclGroupEnd());
+  NCCLCHECK(ncclGroupStart());
+  NCCLCHECK(cocclSendComp(sendbuff, count, type, sendPeer, comm, stream));
+  NCCLCHECK(cocclRecvDecomp(recvbuff, count, type, recvPeer, comm, stream));
+  NCCLCHECK(ncclGroupEnd());
   return testSuccess;
 }
 

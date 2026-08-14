@@ -10,7 +10,7 @@
 
 // This is the only contract crossing the compressor shared-library boundary.
 // Keep it POD-only: the public C++ SDK adapts user code to these structures.
-constexpr uint32_t COCCL_COMPRESSOR_ABI_VERSION = 7;
+constexpr uint32_t COCCL_COMPRESSOR_ABI_VERSION = 8;
 constexpr uint32_t COCCL_COMPRESSOR_HOST_API_VERSION = 3;
 constexpr const char* COCCL_COMPRESSOR_ENTRY_SYMBOL =
     "cocclGetCompressorPlugin";
@@ -64,9 +64,9 @@ enum cocclCompressorFrameEncoding : uint32_t {
   cocclCompressorFrameRaw = 1,
 };
 
-// Framed compressors keep one fixed-capacity payload slot per logical chunk.
-// The actual wire size and the per-frame raw fallback decision stay in device
-// metadata so compression itself remains fully asynchronous.
+// One fixed-capacity payload slot is described by its actual wire size and
+// whether the receiver should decode or copy it. Framed compressors write this
+// metadata on device; byte-oriented Send/Recv also uses it as its wire header.
 struct cocclCompressorFrameMetadata {
   uint64_t payloadBytes;
   uint32_t encoding;
@@ -76,17 +76,9 @@ struct cocclCompressorFrameMetadata {
 static_assert(sizeof(cocclCompressorFrameMetadata) == 16,
               "compressor frame metadata is a wire contract");
 
-struct cocclCompressorDataView {
-  const void* data;
-  size_t bytes;
-  size_t elements;
-  size_t chunks;
-  ncclDataType_t datatype;
-  const cocclCompressorFrameMetadata* frameMetadata;
-  size_t frameStrideBytes;
-};
-
-struct cocclCompressorOutputView {
+// Input and output share one physical view. For input, capacityBytes equals
+// bytes; the C++ Input facade exposes data and frame metadata as read-only.
+struct cocclCompressorView {
   void* data;
   size_t capacityBytes;
   size_t bytes;
@@ -133,8 +125,8 @@ struct cocclCompressorExecutionContext {
 struct cocclCompressorCall {
   uint32_t structSize;
   cocclCompressorOperation operation;
-  cocclCompressorDataView input;
-  cocclCompressorOutputView* output;
+  cocclCompressorView input;
+  cocclCompressorView* output;
   int rank;
   size_t reduceChunks;
   ncclDataType_t originalDatatype;

@@ -20,7 +20,7 @@ constexpr cocclOperationDescriptor kOperationDescriptors[] = {
     {cocclOperation::AllToAll, "AllToAll",
      cocclOperationTraitScaleBytesByRanks | cocclOperationTraitGrouped},
     {cocclOperation::SendRecv, "SendRecv",
-     cocclOperationTraitDirectionalPolicy},
+     cocclOperationTraitDirectionalPolicy | cocclOperationTraitGrouped},
 };
 
 static_assert(sizeof(kOperationDescriptors) /

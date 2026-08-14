@@ -58,7 +58,7 @@ ncclResult_t cocclPipelineStageOutputChunks(
 // Returns the contiguous payload size and the pitched memory span touched by
 // a Pack/Unpack stage. Kept host-only so layout validation is testable without
 // launching a CUDA kernel.
-ncclResult_t cocclPipelineStageLayoutSpans(
+void cocclPipelineStageLayoutSpans(
     const cocclPipelineStageContext* context,
     const cocclPipelineEdge* edge, size_t* contiguousBytes,
     size_t* pitchedBytes);

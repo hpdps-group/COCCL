@@ -45,7 +45,6 @@ static void legacyMergeFreeSlices(cocclLegacyBackingBlock* block) {
 
 static ncclResult_t legacyEnsureBlockRegistration(cocclLegacyBackingBlock* block, ncclComm_t ownerComm,
                                                   ncclComm_t registeredComm) {
-  if (ownerComm == nullptr || registeredComm == nullptr) return ncclInvalidArgument;
   if (block->registrations.find(registeredComm) != block->registrations.end()) return ncclSuccess;
 
   // Legacy allocates one physical backing block with ncclMemAlloc, so register
@@ -63,8 +62,6 @@ static ncclResult_t legacyDeregister(ncclComm_t comm, void* handle) {
 
 static ncclResult_t legacyReleaseBlockMemory(cocclLegacyBackingBlock* block) {
   ncclResult_t ret = ncclSuccess;
-  if (block == nullptr) return ncclSuccess;
-
   CUDACHECKGOTO(cudaSetDevice(block->cudaDev), ret, fail);
   // Registration handles reference block->ptr, so they must be removed before
   // the underlying ncclMemAlloc allocation is freed.
@@ -94,8 +91,6 @@ fail:
 static ncclResult_t legacyCreateBackingBlock(cocclLegacyDeviceBufferPool* pool, size_t bytes,
                                              cocclLegacyBackingBlock** blockOut) {
   ncclResult_t ret = ncclSuccess;
-  if (pool == nullptr || blockOut == nullptr) return ncclInvalidArgument;
-
   size_t configuredBlockBytes = cocclGetConfig().buffer.legacyBlockBytes;
   size_t blockBytes = alignUp(bytes, kCocclBufferAlignment);
   // The optional block size trades memory footprint for fewer future
@@ -127,8 +122,6 @@ fail:
 
 static ncclResult_t legacyTrimPoolLocked(cocclLegacyDeviceBufferPool* pool) {
   ncclResult_t ret = ncclSuccess;
-  if (pool == nullptr) return ncclSuccess;
-
   size_t limit = cocclGetConfig().buffer.poolLimitBytes;
   if (limit == 0 || pool->totalBytes <= limit) return ncclSuccess;
 
@@ -155,7 +148,6 @@ fail:
 
 static ncclResult_t legacyAcquireFromBlock(cocclLegacyBackingBlock* block, size_t bytes,
                                            ncclComm_t comm, cocclBufferHandle* buffer) {
-  if (block == nullptr || buffer == nullptr) return ncclInvalidArgument;
   legacyMergeFreeSlices(block);
 
   for (auto it = block->slices.begin(); it != block->slices.end(); ++it) {
@@ -187,7 +179,6 @@ static ncclResult_t legacyAcquireFromBlock(cocclLegacyBackingBlock* block, size_
 }
 
 static void legacyRollbackBufferLocked(cocclBufferHandle* buffer) {
-  if (buffer == nullptr || buffer->slice == nullptr) return;
   cocclLegacyBufferSlice* slice = static_cast<cocclLegacyBufferSlice*>(buffer->slice);
   // Registration failure happens after a slice has been marked InUse. Roll it
   // back so the failed acquire does not leak capacity.
@@ -198,8 +189,6 @@ static void legacyRollbackBufferLocked(cocclBufferHandle* buffer) {
 
 ncclResult_t legacyReleaseCommRegistrationsLocked(cocclLegacyDeviceBufferPool* pool, ncclComm_t comm) {
   ncclResult_t ret = ncclSuccess;
-  if (pool == nullptr || comm == nullptr) return ncclSuccess;
-
   CUDACHECKGOTO(cudaSetDevice(pool->cudaDev), ret, fail);
   for (auto& blockPtr : pool->blocks) {
     cocclLegacyBackingBlock* block = blockPtr.get();
@@ -240,10 +229,6 @@ ncclResult_t legacyAcquireForComm(cocclLegacyDeviceBufferPool* pool, ncclComm_t 
                                   ncclComm_t registeredComm, size_t bytes,
                                   cocclBufferHandle* buffer) {
   ncclResult_t ret = ncclSuccess;
-  if (pool == nullptr || ownerComm == nullptr || buffer == nullptr) {
-    return ncclInvalidArgument;
-  }
-
   for (auto& blockPtr : pool->blocks) {
     cocclLegacyBackingBlock* block = blockPtr.get();
     if (block->capacity < bytes) continue;
@@ -277,14 +262,10 @@ rollback:
   legacyRollbackBufferLocked(buffer);
   return ret;
 fail:
-  if (buffer != nullptr) *buffer = {};
   return ret;
 }
 
 ncclResult_t legacyRegisterBufferForComm(cocclBufferHandle* buffer, ncclComm_t registeredComm) {
-  if (buffer == nullptr || buffer->block == nullptr || buffer->ownerComm == nullptr || registeredComm == nullptr) {
-    return ncclInvalidArgument;
-  }
   cocclLegacyBackingBlock* block = static_cast<cocclLegacyBackingBlock*>(buffer->block);
   // Additional registrations still cover the entire block in the legacy path.
   return legacyEnsureBlockRegistration(block, buffer->ownerComm, registeredComm);
@@ -292,11 +273,8 @@ ncclResult_t legacyRegisterBufferForComm(cocclBufferHandle* buffer, ncclComm_t r
 
 ncclResult_t legacyReleaseBuffer(cocclBufferHandle* buffer, cudaStream_t stream) {
   ncclResult_t ret = ncclSuccess;
-  if (buffer == nullptr || buffer->slice == nullptr || buffer->block == nullptr) return ncclSuccess;
-
   cocclLegacyBufferSlice* slice = static_cast<cocclLegacyBufferSlice*>(buffer->slice);
   cocclLegacyBackingBlock* block = static_cast<cocclLegacyBackingBlock*>(buffer->block);
-  if (slice == nullptr || block == nullptr || slice->state != SliceState::InUse) return ncclSuccess;
 
   CUDACHECKGOTO(cudaSetDevice(block->cudaDev), ret, fail);
   if (slice->doneEvent == nullptr) {
@@ -317,7 +295,6 @@ fail:
 
 ncclResult_t legacyDestroyPoolLocked(cocclLegacyDeviceBufferPool* pool) {
   ncclResult_t ret = ncclSuccess;
-  if (pool == nullptr) return ncclSuccess;
   if (pool->cudaDev >= 0) CUDACHECKGOTO(cudaSetDevice(pool->cudaDev), ret, fail);
 
   for (auto& blockPtr : pool->blocks) {

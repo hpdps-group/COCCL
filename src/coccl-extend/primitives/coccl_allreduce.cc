@@ -2,16 +2,8 @@
 
 namespace {
 
-ncclResult_t cocclValidateAllReducePartition(const cocclInfo& args) {
-  return args.comm == nullptr || args.comm->nRanks <= 0 ||
-                 args.count % (size_t)args.comm->nRanks != 0
-      ? ncclInvalidArgument
-      : ncclSuccess;
-}
-
 ncclResult_t cocclRunAllReduceOneShot(const cocclPreparedCall* prepared) {
   const cocclInfo& args = prepared->info;
-  NCCLCHECK(cocclValidateAllReducePartition(args));
   const size_t chunkCount = args.count / (size_t)args.comm->nRanks;
   const cocclPipelineStage stages[] = {
       cocclPipelineCompress(),
@@ -29,7 +21,6 @@ ncclResult_t cocclRunAllReduceOneShot(const cocclPreparedCall* prepared) {
 
 ncclResult_t cocclRunAllReduceTwoShot(const cocclPreparedCall* prepared) {
   const cocclInfo& args = prepared->info;
-  NCCLCHECK(cocclValidateAllReducePartition(args));
   const size_t recvcount = args.count / (size_t)args.comm->nRanks;
   const cocclPipelineStage stages[] = {
       cocclPipelineCompress(),
@@ -39,7 +30,7 @@ ncclResult_t cocclRunAllReduceTwoShot(const cocclPreparedCall* prepared) {
       cocclPipelineDecompress(),
   };
   const cocclPipelineSpec spec = {
-      "allreduce-twoshot-overlap", args.sendbuff, args.recvbuff, recvcount,
+      "allreduce-twoshot", args.sendbuff, args.recvbuff, recvcount,
       (size_t)args.comm->nRanks, args.datatype, args.comm,
       prepared->compressor, args.stream, stages,
       (int)(sizeof(stages) / sizeof(stages[0])),
@@ -49,11 +40,7 @@ ncclResult_t cocclRunAllReduceTwoShot(const cocclPreparedCall* prepared) {
 
 ncclResult_t cocclRunAllReduceTripleShot(const cocclPreparedCall* prepared) {
   const cocclInfo& args = prepared->info;
-  NCCLCHECK(cocclValidateAllReducePartition(args));
   const int localRanks = args.comm->localRanks;
-  if (localRanks <= 0 || args.comm->nRanks % localRanks != 0) {
-    return ncclInvalidArgument;
-  }
   const size_t recvcount = args.count / (size_t)args.comm->nRanks;
   const int nNodes = args.comm->nRanks / localRanks;
   cocclHierarchicalComms hierarchy = {};
@@ -69,7 +56,7 @@ ncclResult_t cocclRunAllReduceTripleShot(const cocclPreparedCall* prepared) {
       cocclPipelineDecompress(),
   };
   const cocclPipelineSpec spec = {
-      "allreduce-tripleshot-tl-overlap", args.sendbuff, args.recvbuff,
+      "allreduce-tripleshot", args.sendbuff, args.recvbuff,
       recvcount, (size_t)args.comm->nRanks, args.datatype, args.comm,
       prepared->compressor, args.stream, stages,
       (int)(sizeof(stages) / sizeof(stages[0])),
@@ -104,10 +91,10 @@ cocclPreparedCall cocclDirectAllReduceCall(
 
 }  // namespace
 
-NCCL_API(ncclResult_t, ncclAllReduceCompOneShot, const void* sendbuff,
+NCCL_API(ncclResult_t, cocclAllReduceCompOneShot, const void* sendbuff,
   void* recvbuff, size_t count, ncclDataType_t datatype, ncclRedOp_t op,
   ncclComm* comm, cudaStream_t stream);
-ncclResult_t ncclAllReduceCompOneShot(const void* sendbuff, void* recvbuff,
+ncclResult_t cocclAllReduceCompOneShot(const void* sendbuff, void* recvbuff,
   size_t count, ncclDataType_t datatype, ncclRedOp_t op, ncclComm* comm,
   cudaStream_t stream) {
   cocclCompressorHandle compressor;
@@ -119,11 +106,11 @@ ncclResult_t ncclAllReduceCompOneShot(const void* sendbuff, void* recvbuff,
   return cocclExecutePreparedCall(&prepared);
 }
 
-NCCL_API(ncclResult_t, ncclAllReduceCompTwoShotOverlap,
+NCCL_API(ncclResult_t, cocclAllReduceCompTwoShot,
   const void* sendbuff, void* recvbuff, size_t count,
   ncclDataType_t datatype, ncclRedOp_t op, ncclComm* comm,
   cudaStream_t stream);
-ncclResult_t ncclAllReduceCompTwoShotOverlap(const void* sendbuff,
+ncclResult_t cocclAllReduceCompTwoShot(const void* sendbuff,
   void* recvbuff, size_t count, ncclDataType_t datatype, ncclRedOp_t op,
   ncclComm* comm, cudaStream_t stream) {
   cocclCompressorHandle compressor;
@@ -135,11 +122,11 @@ ncclResult_t ncclAllReduceCompTwoShotOverlap(const void* sendbuff,
   return cocclExecutePreparedCall(&prepared);
 }
 
-NCCL_API(ncclResult_t, ncclAllReduceCompTripleShotTLOverlap,
+NCCL_API(ncclResult_t, cocclAllReduceCompTripleShot,
   const void* sendbuff, void* recvbuff, size_t count,
   ncclDataType_t datatype, ncclRedOp_t op, ncclComm* comm,
   cudaStream_t stream);
-ncclResult_t ncclAllReduceCompTripleShotTLOverlap(const void* sendbuff,
+ncclResult_t cocclAllReduceCompTripleShot(const void* sendbuff,
   void* recvbuff, size_t count, ncclDataType_t datatype, ncclRedOp_t op,
   ncclComm* comm, cudaStream_t stream) {
   cocclCompressorHandle compressor;
@@ -152,8 +139,13 @@ ncclResult_t ncclAllReduceCompTripleShotTLOverlap(const void* sendbuff,
 }
 
 ncclResult_t cocclExecuteAllReduce(const cocclPreparedCall* prepared) {
-  if (prepared == nullptr || prepared->info.comm == nullptr ||
-      !prepared->compressor) {
+  const cocclInfo& args = prepared->info;
+  if (args.count % (size_t)args.comm->nRanks != 0) {
+    return ncclInvalidArgument;
+  }
+  if (prepared->algorithm == cocclAlgorithmAllReduceTripleShot &&
+      (args.comm->localRanks <= 0 ||
+       args.comm->nRanks % args.comm->localRanks != 0)) {
     return ncclInvalidArgument;
   }
   switch (prepared->algorithm) {

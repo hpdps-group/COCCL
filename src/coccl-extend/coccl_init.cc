@@ -163,12 +163,6 @@ ncclResult_t loadPolicy(
     const cocclPrimitivePolicy& policy,
     cocclCompressorConfigVariant variant) {
   if (policy.compressor.name.empty()) return ncclSuccess;
-  const cocclOperationDescriptor* descriptor =
-      cocclGetOperationDescriptor(key.operation);
-  if (!cocclOperationSupportsPolicy(descriptor, key.variant)) {
-    return ncclInvalidArgument;
-  }
-
   cocclCompressorHandle handle;
   NCCLCHECK(createConfiguredCompressor(
       comm, variant, policy.compressor, &handle));

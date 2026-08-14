@@ -1,9 +1,9 @@
 #include "primitives/coccl_primitives_internal.h"
 
-NCCL_API(ncclResult_t, ncclAlltoAllCompOverlap, const void* sendbuff,
+NCCL_API(ncclResult_t, cocclAllToAllComp, const void* sendbuff,
   void* recvbuff, size_t sendcount, ncclDataType_t datatype, ncclComm_t comm,
   cudaStream_t stream);
-ncclResult_t ncclAlltoAllCompOverlap(const void* sendbuff, void* recvbuff,
+ncclResult_t cocclAllToAllComp(const void* sendbuff, void* recvbuff,
   size_t sendcount, ncclDataType_t datatype, ncclComm_t comm,
   cudaStream_t stream) {
   cocclCompressorHandle compressor;
@@ -26,10 +26,6 @@ ncclResult_t ncclAlltoAllCompOverlap(const void* sendbuff, void* recvbuff,
 }
 
 ncclResult_t cocclExecuteAllToAll(const cocclPreparedCall* prepared) {
-  if (prepared == nullptr || prepared->info.comm == nullptr ||
-      !prepared->compressor) {
-    return ncclInvalidArgument;
-  }
   const cocclInfo& args = prepared->info;
   const cocclPipelineStage stages[] = {
     cocclPipelineCompress(),
@@ -37,7 +33,7 @@ ncclResult_t cocclExecuteAllToAll(const cocclPreparedCall* prepared) {
     cocclPipelineDecompress(),
   };
   const cocclPipelineSpec spec = {
-    "alltoall-overlap", args.sendbuff, args.recvbuff, args.count,
+    "alltoall", args.sendbuff, args.recvbuff, args.count,
     (size_t)args.comm->nRanks, args.datatype, args.comm,
     prepared->compressor, args.stream, stages,
     (int)(sizeof(stages) / sizeof(stages[0])),

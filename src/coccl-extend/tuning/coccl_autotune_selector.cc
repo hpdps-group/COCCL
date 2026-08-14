@@ -193,10 +193,6 @@ ncclResult_t selectCandidate(cocclPreparedCall* prepared) {
 }  // namespace
 
 ncclResult_t cocclSelectAlgorithm(cocclPreparedCall* prepared) {
-  if (prepared == nullptr || prepared->info.comm == nullptr ||
-      !prepared->compressor) {
-    return ncclInvalidArgument;
-  }
   prepared->algorithm = cocclAlgorithmNone;
   prepared->oneShotUs = std::numeric_limits<double>::infinity();
   prepared->twoShotUs = std::numeric_limits<double>::infinity();

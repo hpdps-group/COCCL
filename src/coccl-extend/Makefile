@@ -16,7 +16,6 @@ COCCL_HOST_SRCFILES = \
 	$(wildcard $(COCCL_ROOT)/*.cc) \
 	$(wildcard $(COCCL_ROOT)/buffer/*.cc) \
 	$(wildcard $(COCCL_ROOT)/debug/*.cc) \
-	$(wildcard $(COCCL_ROOT)/old_impl/*.cc) \
 	$(wildcard $(COCCL_ROOT)/param/*.cc) \
 	$(wildcard $(COCCL_ROOT)/pipeline/*.cc) \
 	$(wildcard $(COCCL_ROOT)/primitives/*.cc) \
@@ -35,7 +34,6 @@ COCCL_CUDA_OBJFILES = $(patsubst $(COCCL_ROOT)/%.cu,$(COCCL_OBJDIR)/%.cu.o,$(COC
 COCCL_CUDA_DEPFILES = $(COCCL_CUDA_OBJFILES:%=%.d)
 COCCL_PLUGIN_DIR = $(COCCL_ROOT)/compressor_plugin
 COCCL_PLUGIN_OBJDIR = $(COCCL_OBJDIR)/compressor_plugin
-COCCL_LEGACY_REDUCE_HELPER = $(COCCL_PLUGIN_OBJDIR)/libcompress/libcoccl_reduce_helper.so
 COCCL_PLUGIN_LIB_TARGET := coccl-plugin-libs
 COCCL_CONFIG_CHECK_TARGET := coccl-config-check
 COCCL_CONFIG_CHECKER := $(BUILDDIR)/bin/coccl-config-check
@@ -69,8 +67,6 @@ CUDA_HOME ?= /usr/local/cuda
 all: $(COCCL_BUILD_TARGET)
 
 $(COCCL_BUILD_TARGET): $(COCCL_PLUGIN_LIB_TARGET)
-	# This DSO belonged to the retired lazy-loaded reduce helper build.
-	rm -f $(COCCL_LEGACY_REDUCE_HELPER)
 
 $(COCCL_CONFIG_CHECK_TARGET): $(COCCL_CONFIG_CHECKER)
 

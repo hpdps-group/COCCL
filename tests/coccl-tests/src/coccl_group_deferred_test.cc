@@ -67,17 +67,13 @@ static int runRank(int rank, ncclComm_t comm, pthread_barrier_t* barrier) {
   }
 
   pthread_barrier_wait(barrier);
-  // Mixing native work with a deferred COCCL primitive is deliberately
-  // rejected. The failed group must also discard the deferred descriptor.
+  // A mixed group falls back as one native NCCL group instead of executing a
+  // deferred COCCL primitive after native work has already been submitted.
   TEST_NCCL(ncclGroupStart());
   TEST_NCCL(ncclAllGather(input, output, count, ncclFloat, comm, stream));
   TEST_NCCL(ncclBroadcast(input, output, count, ncclFloat, 0, comm, stream));
-  ncclResult_t mixedResult = ncclGroupEnd();
-  if (mixedResult != ncclInvalidUsage) {
-    fprintf(stderr, "rank %d: mixed group returned %d instead of ncclInvalidUsage\n",
-            rank, (int)mixedResult);
-    return 1;
-  }
+  TEST_NCCL(ncclGroupEnd());
+  TEST_CUDA(cudaStreamSynchronize(stream));
 
   pthread_barrier_wait(barrier);
   TEST_NCCL(ncclAllGather(input, output, count, ncclFloat, comm, stream));

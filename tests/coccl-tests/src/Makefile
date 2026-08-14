@@ -68,7 +68,7 @@ else
 .SILENT:
 endif
 
-.PHONY: build clean pipeline-layout-test group-deferred-test \
+.PHONY: build clean pipeline-layout-test group-deferred-test group-batch-test \
 	training-classifier-test config-reader-test compressor-sdk-test \
 	compressor-size-test autotune-selector-test pipeline-stage-test \
 	pipeline-plan-test frame-exchange-test dietgpu-codec-test
@@ -94,11 +94,9 @@ DST_DIR := $(BUILDDIR)
 SRC_FILES := $(wildcard *.cu)
 OBJ_FILES := $(SRC_FILES:%.cu=${DST_DIR}/%.o)
 BIN_FILES_LIST := all_reduce all_gather broadcast reduce_scatter reduce alltoall scatter gather sendrecv hypercube \
-alltoall_comp alltoall_p2p reduce_scatter_ring reduce_scatter_comp all_gather_comp all_gather_ring all_gather_comp_overlap\
-all_reduce_oneshot all_reduce_twoShot all_reduce_ring all_reduce_optim all_reduce_comp_ring all_reduce_comp_twoshot all_reduce_comp_twoshot_overlap\
-all_reduce_comp_oneshot all_reduce_comp_optim alltoall_comp_overlap reduce_scatter_comp_oneshot reduce_scatter_comp_twoshot \
-all_gather_comp_twoshot reduce_scatter_comp_twoshot_new_multi all_reduce_comp_tripleshot_tl_overlap all_reduce_comp_tripleshot sendrecv_comp reduce_scatter_comp_oneshot_overlap \
-reduce_scatter_comp_twoshot_tl_overlap
+alltoall_comp alltoall_p2p all_gather_comp \
+all_reduce_comp_oneshot all_reduce_comp_twoshot all_reduce_comp_tripleshot \
+reduce_scatter_comp_oneshot reduce_scatter_comp_twoshot sendrecv_comp
 BIN_FILES := $(BIN_FILES_LIST:%=${DST_DIR}/%_perf)
 
 build: ${BIN_FILES}
@@ -110,6 +108,7 @@ COCCL_LAYOUT_INC := ../../../src/coccl-extend/include
 pipeline-layout-test: $(COCCL_LAYOUT_TEST)
 
 COCCL_GROUP_TEST := $(DST_DIR)/coccl_group_deferred_test
+COCCL_GROUP_BATCH_TEST := $(DST_DIR)/coccl_group_batch_test
 COCCL_TRAINING_TEST := $(DST_DIR)/coccl_training_classifier_test
 COCCL_CONFIG_READER_TEST := $(DST_DIR)/coccl_config_reader_test
 COCCL_COMPRESSOR_SDK_TEST := $(DST_DIR)/coccl_compressor_sdk_test
@@ -140,9 +139,11 @@ COCCL_TRAINING_SRC := \
 	../../../src/coccl-extend/training_assist/coccl_training_assist.cc \
 	../../../src/coccl-extend/training_assist/coccl_training_classifier.cc \
 	../../../src/coccl-extend/coccl_operation.cc \
-	../../../src/coccl-extend/coccl_comm.cc
+	../../../src/coccl-extend/coccl_comm.cc \
+	../../../src/coccl-extend/coccl_runtime.cc
 
 group-deferred-test: $(COCCL_GROUP_TEST)
+group-batch-test: $(COCCL_GROUP_BATCH_TEST)
 training-classifier-test: $(COCCL_TRAINING_TEST)
 config-reader-test: $(COCCL_CONFIG_READER_TEST)
 compressor-sdk-test: $(COCCL_COMPRESSOR_SDK_TEST)
@@ -158,6 +159,15 @@ $(COCCL_GROUP_TEST): coccl_group_deferred_test.cc
 	@mkdir -p ${DST_DIR}
 	$(CXX) $(CXXFLAGS) -I$(CUDA_INC) -I$(NCCL_HOME)/include -o $@ $< \
 		-L$(NCCL_HOME)/lib -lnccl $(LDFLAGS) -pthread
+
+$(COCCL_GROUP_BATCH_TEST): coccl_group_batch_test.cc \
+		../../../src/coccl-extend/coccl_group.cc
+	@printf "Linking  %-35s > %s\n" $< $@
+	@mkdir -p ${DST_DIR}
+	$(CXX) $(filter-out -std=c++11,$(CXXFLAGS)) -std=c++17 \
+		-ffunction-sections -fdata-sections -Wl,--gc-sections \
+		-I$(CUDA_INC) -I$(NCCL_HOME)/include -I../../../src/include \
+		-I../../../src/coccl-extend/include -o $@ $^
 
 $(COCCL_TRAINING_TEST): coccl_training_classifier_test.cc $(COCCL_TRAINING_SRC)
 	@printf "Linking  %-35s > %s\n" $< $@

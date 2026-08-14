@@ -15,7 +15,13 @@ struct cocclFrameExchange {
   size_t sendBytes;
   size_t recvBytes;
   size_t slotBytes;
+  ncclComm_t comm;
+  cudaStream_t stream;
 };
+
+bool cocclFrameMetadataValid(
+    const cocclCompressorFrameMetadata& metadata,
+    size_t frameStrideBytes);
 
 ncclResult_t cocclBuildAllToAllFrameExchanges(
     const void* sendBase, void* recvBase, size_t frames,
@@ -34,7 +40,8 @@ ncclResult_t cocclBuildAllGatherFrameExchanges(
     size_t* exchangeCount);
 
 // Commits the caller's deterministic descriptor order as one NCCL group.
-// Compression and frame-size exchange happen before this function.
+// An exchange-specific comm selects its matching stream; otherwise the
+// defaults supplied to this function are used.
 ncclResult_t cocclCommitFrameExchange(
     const cocclFrameExchange* exchanges, size_t count,
     ncclComm_t comm, cudaStream_t stream);

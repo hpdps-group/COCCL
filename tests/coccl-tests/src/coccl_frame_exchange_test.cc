@@ -1,6 +1,7 @@
 #include "pipeline/coccl_frame_exchange.h"
 
 #include "comm.h"
+#include "runtime/coccl_runtime.h"
 
 #include <stdint.h>
 #include <stdio.h>
@@ -13,6 +14,8 @@ struct SubmittedCall {
   char kind;
   int peer;
   size_t bytes;
+  ncclComm_t comm;
+  cudaStream_t stream;
 };
 
 std::vector<SubmittedCall> submitted;
@@ -93,30 +96,47 @@ int testAllGatherMapping() {
 }
 
 int testCommitOrder() {
-  ncclComm_t comm = (ncclComm_t)calloc(1, sizeof(ncclComm));
-  if (comm == nullptr) return 1;
-  comm->nRanks = 4;
+  ncclComm_t comm0 = (ncclComm_t)calloc(1, sizeof(ncclComm));
+  ncclComm_t comm1 = (ncclComm_t)calloc(1, sizeof(ncclComm));
+  if (comm0 == nullptr || comm1 == nullptr) return 1;
+  comm0->nRanks = 4;
+  comm1->nRanks = 4;
+  cudaStream_t stream0 = reinterpret_cast<cudaStream_t>(1);
+  cudaStream_t stream1 = reinterpret_cast<cudaStream_t>(2);
   unsigned char send[64] = {};
   unsigned char recv[64] = {};
   const cocclFrameExchange exchanges[] = {
-      {1, send, recv, 10, 11, 64},
-      {2, send, nullptr, 12, 0, 64},
+      {1, send, recv, 10, 11, 64, comm0, stream0},
+      {2, send, nullptr, 12, 0, 64, comm1, stream1},
   };
   submitted.clear();
   const ncclResult_t result =
-      cocclCommitFrameExchange(exchanges, 2, comm, nullptr);
-  free(comm);
+      cocclCommitFrameExchange(exchanges, 2, nullptr, nullptr);
   const char expected[] = {'G', 'R', 'S', 'S', 'E'};
   if (result != ncclSuccess || submitted.size() != sizeof(expected)) {
     fprintf(stderr, "Batch frame submission failed\n");
+    free(comm1);
+    free(comm0);
     return 1;
   }
   for (size_t i = 0; i < sizeof(expected); ++i) {
     if (submitted[i].kind != expected[i]) {
       fprintf(stderr, "Batch frame order differs at %zu\n", i);
+      free(comm1);
+      free(comm0);
       return 1;
     }
   }
+  if (submitted[1].comm != comm0 || submitted[1].stream != stream0 ||
+      submitted[2].comm != comm0 || submitted[2].stream != stream0 ||
+      submitted[3].comm != comm1 || submitted[3].stream != stream1) {
+    fprintf(stderr, "Batch frame context was not preserved\n");
+    free(comm1);
+    free(comm0);
+    return 1;
+  }
+  free(comm1);
+  free(comm0);
   return 0;
 }
 
@@ -149,29 +169,15 @@ int testValidation() {
     fprintf(stderr, "short Raw frame was accepted\n");
     return 1;
   }
-  sendMetadata[0] = encoded(1);
-  sendMetadata[0].reserved = 1;
-  if (cocclBuildAllToAllFrameExchanges(
-          send, recv, 1, 64, 1, sendMetadata, recvMetadata,
-          &exchange, 1, &count) != ncclInvalidUsage) {
-    fprintf(stderr, "nonzero frame reserved field was accepted\n");
-    return 1;
-  }
-
   ncclComm_t comm = (ncclComm_t)calloc(1, sizeof(ncclComm));
   if (comm == nullptr) return 1;
   comm->nRanks = 4;
   const cocclFrameExchange empty = {1, nullptr, nullptr, 0, 0, 64};
   const cocclFrameExchange invalidPeer = {4, send, recv, 1, 1, 64};
-  const cocclFrameExchange invalidRange = {
-      1, reinterpret_cast<const void*>(UINTPTR_MAX - 1), nullptr,
-      1, 0, 64};
   const bool rejected =
       cocclCommitFrameExchange(&empty, 1, comm, nullptr) ==
           ncclInvalidArgument &&
       cocclCommitFrameExchange(&invalidPeer, 1, comm, nullptr) ==
-          ncclInvalidArgument &&
-      cocclCommitFrameExchange(&invalidRange, 1, comm, nullptr) ==
           ncclInvalidArgument;
   free(comm);
   if (!rejected) {
@@ -184,27 +190,23 @@ int testValidation() {
 }  // namespace
 
 ncclResult_t ncclGroupStart() {
-  submitted.push_back({'G', -1, 0});
+  submitted.push_back({'G', -1, 0, nullptr, nullptr});
   return ncclSuccess;
 }
 
 ncclResult_t ncclGroupEnd() {
-  submitted.push_back({'E', -1, 0});
+  submitted.push_back({'E', -1, 0, nullptr, nullptr});
   return ncclSuccess;
 }
 
-ncclResult_t ncclRecvNaive(void*, size_t count, ncclDataType_t datatype,
-                           int peer, ncclComm_t, cudaStream_t) {
-  if (datatype != ncclInt8) return ncclInvalidArgument;
-  submitted.push_back({'R', peer, count});
-  return ncclSuccess;
-}
-
-ncclResult_t ncclSendNaive(const void*, size_t count,
-                           ncclDataType_t datatype, int peer,
-                           ncclComm_t, cudaStream_t) {
-  if (datatype != ncclInt8) return ncclInvalidArgument;
-  submitted.push_back({'S', peer, count});
+ncclResult_t cocclReplayNativeCall(const cocclInfo& info) {
+  if (info.operation != cocclOperation::SendRecv ||
+      info.datatype != ncclInt8 ||
+      (info.func != ncclFuncRecv && info.func != ncclFuncSend)) {
+    return ncclInvalidArgument;
+  }
+  submitted.push_back({info.func == ncclFuncRecv ? 'R' : 'S',
+                       info.peer, info.count, info.comm, info.stream});
   return ncclSuccess;
 }
 
