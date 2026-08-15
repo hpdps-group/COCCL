@@ -68,7 +68,7 @@ else
 .SILENT:
 endif
 
-.PHONY: build clean m1-host-tests m1-plugin-load-test m2-host-tests
+.PHONY: build clean m1-host-tests m1-plugin-load-test m2-host-tests m3-host-tests
 
 BUILDDIR ?= ../build
 ifneq ($(NCCL_HOME), "")
@@ -112,6 +112,10 @@ M1_ZFP_CONFIG := ../../../examples/benchmarks_scripts/configs/m1_zfp.toml
 M1_PLUGIN_DIR := $(NCCL_HOME)/obj/device/compress/libcompress
 M2_RUNTIME_TEST := $(DST_DIR)/coccl_m2_runtime_test
 M2_GROUP_TEST := $(DST_DIR)/coccl_m2_group_test
+M3_BUFFER_TEST := $(DST_DIR)/coccl_m3_buffer_test
+
+m3-host-tests: $(M3_BUFFER_TEST)
+	$(M3_BUFFER_TEST)
 
 m2-host-tests: $(M2_RUNTIME_TEST) $(M2_GROUP_TEST)
 	$(M2_RUNTIME_TEST)
@@ -156,6 +160,13 @@ $(M2_RUNTIME_TEST): coccl_m2_runtime_test.cc \
 
 $(M2_GROUP_TEST): coccl_m2_group_test.cc \
 		$(COCCL_SRC)/misc/coccl_group.cc
+	@printf "Linking  %-35s > %s\n" $< $@
+	@mkdir -p $(DST_DIR)
+	$(CXX) $(M1_CXXFLAGS) $(COCCL_INC) -I$(COCCL_SRC) -o $@ $^
+
+$(M3_BUFFER_TEST): coccl_m3_buffer_test.cc \
+		$(COCCL_SRC)/misc/coccl_buffer_management.cc \
+		$(COCCL_SRC)/misc/coccl_buffer_legacy.cc
 	@printf "Linking  %-35s > %s\n" $< $@
 	@mkdir -p $(DST_DIR)
 	$(CXX) $(M1_CXXFLAGS) $(COCCL_INC) -I$(COCCL_SRC) -o $@ $^

@@ -27,11 +27,12 @@ ncclResult_t ncclDecompress(void* decompbuff, const void* compbuff, const size_t
     const size_t compChunkCount, ncclDataType_t compDatatype, const size_t numChunks, ncclCommOp_t commOp, cudaStream_t stream);
 
 ncclResult_t ncclDecompressReduce(void* reducebuff, const void* compbuff, const size_t compChunkCount, ncclDataType_t compDatatype, 
-    const size_t reduceChunkCount, ncclDataType_t reduceDataType,  const size_t numChunks, ncclCommOp_t commOp, cudaStream_t stream);
+    const size_t reduceChunkCount, ncclDataType_t reduceDataType,  const size_t numChunks, ncclCommOp_t commOp, cudaStream_t stream,
+    ncclComm_t ownerComm);
 
 ncclResult_t ncclDecompReduceComp(const void* compbuff, void** recompbuff, const size_t orgChunkCount, ncclDataType_t orgDayatype,
     const size_t compChunkCount, ncclDataType_t compDatatype, size_t* reCompChunkCount, ncclDataType_t* reCompDatatype, const size_t numChunks, 
-    ncclCommOp_t commOp, cudaStream_t stream);
+    ncclCommOp_t commOp, cudaStream_t stream, ncclComm_t ownerComm);
 
 ncclResult_t ncclCompressInit(const ncclComm_t comm);
 

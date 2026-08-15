@@ -1,6 +1,6 @@
 #include "compress.h"
+#include "coccl_buffer_management.h"
 
-#include "coccl_alloc.h"
 #include "coccl_config.h"
 #include "comm.h"
 #include "compressor_plugin/detail/coccl_compressor_abi.h"
@@ -419,22 +419,28 @@ ncclResult_t executeDecompress(CompressorPolicy* policy, void* output,
   return execute(policy, &call, rank, stream);
 }
 
-__thread void* reduceTempbuff = nullptr;
-
 ncclResult_t genericDecompressReduce(
     CompressorPolicy* policy, void* output, const void* input,
     size_t inputChunkElements, ncclDataType_t inputDatatype,
     size_t outputChunkElements, ncclDataType_t outputDatatype,
-    size_t chunks, cudaStream_t stream) {
+    size_t chunks, cudaStream_t stream, ncclComm_t ownerComm) {
   const size_t bytes =
       outputChunkElements * chunks * ncclTypeSize(outputDatatype);
-  NCCLCHECK(cocclBuffAlloc(&reduceTempbuff, bytes, nullptr));
-  NCCLCHECK(executeDecompress(policy, reduceTempbuff, input,
-                              outputChunkElements, outputDatatype,
-                              inputChunkElements, inputDatatype, chunks,
-                              stream));
-  return ncclReduceChunk(reduceTempbuff, outputChunkElements, output,
-                         outputDatatype, chunks, stream);
+  cocclBufferHandle temporary;
+  ncclResult_t ret = cocclGetUnregisteredBuffer(ownerComm, bytes, stream,
+                                                 &temporary);
+  if (ret == ncclSuccess) {
+    ret = executeDecompress(policy, temporary.ptr, input,
+                            outputChunkElements, outputDatatype,
+                            inputChunkElements, inputDatatype, chunks,
+                            stream);
+  }
+  if (ret == ncclSuccess) {
+    ret = ncclReduceChunk(temporary.ptr, outputChunkElements, output,
+                          outputDatatype, chunks, stream);
+  }
+  ncclResult_t releaseRet = cocclReleaseBuffer(&temporary, stream);
+  return ret == ncclSuccess ? releaseRet : ret;
 }
 
 }  // namespace
@@ -504,7 +510,7 @@ ncclResult_t ncclDecompressReduce(
     void* reducebuff, const void* compbuff, const size_t compChunkCount,
     ncclDataType_t compDatatype, const size_t reduceChunkCount,
     ncclDataType_t reduceDatatype, const size_t numChunks,
-    ncclCommOp_t commOp, cudaStream_t stream) {
+    ncclCommOp_t commOp, cudaStream_t stream, ncclComm_t ownerComm) {
   CompressorPolicy* policy = policyFor(commOp);
   if (policy == nullptr) return ncclInvalidUsage;
   if (compDatatype == COCCL_COMPRESSOR_RAW_PASSTHROUGH ||
@@ -512,7 +518,7 @@ ncclResult_t ncclDecompressReduce(
        cocclCompressorCapabilityDecompressReduce) == 0) {
     return genericDecompressReduce(
         policy, reducebuff, compbuff, compChunkCount, compDatatype,
-        reduceChunkCount, reduceDatatype, numChunks, stream);
+        reduceChunkCount, reduceDatatype, numChunks, stream, ownerComm);
   }
 
   const size_t inputElements = compChunkCount * numChunks;
@@ -546,7 +552,7 @@ ncclResult_t ncclDecompReduceComp(
     ncclDataType_t orgDatatype, const size_t compChunkCount,
     ncclDataType_t compDatatype, size_t* reCompChunkCount,
     ncclDataType_t* reCompDatatype, const size_t numChunks,
-    ncclCommOp_t commOp, cudaStream_t stream) {
+    ncclCommOp_t commOp, cudaStream_t stream, ncclComm_t ownerComm) {
   CompressorPolicy* policy = policyFor(commOp);
   if (policy == nullptr) return ncclInvalidUsage;
   if (compDatatype == COCCL_COMPRESSOR_RAW_PASSTHROUGH ||
@@ -554,15 +560,25 @@ ncclResult_t ncclDecompReduceComp(
        cocclCompressorCapabilityDecompressReduceCompress) == 0) {
     const size_t bytes =
         orgChunkCount * numChunks * ncclTypeSize(orgDatatype);
-    NCCLCHECK(cocclBuffAlloc(&reduceTempbuff, bytes, nullptr));
-    NCCLCHECK(executeDecompress(policy, reduceTempbuff, compbuff,
-                                orgChunkCount, orgDatatype, compChunkCount,
-                                compDatatype, numChunks, stream));
-    NCCLCHECK(ncclReduceChunk(reduceTempbuff, orgChunkCount, reduceTempbuff,
-                             orgDatatype, numChunks, stream));
-    return executeCompress(policy, reduceTempbuff, recompbuff, orgChunkCount,
-                           orgDatatype, 1, 0, reCompChunkCount,
-                           reCompDatatype, stream);
+    cocclBufferHandle temporary;
+    ncclResult_t ret = cocclGetUnregisteredBuffer(ownerComm, bytes, stream,
+                                                   &temporary);
+    if (ret == ncclSuccess) {
+      ret = executeDecompress(policy, temporary.ptr, compbuff,
+                              orgChunkCount, orgDatatype, compChunkCount,
+                              compDatatype, numChunks, stream);
+    }
+    if (ret == ncclSuccess) {
+      ret = ncclReduceChunk(temporary.ptr, orgChunkCount, temporary.ptr,
+                            orgDatatype, numChunks, stream);
+    }
+    if (ret == ncclSuccess) {
+      ret = executeCompress(policy, temporary.ptr, recompbuff,
+                            orgChunkCount, orgDatatype, 1, 0,
+                            reCompChunkCount, reCompDatatype, stream);
+    }
+    ncclResult_t releaseRet = cocclReleaseBuffer(&temporary, stream);
+    return ret == ncclSuccess ? releaseRet : ret;
   }
 
   const size_t inputElements = compChunkCount * numChunks;
