@@ -538,25 +538,12 @@ ncclResult_t  ncclRecvNaive(void* recvbuff, size_t count, ncclDataType_t datatyp
     ncclComm_t comm, cudaStream_t stream);
 
 
-ncclResult_t  ncclAllToAllComp(const void* sendbuff, void* recvbuff, size_t sendcount,
-    ncclDataType_t datatype, ncclComm_t comm, cudaStream_t stream);
-ncclResult_t  pncclAllToAllComp(const void* sendbuff, void* recvbuff, size_t sendcount,
-    ncclDataType_t datatype, ncclComm_t comm, cudaStream_t stream);
-
-
-
-
 ncclResult_t  ncclAllToAll(const void* sendbuff, void* recvbuff, size_t sendcount,
     ncclDataType_t datatype, ncclComm_t comm, cudaStream_t stream);
 ncclResult_t  pncclAllToAll(const void* sendbuff, void* recvbuff, size_t sendcount,
     ncclDataType_t datatype, ncclComm_t comm, cudaStream_t stream);
 
 
-
-ncclResult_t  ncclAlltoAllCompOverlap(const void* sendbuff, void* recvbuff, size_t sendcount,
-  ncclDataType_t datatype, ncclComm_t comm, cudaStream_t stream);
-ncclResult_t  pncclAlltoAllCompOverlap(const void* sendbuff, void* recvbuff, size_t sendcount,
-  ncclDataType_t datatype, ncclComm_t comm, cudaStream_t stream);
 
 /* Explicit COCCL collectives use the same prepared-call runtime as auto routing. */
 ncclResult_t cocclAllGatherComp(const void* sendbuff, void* recvbuff, size_t sendcount,

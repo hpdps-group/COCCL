@@ -68,7 +68,8 @@ else
 .SILENT:
 endif
 
-.PHONY: build clean m1-host-tests m1-plugin-load-test m2-host-tests m3-host-tests m4-host-tests
+.PHONY: build clean m1-host-tests m1-plugin-load-test m2-host-tests \
+	m3-host-tests m4-host-tests m5-host-tests m5-layout-test
 
 BUILDDIR ?= ../build
 ifneq ($(NCCL_HOME), "")
@@ -93,7 +94,7 @@ OBJ_FILES := $(SRC_FILES:%.cu=${DST_DIR}/%.o)
 BIN_FILES_LIST := all_reduce all_gather broadcast reduce_scatter reduce alltoall scatter gather sendrecv hypercube \
 alltoall_comp alltoall_p2p reduce_scatter_ring reduce_scatter_comp all_gather_comp all_gather_ring all_gather_comp_overlap\
 all_reduce_twoShot all_reduce_ring all_reduce_optim all_reduce_comp_ring all_reduce_comp_twoshot all_reduce_comp_twoshot_overlap\
-all_reduce_comp_optim alltoall_comp_overlap reduce_scatter_comp_oneshot reduce_scatter_comp_twoshot \
+all_reduce_comp_optim reduce_scatter_comp_oneshot reduce_scatter_comp_twoshot \
 all_gather_comp_twoshot reduce_scatter_comp_twoshot_new_multi all_reduce_comp_tripleshot_tl_overlap all_reduce_comp_tripleshot sendrecv_comp reduce_scatter_comp_oneshot_overlap \
 reduce_scatter_comp_twoshot_tl_overlap all_reduce_comp_oneshot
 BIN_FILES := $(BIN_FILES_LIST:%=${DST_DIR}/%_perf)
@@ -114,6 +115,16 @@ M2_RUNTIME_TEST := $(DST_DIR)/coccl_m2_runtime_test
 M2_GROUP_TEST := $(DST_DIR)/coccl_m2_group_test
 M3_BUFFER_TEST := $(DST_DIR)/coccl_m3_buffer_test
 M4_VMM_TEST := $(DST_DIR)/coccl_m4_vmm_test
+M5_PIPELINE_PLAN_TEST := $(DST_DIR)/coccl_m5_pipeline_plan_test
+M5_PIPELINE_STAGE_TEST := $(DST_DIR)/coccl_m5_pipeline_stage_test
+M5_PIPELINE_LAYOUT_TEST := $(DST_DIR)/coccl_m5_pipeline_layout_test
+
+m5-layout-test: $(M5_PIPELINE_LAYOUT_TEST)
+	$(M5_PIPELINE_LAYOUT_TEST)
+
+m5-host-tests: $(M5_PIPELINE_PLAN_TEST) $(M5_PIPELINE_STAGE_TEST)
+	$(M5_PIPELINE_PLAN_TEST)
+	$(M5_PIPELINE_STAGE_TEST)
 
 m4-host-tests: $(M4_VMM_TEST)
 	$(M4_VMM_TEST)
@@ -182,6 +193,25 @@ $(M4_VMM_TEST): coccl_m4_vmm_test.cc \
 	@printf "Linking  %-35s > %s\n" $< $@
 	@mkdir -p $(DST_DIR)
 	$(CXX) $(M1_CXXFLAGS) $(COCCL_INC) -I$(COCCL_SRC) -o $@ $^
+
+$(M5_PIPELINE_PLAN_TEST): coccl_m5_pipeline_plan_test.cc \
+		$(COCCL_SRC)/misc/coccl_pipeline_plan.cc
+	@printf "Linking  %-35s > %s\n" $< $@
+	@mkdir -p $(DST_DIR)
+	$(CXX) $(M1_CXXFLAGS) $(COCCL_INC) -I$(COCCL_SRC) -o $@ $^
+
+$(M5_PIPELINE_STAGE_TEST): coccl_m5_pipeline_stage_test.cc \
+		$(COCCL_SRC)/misc/coccl_pipeline_stage.cc
+	@printf "Linking  %-35s > %s\n" $< $@
+	@mkdir -p $(DST_DIR)
+	$(CXX) $(M1_CXXFLAGS) $(COCCL_INC) -I$(COCCL_SRC) -o $@ $^
+
+$(M5_PIPELINE_LAYOUT_TEST): coccl_m5_pipeline_layout_test.cu \
+		$(COCCL_SRC)/device/pipeline/coccl_pipeline_layout.cu Makefile
+	@printf "Linking  %-35s > %s\n" $< $@
+	@mkdir -p $(DST_DIR)
+	$(NVCC) -o $@ $(NVCUFLAGS) $(COCCL_INC) \
+		$(filter-out Makefile,$^) $(LDFLAGS)
 
 clean:
 	rm -rf ${DST_DIR}

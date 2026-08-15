@@ -28,6 +28,7 @@
 #include "param.h"
 #include "compress.h"
 #include "coccl_buffer_management.h"
+#include "coccl_pipeline.h"
 #define STR2(v) #v
 #define STR(v) STR2(v)
 
@@ -1989,6 +1990,7 @@ static ncclResult_t commCleanup(ncclComm_t comm) {
     NCCLCHECK(ncclTunerPluginUnload(&comm->tuner));
   }
 
+  NCCLCHECK(cocclPipelineCommDestroy(comm));
   NCCLCHECK(cocclBufferCommDestroy(comm));
   NCCLCHECK(commFree(comm));
 

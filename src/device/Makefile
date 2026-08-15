@@ -61,7 +61,7 @@ $(OBJDIR)/gensrc: generate.py
 	  (bar='!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!'; \
 	   printf "\n$${bar}\nERROR: Building NCCL requires a Python 3 installation invokable as 'python3'.\n$${bar}\n\n" 1>&2; \
 	   exit 1)) \
-	&& ./generate.py $@ "$(ONLY_FUNCS)"
+	&& python3 ./generate.py $@ "$(ONLY_FUNCS)"
 else
 # Case if the <gensrc> directory is pre-generated and checked in the repo as ./gen:
 $(OBJDIR)/gensrc:
@@ -86,10 +86,19 @@ $(COMPSUBOBJDIR):
 compress.build: | $(COMPSUBOBJDIR)
 	$(MAKE) -C $(COMPSUBDIR) SUBOBJDIR=$(COMPSUBOBJDIR)
 # SRCS = common.cu onerank.cu
-SRCS = common.cu onerank.cu compress/reduce_extend_kernel.cu
+SRCS = common.cu onerank.cu compress/reduce_extend_kernel.cu \
+	pipeline/coccl_pipeline_layout.cu
 
 #  $(SUBSO)
 LIB_OBJS = $(patsubst %, $(OBJDIR)/%.o, $(SRCS)) $(LIB_OBJS_GEN)
+PIPELINE_LAYOUT_OBJ := $(OBJDIR)/pipeline/coccl_pipeline_layout.cu.o
+RDC_LIB_OBJS := $(filter-out $(PIPELINE_LAYOUT_OBJ),$(LIB_OBJS))
+
+$(PIPELINE_LAYOUT_OBJ): pipeline/coccl_pipeline_layout.cu \
+		$(OBJDIR)/pipeline/coccl_pipeline_layout.cu.d
+	@$(SAY) "Compiling" $<; \
+	 mkdir -p $(dir $@); \
+	 $(NVCC) $(NVCUFLAGS) -c $< -o $@
 
 $(OBJDIR)/%.o: % $(OBJDIR)/%.d
 	$(call COMPILE,$@,$<)
@@ -103,7 +112,7 @@ $(OBJDIR)/%.d: %
 $(OBJDIR)/genobj/%.d: $(OBJDIR)/gensrc/%
 	$(call DEPENDS,$@,$<)
 
-$(DEVGLUE_OBJ): $(LIB_OBJS)
+$(DEVGLUE_OBJ): $(RDC_LIB_OBJS)
 	$(NVCC) $(NVCUFLAGS) -dlink $^ -o $@
 
 $(MANIFEST): $(LIB_OBJS) $(DEVGLUE_OBJ)

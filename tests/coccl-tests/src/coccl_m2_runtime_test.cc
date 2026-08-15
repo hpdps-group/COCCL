@@ -136,8 +136,7 @@ ncclResult_t ncclAllGatherCompOverlap(
   return ncclSuccess;
 }
 
-ncclResult_t ncclAlltoAllCompOverlap(
-    const void*, void*, size_t, ncclDataType_t, ncclComm_t, cudaStream_t) {
+ncclResult_t cocclExecuteAllToAll(const cocclPreparedCall*) {
   ++compressedCalls;
   return ncclSuccess;
 }

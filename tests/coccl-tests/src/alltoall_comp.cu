@@ -80,7 +80,7 @@ testResult_t AlltoAllRunColl(void* sendbuff, void* recvbuff, size_t count, ncclD
   //   NCCLCHECK(ncclRecv(((char*)recvbuff)+r*rankOffset, count, type, r, comm, stream));
   // }
   // NCCLCHECK(ncclGroupEnd());
-  NCCLCHECK(ncclAllToAllComp(sendbuff, recvbuff, count, type, comm, stream));
+  NCCLCHECK(cocclAllToAllComp(sendbuff, recvbuff, count, type, comm, stream));
   return testSuccess;
 #endif
 }
