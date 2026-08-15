@@ -380,7 +380,7 @@ void launch_compress_template(
 __hidden cudaError_t launchCompress(const void* orgbuff, void** compbuff,
                                     size_t orgChunkCount, ncclDataType_t orgDatatype,
                                     size_t* compChunkCount, ncclDataType_t* compDatatype,
-                                    size_t numChunks, void* config,
+                                    size_t numChunks, const int rank, void* config,
                                     cudaMemPool_t compMemPool, cudaStream_t stream) 
 {
     if (orgChunkCount == 0 || numChunks == 0) return cudaSuccess;

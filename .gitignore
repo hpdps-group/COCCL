@@ -1,5 +1,11 @@
 # Copyright (c) 2015-2016, NVIDIA CORPORATION. All rights reserved.
 /build
+/tests/coccl-tests/build/
+/goals/
+/results/
+__pycache__/
+*.pyc
+ncclcomp.*
 *.log
 .DS_Store
 *.gcov
