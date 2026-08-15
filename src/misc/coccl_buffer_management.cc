@@ -19,6 +19,42 @@ CommBufferPool* findPool(ncclComm_t comm) {
   return found == commPools.end() ? nullptr : found->second.get();
 }
 
+ncclResult_t initPool(ncclComm_t comm, CommBufferPool* pool) {
+  pool->ownerComm = comm;
+  pool->cudaDev = comm->cudaDev;
+#if CUDART_VERSION >= 11030
+  bool available = false;
+  NCCLCHECK(vmmInit(&pool->vmm, comm, &available));
+  if (available) pool->backend = BufferBackend::Vmm;
+#endif
+  INFO(NCCL_INIT, "COCCL buffer comm %p backend %s", comm,
+       pool->backend == BufferBackend::Vmm ? "VMM" : "legacy");
+  return ncclSuccess;
+}
+
+ncclResult_t deregisterComm(CommBufferPool* pool, ncclComm_t comm) {
+#if CUDART_VERSION >= 11030
+  if (pool->backend == BufferBackend::Vmm) {
+    return vmmDeregisterComm(&pool->vmm, comm);
+  }
+#endif
+  return legacyDeregisterComm(pool, comm);
+}
+
+ncclResult_t destroyPool(CommBufferPool* pool) {
+#if CUDART_VERSION >= 11030
+  if (pool->backend == BufferBackend::Vmm) {
+    return vmmDestroy(&pool->vmm);
+  }
+#endif
+  const size_t releasedBytes = pool->totalBytes;
+  NCCLCHECK(legacyDestroy(pool));
+  INFO(NCCL_INIT,
+       "COCCL legacy buffer comm %p released %zu bytes", pool->ownerComm,
+       releasedBytes);
+  return ncclSuccess;
+}
+
 ncclResult_t acquire(ncclComm_t ownerComm, ncclComm_t registeredComm,
                      size_t bytes, cudaStream_t stream,
                      cocclBufferHandle* buffer) {
@@ -33,9 +69,17 @@ ncclResult_t acquire(ncclComm_t ownerComm, ncclComm_t registeredComm,
     goto exit;
   }
   CUDACHECKGOTO(cudaSetDevice(pool->cudaDev), ret, exit);
-  NCCLCHECKGOTO(legacyAcquire(pool, registeredComm,
-                              alignUp(bytes == 0 ? 1 : bytes), stream, buffer),
-                ret, exit);
+  bytes = alignUp(bytes == 0 ? 1 : bytes);
+#if CUDART_VERSION >= 11030
+  if (pool->backend == BufferBackend::Vmm) {
+    NCCLCHECKGOTO(vmmAcquire(&pool->vmm, registeredComm, bytes, stream,
+                             buffer), ret, exit);
+  } else
+#endif
+  {
+    NCCLCHECKGOTO(legacyAcquire(pool, registeredComm, bytes, stream, buffer),
+                  ret, exit);
+  }
 
 exit:
   pthread_mutex_unlock(&bufferLock);
@@ -50,9 +94,10 @@ ncclResult_t cocclBufferCommInit(ncclComm_t comm) {
   pthread_mutex_lock(&bufferLock);
   if (findPool(comm) == nullptr) {
     std::unique_ptr<CommBufferPool> pool(new CommBufferPool());
-    pool->ownerComm = comm;
-    pool->cudaDev = comm->cudaDev;
-    commPools.emplace(comm, std::move(pool));
+    ncclResult_t ret = initPool(comm, pool.get());
+    if (ret == ncclSuccess) commPools.emplace(comm, std::move(pool));
+    pthread_mutex_unlock(&bufferLock);
+    return ret;
   }
   pthread_mutex_unlock(&bufferLock);
   return ncclSuccess;
@@ -67,17 +112,13 @@ ncclResult_t cocclBufferCommDestroy(ncclComm_t comm) {
   // A parent-owned block may also be registered with a hierarchical child.
   for (auto& entry : commPools) {
     if (entry.first == comm) continue;
-    NCCLCHECKGOTO(legacyDeregisterComm(entry.second.get(), comm), ret, exit);
+    NCCLCHECKGOTO(deregisterComm(entry.second.get(), comm), ret, exit);
   }
 
   {
     auto found = commPools.find(comm);
     if (found != commPools.end()) {
-      const size_t releasedBytes = found->second->totalBytes;
-      NCCLCHECKGOTO(legacyDestroy(found->second.get()), ret, exit);
-      INFO(NCCL_INIT,
-           "COCCL legacy buffer comm %p released %zu bytes", comm,
-           releasedBytes);
+      NCCLCHECKGOTO(destroyPool(found->second.get()), ret, exit);
       commPools.erase(found);
     }
   }
@@ -116,7 +157,15 @@ ncclResult_t cocclRegisterBufferForComm(cocclBufferHandle* buffer,
 
   ncclResult_t ret = ncclSuccess;
   pthread_mutex_lock(&bufferLock);
-  NCCLCHECKGOTO(legacyRegister(buffer, registeredComm), ret, exit);
+  BufferBlock* block = static_cast<BufferBlock*>(buffer->block);
+#if CUDART_VERSION >= 11030
+  if (block->backend == BufferBackend::Vmm) {
+    NCCLCHECKGOTO(vmmRegister(buffer, registeredComm), ret, exit);
+  } else
+#endif
+  {
+    NCCLCHECKGOTO(legacyRegister(buffer, registeredComm), ret, exit);
+  }
 
 exit:
   pthread_mutex_unlock(&bufferLock);
@@ -129,7 +178,15 @@ ncclResult_t cocclReleaseBuffer(cocclBufferHandle* buffer,
 
   ncclResult_t ret = ncclSuccess;
   pthread_mutex_lock(&bufferLock);
-  NCCLCHECKGOTO(legacyRelease(buffer, stream), ret, exit);
+  BufferBlock* block = static_cast<BufferBlock*>(buffer->block);
+#if CUDART_VERSION >= 11030
+  if (block->backend == BufferBackend::Vmm) {
+    NCCLCHECKGOTO(vmmRelease(buffer, stream), ret, exit);
+  } else
+#endif
+  {
+    NCCLCHECKGOTO(legacyRelease(buffer, stream), ret, exit);
+  }
 
 exit:
   if (ret == ncclSuccess) *buffer = {};

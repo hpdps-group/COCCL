@@ -68,7 +68,7 @@ else
 .SILENT:
 endif
 
-.PHONY: build clean m1-host-tests m1-plugin-load-test m2-host-tests m3-host-tests
+.PHONY: build clean m1-host-tests m1-plugin-load-test m2-host-tests m3-host-tests m4-host-tests
 
 BUILDDIR ?= ../build
 ifneq ($(NCCL_HOME), "")
@@ -113,6 +113,10 @@ M1_PLUGIN_DIR := $(NCCL_HOME)/obj/device/compress/libcompress
 M2_RUNTIME_TEST := $(DST_DIR)/coccl_m2_runtime_test
 M2_GROUP_TEST := $(DST_DIR)/coccl_m2_group_test
 M3_BUFFER_TEST := $(DST_DIR)/coccl_m3_buffer_test
+M4_VMM_TEST := $(DST_DIR)/coccl_m4_vmm_test
+
+m4-host-tests: $(M4_VMM_TEST)
+	$(M4_VMM_TEST)
 
 m3-host-tests: $(M3_BUFFER_TEST)
 	$(M3_BUFFER_TEST)
@@ -167,6 +171,14 @@ $(M2_GROUP_TEST): coccl_m2_group_test.cc \
 $(M3_BUFFER_TEST): coccl_m3_buffer_test.cc \
 		$(COCCL_SRC)/misc/coccl_buffer_management.cc \
 		$(COCCL_SRC)/misc/coccl_buffer_legacy.cc
+	@printf "Linking  %-35s > %s\n" $< $@
+	@mkdir -p $(DST_DIR)
+	$(CXX) $(M1_CXXFLAGS) $(COCCL_INC) -I$(COCCL_SRC) -o $@ $^
+
+$(M4_VMM_TEST): coccl_m4_vmm_test.cc \
+		$(COCCL_SRC)/misc/coccl_buffer_management.cc \
+		$(COCCL_SRC)/misc/coccl_buffer_legacy.cc \
+		$(COCCL_SRC)/misc/coccl_buffer_vmm.cc
 	@printf "Linking  %-35s > %s\n" $< $@
 	@mkdir -p $(DST_DIR)
 	$(CXX) $(M1_CXXFLAGS) $(COCCL_INC) -I$(COCCL_SRC) -o $@ $^

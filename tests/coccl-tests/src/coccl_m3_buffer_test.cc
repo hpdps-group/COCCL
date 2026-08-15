@@ -1,4 +1,5 @@
 #include "coccl_buffer_management.h"
+#include "coccl_buffer_internal.h"
 #include "coccl_config.h"
 #include "comm.h"
 #include "debug.h"
@@ -46,6 +47,38 @@ void ncclDebugLog(ncclDebugLogLevel, unsigned long, const char*, int,
 const cocclConfig& cocclGetConfig() {
   return config;
 }
+
+#if CUDART_VERSION >= 11030
+namespace coccl_buffer {
+
+ncclResult_t vmmInit(VmmPool*, ncclComm_t, bool* available) {
+  *available = false;
+  return ncclSuccess;
+}
+
+ncclResult_t vmmAcquire(VmmPool*, ncclComm_t, size_t, cudaStream_t,
+                        cocclBufferHandle*) {
+  return ncclInternalError;
+}
+
+ncclResult_t vmmRegister(cocclBufferHandle*, ncclComm_t) {
+  return ncclInternalError;
+}
+
+ncclResult_t vmmRelease(cocclBufferHandle*, cudaStream_t) {
+  return ncclInternalError;
+}
+
+ncclResult_t vmmDeregisterComm(VmmPool*, ncclComm_t) {
+  return ncclInternalError;
+}
+
+ncclResult_t vmmDestroy(VmmPool*) {
+  return ncclInternalError;
+}
+
+}  // namespace coccl_buffer
+#endif
 
 extern "C" ncclResult_t ncclMemAlloc(void** ptr, size_t bytes) {
   *ptr = std::malloc(bytes);
