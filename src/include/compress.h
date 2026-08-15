@@ -4,10 +4,20 @@
 #include "device.h"
 #include "core.h"
 #include "argcheck.h"
+#include "coccl_operation.h"
 
 enum ncclCommOp{AlltoAll = 0, AlltoAll_Inter = 1, AllReduce = 2, AllReduce_Inter = 3, AllGather = 4, AllGather_Inter = 5, ReduceScatter = 6, ReduceScatter_Inter = 7, SendRecv = 8, SendRecv_BWD = 9};
 
 typedef ncclCommOp ncclCommOp_t;
+
+struct cocclResolvedCompressorPolicy {
+  void* compressor;
+  size_t thresholdBytes;
+};
+
+bool cocclCompressionEnabled();
+ncclResult_t cocclResolveCompressorPolicy(
+    cocclPolicyKey key, cocclResolvedCompressorPolicy* resolved);
 
 
 ncclResult_t ncclCompress(const void* orgbuff, void** compbuff, const size_t orgChunkCount, ncclDataType_t orgDayatype,

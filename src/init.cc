@@ -1507,7 +1507,6 @@ static ncclResult_t ncclCommInitRankFunc(struct ncclAsyncJob* job_) {
   int cudaDev = job->cudaDev;
   int* parentRanks = NULL;
   int cudaArch;
-  const char* enableComp = getenv("NCCL_ENABLE_COMPRESS");
 
     // INFO(NCCL_INIT, "NCCL_ENABLE_COMPRESS Not set, defaulting to 1");
 
@@ -1556,9 +1555,7 @@ static ncclResult_t ncclCommInitRankFunc(struct ncclAsyncJob* job_) {
     NCCLCHECK(comm->tuner->init(comm->nRanks, comm->nNodes, ncclDebugLog, &comm->tunerContext));
   }
 
-  if (enableComp && strcmp(enableComp, "1") == 0) {
-    NCCLCHECKGOTO(ncclCompressInit(comm), res, fail);
-  }
+  NCCLCHECKGOTO(ncclCompressInit(comm), res, fail);
   // update communicator state
   comm->initState = ncclSuccess;
 

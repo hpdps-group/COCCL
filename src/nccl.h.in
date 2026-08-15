@@ -558,6 +558,36 @@ ncclResult_t  ncclAlltoAllCompOverlap(const void* sendbuff, void* recvbuff, size
 ncclResult_t  pncclAlltoAllCompOverlap(const void* sendbuff, void* recvbuff, size_t sendcount,
   ncclDataType_t datatype, ncclComm_t comm, cudaStream_t stream);
 
+/* Explicit COCCL collectives use the same prepared-call runtime as auto routing. */
+ncclResult_t cocclAllGatherComp(const void* sendbuff, void* recvbuff, size_t sendcount,
+  ncclDataType_t datatype, ncclComm_t comm, cudaStream_t stream);
+ncclResult_t pcocclAllGatherComp(const void* sendbuff, void* recvbuff, size_t sendcount,
+  ncclDataType_t datatype, ncclComm_t comm, cudaStream_t stream);
+ncclResult_t cocclAllToAllComp(const void* sendbuff, void* recvbuff, size_t sendcount,
+  ncclDataType_t datatype, ncclComm_t comm, cudaStream_t stream);
+ncclResult_t pcocclAllToAllComp(const void* sendbuff, void* recvbuff, size_t sendcount,
+  ncclDataType_t datatype, ncclComm_t comm, cudaStream_t stream);
+ncclResult_t cocclReduceScatterCompOneShot(const void* sendbuff, void* recvbuff, size_t recvcount,
+  ncclDataType_t datatype, ncclRedOp_t op, ncclComm_t comm, cudaStream_t stream);
+ncclResult_t pcocclReduceScatterCompOneShot(const void* sendbuff, void* recvbuff, size_t recvcount,
+  ncclDataType_t datatype, ncclRedOp_t op, ncclComm_t comm, cudaStream_t stream);
+ncclResult_t cocclReduceScatterCompTwoShot(const void* sendbuff, void* recvbuff, size_t recvcount,
+  ncclDataType_t datatype, ncclRedOp_t op, ncclComm_t comm, cudaStream_t stream);
+ncclResult_t pcocclReduceScatterCompTwoShot(const void* sendbuff, void* recvbuff, size_t recvcount,
+  ncclDataType_t datatype, ncclRedOp_t op, ncclComm_t comm, cudaStream_t stream);
+ncclResult_t cocclAllReduceCompOneShot(const void* sendbuff, void* recvbuff, size_t count,
+  ncclDataType_t datatype, ncclRedOp_t op, ncclComm_t comm, cudaStream_t stream);
+ncclResult_t pcocclAllReduceCompOneShot(const void* sendbuff, void* recvbuff, size_t count,
+  ncclDataType_t datatype, ncclRedOp_t op, ncclComm_t comm, cudaStream_t stream);
+ncclResult_t cocclAllReduceCompTwoShot(const void* sendbuff, void* recvbuff, size_t count,
+  ncclDataType_t datatype, ncclRedOp_t op, ncclComm_t comm, cudaStream_t stream);
+ncclResult_t pcocclAllReduceCompTwoShot(const void* sendbuff, void* recvbuff, size_t count,
+  ncclDataType_t datatype, ncclRedOp_t op, ncclComm_t comm, cudaStream_t stream);
+ncclResult_t cocclAllReduceCompTripleShot(const void* sendbuff, void* recvbuff, size_t count,
+  ncclDataType_t datatype, ncclRedOp_t op, ncclComm_t comm, cudaStream_t stream);
+ncclResult_t pcocclAllReduceCompTripleShot(const void* sendbuff, void* recvbuff, size_t count,
+  ncclDataType_t datatype, ncclRedOp_t op, ncclComm_t comm, cudaStream_t stream);
+
 // ncclResult_t  ncclAlltoAllCompMultiStreamNew(const void* sendbuff, void* recvbuff, size_t sendcount,
 //   ncclDataType_t datatype, ncclComm_t comm, cudaStream_t stream);
 // ncclResult_t  pncclAlltoAllCompMultiStreamNew(const void* sendbuff, void* recvbuff, size_t sendcount,

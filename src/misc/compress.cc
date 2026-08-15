@@ -48,6 +48,7 @@ struct DeviceResources {
 struct CompressorPolicy {
   const cocclCompressorPlugin* plugin = nullptr;
   void* config = nullptr;
+  size_t thresholdBytes = 0;
   std::mutex resourceLock;
   std::map<int, DeviceResources> resources;
 };
@@ -223,11 +224,13 @@ ncclResult_t installPolicy(cocclOperation operation,
   const size_t index = static_cast<size_t>(operation);
   NCCLCHECK(createPolicy(configured.compressor, cocclCompressorConfigDefault,
                          &defaultPolicies[index]));
+  defaultPolicies[index]->thresholdBytes = configured.thresholdBytes;
   hierarchicalPolicies[index] = defaultPolicies[index];
   if (hierarchical && configured.compressor.hasHierarchicalConfig) {
     NCCLCHECK(createPolicy(configured.compressor,
                            cocclCompressorConfigHierarchical,
                            &hierarchicalPolicies[index]));
+    hierarchicalPolicies[index]->thresholdBytes = configured.thresholdBytes;
   }
   return ncclSuccess;
 }
@@ -435,6 +438,29 @@ ncclResult_t genericDecompressReduce(
 }
 
 }  // namespace
+
+bool cocclCompressionEnabled() {
+  return runtimeInitialized && runtimeInitResult == ncclSuccess &&
+      (enableAllToAllComp || enableAllReduceComp || enableAllGatherComp ||
+       enableReduceScatterComp || enableSendRecvComp);
+}
+
+ncclResult_t cocclResolveCompressorPolicy(
+    cocclPolicyKey key, cocclResolvedCompressorPolicy* resolved) {
+  const size_t index = static_cast<size_t>(key.operation);
+  if (index >= kOperationCount) return ncclInvalidUsage;
+
+  CompressorPolicy* policy = nullptr;
+  if (key.variant == cocclPolicyVariant::Default) {
+    policy = defaultPolicies[index];
+  } else if (key.variant == cocclPolicyVariant::Hierarchical) {
+    policy = hierarchicalPolicies[index];
+  }
+  if (policy == nullptr) return ncclInvalidUsage;
+  resolved->compressor = policy;
+  resolved->thresholdBytes = policy->thresholdBytes;
+  return ncclSuccess;
+}
 
 ncclResult_t ncclCompressInit(const ncclComm_t comm) {
   const bool configReady = cocclConfigInitialize();
