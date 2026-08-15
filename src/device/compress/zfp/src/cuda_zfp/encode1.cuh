@@ -153,7 +153,8 @@ size_t encode1launch(uint dim,
   //
   size_t stream_bytes = calc_device_mem1d(zfp_pad, maxbits);
   // ensure we have zeros
-  cudaMemset(stream, 0, stream_bytes);
+  if (cudaMemsetAsync(stream, 0, stream_bytes, exec_stream) != cudaSuccess)
+    return 0;
 #ifdef CUDA_ZFP_RATE_PRINT
   cudaEvent_t start, stop;
   cudaEventCreate(&start);

@@ -43,6 +43,13 @@ LIBOBJ     := $(LIBSRCFILES:%.cc=$(OBJDIR)/%.o)
 DEPFILES   := $(LIBOBJ:%.o=%.d)
 LDFLAGS    += -L${CUDA_LIB} -l$(CUDARTLIB) -lpthread -lrt -ldl
 
+# The compressor SDK and TOML parser use C++17. Keep the rest of NCCL on its
+# existing language mode during this migration step.
+$(OBJDIR)/misc/coccl_config.o \
+$(OBJDIR)/misc/coccl_config_format.o \
+$(OBJDIR)/misc/coccl_config_log.o \
+$(OBJDIR)/misc/compress.o: CXXFLAGS += -std=c++17
+
 DEVMANIFEST := $(BUILDDIR)/obj/device/manifest
 
 ##### rules

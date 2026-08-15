@@ -4,7 +4,6 @@
 #include "device.h"
 #include "core.h"
 #include "argcheck.h"
-#include "compressor.h"
 
 enum ncclCommOp{AlltoAll = 0, AlltoAll_Inter = 1, AllReduce = 2, AllReduce_Inter = 3, AllGather = 4, AllGather_Inter = 5, ReduceScatter = 6, ReduceScatter_Inter = 7, SendRecv = 8, SendRecv_BWD = 9};
 

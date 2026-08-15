@@ -68,7 +68,7 @@ else
 .SILENT:
 endif
 
-.PHONY: build clean
+.PHONY: build clean m1-host-tests m1-plugin-load-test
 
 BUILDDIR ?= ../build
 ifneq ($(NCCL_HOME), "")
@@ -99,6 +99,48 @@ reduce_scatter_comp_twoshot_tl_overlap
 BIN_FILES := $(BIN_FILES_LIST:%=${DST_DIR}/%_perf)
 
 build: ${BIN_FILES}
+
+COCCL_SRC := ../../../src
+COCCL_INC := -I$(COCCL_SRC)/include -I$(NCCL_HOME)/include -I$(CUDA_INC)
+M1_CXXFLAGS := $(filter-out -std=c++11,$(CXXFLAGS)) -std=c++17
+M1_SDK_TEST := $(DST_DIR)/coccl_compressor_sdk_test
+M1_CONFIG_READER_TEST := $(DST_DIR)/coccl_config_reader_test
+M1_CONFIG_TEST := $(DST_DIR)/coccl_m1_config_test
+M1_PLUGIN_LOAD_TEST := $(DST_DIR)/coccl_m1_plugin_load_test
+M1_SDP_CONFIG := ../../../examples/benchmarks_scripts/configs/m1_sdp4bit.toml
+M1_ZFP_CONFIG := ../../../examples/benchmarks_scripts/configs/m1_zfp.toml
+M1_PLUGIN_DIR := $(NCCL_HOME)/obj/device/compress/libcompress
+
+m1-host-tests: $(M1_SDK_TEST) $(M1_CONFIG_READER_TEST) $(M1_CONFIG_TEST)
+	$(M1_SDK_TEST)
+	$(M1_CONFIG_READER_TEST)
+	$(M1_CONFIG_TEST) $(M1_SDP_CONFIG) $(M1_ZFP_CONFIG)
+
+m1-plugin-load-test: $(M1_PLUGIN_LOAD_TEST)
+	$(M1_PLUGIN_LOAD_TEST) $(M1_PLUGIN_DIR)
+
+$(M1_SDK_TEST): coccl_compressor_sdk_test.cc
+	@printf "Linking  %-35s > %s\n" $< $@
+	@mkdir -p $(DST_DIR)
+	$(CXX) $(M1_CXXFLAGS) $(COCCL_INC) -o $@ $< -L$(CUDA_LIB) -lcudart
+
+$(M1_CONFIG_READER_TEST): coccl_config_reader_test.cc
+	@printf "Linking  %-35s > %s\n" $< $@
+	@mkdir -p $(DST_DIR)
+	$(CXX) $(M1_CXXFLAGS) $(COCCL_INC) -o $@ $<
+
+$(M1_CONFIG_TEST): coccl_m1_config_test.cc \
+		$(COCCL_SRC)/misc/coccl_config.cc \
+		$(COCCL_SRC)/misc/coccl_operation.cc
+	@printf "Linking  %-35s > %s\n" $< $@
+	@mkdir -p $(DST_DIR)
+	$(CXX) $(M1_CXXFLAGS) -DCOCCL_CONFIG_PARSER_ONLY $(COCCL_INC) \
+		-o $@ $^
+
+$(M1_PLUGIN_LOAD_TEST): coccl_m1_plugin_load_test.cc
+	@printf "Linking  %-35s > %s\n" $< $@
+	@mkdir -p $(DST_DIR)
+	$(CXX) $(M1_CXXFLAGS) $(COCCL_INC) -o $@ $< -ldl
 
 clean:
 	rm -rf ${DST_DIR}

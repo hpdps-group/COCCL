@@ -1,0 +1,39 @@
+schema_version = 2
+
+[runtime]
+mode = "normal"
+compression_threshold_bytes = 0
+
+[compressor_plugins]
+compressors = ["sdp4bit", "zfp"]
+library_path = "../../../build/obj/device/compress/libcompress"
+
+[normal.all_to_all]
+compressor = "zfp"
+
+[normal.all_to_all.config.default]
+rate = 4
+
+[normal.all_gather]
+compressor = "zfp"
+
+[normal.all_gather.config.default]
+rate = 8
+
+[normal.all_reduce]
+compressor = "zfp"
+
+[normal.all_reduce.config.default]
+rate = 8
+
+[normal.all_reduce.config.hierarchical]
+rate = 8
+
+[normal.reduce_scatter]
+compressor = "zfp"
+
+[normal.reduce_scatter.config.default]
+rate = 8
+
+[normal.reduce_scatter.config.hierarchical]
+rate = 8

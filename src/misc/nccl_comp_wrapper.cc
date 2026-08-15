@@ -5,13 +5,10 @@
 #include "enqueue.h"
 #include "compress.h"
 #include "reduce_extend.h"
-#include "compressor.h"
 #include "../graph/topo.h"
 #include "coccl_alloc.h"
 #define COMPBUFF_EXCESS_SIZE 16
 __thread struct parComm* parcomms = nullptr;
-extern cudaMemPool_t* compMemPool;
-extern size_t compMemPoolCnt;
 // maxSendSize for allgather
 __thread size_t aGMaxSendBytes = 0;
 
@@ -1322,4 +1319,3 @@ ncclResult_t ncclRecvDecomp(void* recvbuff, size_t count, ncclDataType_t datatyp
 
   return ncclSuccess;
 }
-

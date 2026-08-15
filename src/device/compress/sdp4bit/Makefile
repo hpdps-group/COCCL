@@ -53,6 +53,7 @@ INCFLAGS := -I$(CUDA_INC) \
 # @echo $(INCFLAGS)
 
 NVCUFLAGS += $(INCFLAGS) \
+            -std=c++17 \
             -U__CUDA_NO_HALF_OPERATORS__ \
             -U__CUDA_NO_HALF_CONVERSIONS__ \
             -U__CUDA_NO_HALF2_OPERATORS__ \

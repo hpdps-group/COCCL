@@ -4,6 +4,7 @@
 #include "quantization.h"
 #include "quantization_utils.h"
 #include "reduction_utils.h"
+#include "sdp4bit_config.h"
 #include <cuda_runtime.h> 
 #include <cuda_fp16.h>  
 #include "nccl.h"
@@ -20,27 +21,6 @@
 
 #define ALIGN_SIZE(size, align) \
   size = ((size + (align) - 1) / (align)) * (align);
-
-struct sdp4bitConfig{
-    /* custom configs*/
-    // normal
-    int groupCount=2048;
-    int quantBits=8;
-    bool hadamard = false;
-    quantize::Type quantType = quantize::Type::Symmetric;
-    // gradient config
-    int inQuantBits = 0;
-    int outQuantBits = 0;
-    int inGroupCount = 0;
-    int outGroupCount = 0;
-    // intra and inter
-    bool intraAndInter = false;
-    // swizzle
-    int nodes = 1;
-    int devicesPerNodes = 4;
-    int pipelineSize = 1;
-    bool subAdd = 0;
-} ;
 
 __hidden void parseSDP4BitConfig(const char* configFile, void** compConfig, int nodes, int devicesPerNodes){
     // alloc memory for config
@@ -648,12 +628,3 @@ __hidden cudaError_t launchDequanReduce(void* reducebuff, const void* compbuff, 
                     chunkBytes, groupBytes, stream);
     return cudaGetLastError();
 }
-
-extern "C" __attribute__((visibility("default"))) const ncclCompressor_t sdp4bit{
-    .name = "sdp4bit",
-    .compress = launchQuantize,
-    .decompress = launchDequantize,
-    .decompReduce = launchDequanReduce,
-    .decompReduceComp = launchDequanReduceQuan,
-    .parseConfig = parseSDP4BitConfig
-};
