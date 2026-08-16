@@ -138,7 +138,7 @@ for comp in "${COMPRESSORS[@]}"; do
   for ((pipe=1;pipe<=8;pipe=pipe*2))do
     echo "------------------------------------------------------allreduce comp twoshot $gpus A800 GPUs pipe $pipe [compressor=$comp]------------------------------------------------------"
     export NCCL_PIPELINE_DEPTH=$pipe
-    $COCCL_PATH/tests/coccl-tests/build/all_reduce_comp_twoshot_overlap_perf -b 1MB -e 8G -f 2 -t $gpus -g 1 -w 10 -n 20 -c 0
+    $COCCL_PATH/tests/coccl-tests/build/all_reduce_comp_twoshot_perf -b 1MB -e 8G -f 2 -t $gpus -g 1 -w 10 -n 20 -c 0
   done
 
   echo ' '

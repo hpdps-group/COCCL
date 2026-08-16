@@ -348,11 +348,6 @@ ncclResult_t ncclAllReduceOptim(const void* sendbuff, void* recvbuff, size_t cou
 ncclResult_t pncclAllReduceOptim(const void* sendbuff, void* recvbuff, size_t count,
     ncclDataType_t datatype, ncclRedOp_t op, ncclComm* comm, cudaStream_t stream);
 
-ncclResult_t ncclAllReduceCompRing(const void* sendbuff, void* recvbuff, size_t count,
-    ncclDataType_t datatype, ncclRedOp_t op, ncclComm* comm, cudaStream_t stream);
-ncclResult_t pncclAllReduceCompRing(const void* sendbuff, void* recvbuff, size_t count,
-    ncclDataType_t datatype, ncclRedOp_t op, ncclComm* comm, cudaStream_t stream);
-
 ncclResult_t ncclAllReduceCompOneShot(const void* sendbuff, void* recvbuff, size_t count,
     ncclDataType_t datatype, ncclRedOp_t op, ncclComm* comm, cudaStream_t stream);
 ncclResult_t pncclAllReduceCompOneShot(const void* sendbuff, void* recvbuff, size_t count,
@@ -363,25 +358,10 @@ ncclResult_t ncclAllReduceCompTwoShot(const void* sendbuff, void* recvbuff, size
 ncclResult_t pncclAllReduceCompTwoShot(const void* sendbuff, void* recvbuff, size_t count,
     ncclDataType_t datatype, ncclRedOp_t op, ncclComm* comm, cudaStream_t stream);
 
-ncclResult_t ncclAllReduceCompTwoShotOverlap(const void* sendbuff, void* recvbuff, size_t count,
-  ncclDataType_t datatype, ncclRedOp_t op, ncclComm* comm, cudaStream_t stream);
-ncclResult_t pncclAllReduceCompTwoShotOverlap(const void* sendbuff, void* recvbuff, size_t count,
-  ncclDataType_t datatype, ncclRedOp_t op, ncclComm* comm, cudaStream_t stream);
-
 ncclResult_t ncclAllReduceCompTripleShot(const void* sendbuff, void* recvbuff, size_t count,
   ncclDataType_t datatype, ncclRedOp_t op, ncclComm* comm, cudaStream_t stream);
 ncclResult_t pncclAllReduceCompTripleShot(const void* sendbuff, void* recvbuff, size_t count,
   ncclDataType_t datatype, ncclRedOp_t op, ncclComm* comm, cudaStream_t stream);
-
-ncclResult_t ncclAllReduceCompTripleShotTLOverlap(const void* sendbuff, void* recvbuff, size_t count,
-  ncclDataType_t datatype, ncclRedOp_t op, ncclComm* comm, cudaStream_t stream);
-ncclResult_t pncclAllReduceCompTripleShotTLOverlap(const void* sendbuff, void* recvbuff, size_t count,
-  ncclDataType_t datatype, ncclRedOp_t op, ncclComm* comm, cudaStream_t stream);
-
-ncclResult_t ncclAllReduceCompOptim(const void* sendbuff, void* recvbuff, size_t count,
-    ncclDataType_t datatype, ncclRedOp_t op, ncclComm* comm, cudaStream_t stream);
-ncclResult_t pncclAllReduceCompOptim(const void* sendbuff, void* recvbuff, size_t count,
-    ncclDataType_t datatype, ncclRedOp_t op, ncclComm* comm, cudaStream_t stream);
 
 /*
  * Reduce-Scatter

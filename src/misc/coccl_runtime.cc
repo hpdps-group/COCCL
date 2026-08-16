@@ -2,6 +2,7 @@
 
 #include "coccl_config.h"
 #include "coccl_allgather.h"
+#include "coccl_allreduce.h"
 #include "coccl_alltoall.h"
 #include "coccl_group_internal.h"
 #include "coccl_prepared_call.h"
@@ -240,20 +241,7 @@ ncclResult_t cocclExecutePreparedCall(const cocclPreparedCall* prepared) {
       result = cocclExecuteReduceScatter(prepared);
       break;
     case cocclOperation::AllReduce:
-      if (prepared->algorithm == cocclAlgorithmAllReduceOneShot) {
-        result = ncclAllReduceCompOneShot(
-            info.sendbuff, info.recvbuff, info.count, info.datatype,
-            info.op, info.comm, info.stream);
-      } else if (prepared->algorithm ==
-                 cocclAlgorithmAllReduceTripleShot) {
-        result = ncclAllReduceCompTripleShotTLOverlap(
-            info.sendbuff, info.recvbuff, info.count, info.datatype,
-            info.op, info.comm, info.stream);
-      } else {
-        result = ncclAllReduceCompTwoShotOverlap(
-            info.sendbuff, info.recvbuff, info.count, info.datatype,
-            info.op, info.comm, info.stream);
-      }
+      result = cocclExecuteAllReduce(prepared);
       break;
     default:
       break;
