@@ -200,9 +200,11 @@ case "$mode" in
     done
     ;;
   memory)
+    for compressor in sdp4bit zfp; do
+      run_case oneshot "$compressor" 1 33554432
+    done
     for bytes in 67108864 1073741824 8589934592; do
       for compressor in sdp4bit zfp; do
-        run_case oneshot "$compressor" 1 "$bytes"
         for depth in 1 2 4 8; do
           run_case twoshot "$compressor" "$depth" "$bytes"
         done

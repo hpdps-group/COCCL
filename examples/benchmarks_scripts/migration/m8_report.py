@@ -11,8 +11,7 @@ GATE_BYTES = 512 << 20
 EXPECTED_SMOKE = 37
 EXPECTED_PERFORMANCE = 162
 EXPECTED_LAYOUT = 56
-EXPECTED_MEMORY = 30
-ALLOWED_MEMORY_OOM = {("oneshot", "zfp", 1, 8 << 30)}
+EXPECTED_MEMORY = 26
 
 
 def case_fields(path):
@@ -276,9 +275,7 @@ def main():
     memory_gpu_ok = bool(memory_rows) and all(
         row["sampled_gpus"] == 4 for row in memory_rows
     )
-    unexpected_memory_oom = [
-        case for case in memory_oom if case not in ALLOWED_MEMORY_OOM
-    ]
+    unexpected_memory_oom = memory_oom
     complete = (
         smoke_processes == EXPECTED_SMOKE
         and performance_processes == EXPECTED_PERFORMANCE
@@ -292,9 +289,7 @@ def main():
         and not gate_failures and not release_failures
         and not unexpected_memory_oom
     )
-    status = "PASS_WITH_CAPACITY_LIMIT" if passed and memory_oom else (
-        "PASS" if passed else "FAIL"
-    )
+    status = "PASS" if passed else "FAIL"
 
     gated = [row for row in comparisons if row["gate"]]
     small = [row for row in comparisons
@@ -306,7 +301,8 @@ def main():
         stream.write("- OneShot: Compress -> AllGather -> DecompressReduce.\n")
         stream.write("- TwoShot: Compress -> AllToAll -> DRC -> AllGather -> Decompress.\n")
         stream.write("- TripleShot is compile/Host-only for this single-node milestone.\n")
-        stream.write("- SDP4Bit and ZFP use `-w 20 -n 30 -c 0`, one process per point.\n\n")
+        stream.write("- SDP4Bit and ZFP use `-w 20 -n 30 -c 0`, one process per point.\n")
+        stream.write("- OneShot runs from 4 KiB through 32 MiB; its memory sample is 32 MiB.\n\n")
         stream.write("## Completeness\n\n")
         stream.write(f"- Smoke processes: {smoke_processes}/{EXPECTED_SMOKE}.\n")
         stream.write(f"- Performance processes: {performance_processes}/{EXPECTED_PERFORMANCE}; rows: {len(allreduce_rows)}/{EXPECTED_PERFORMANCE * 2}.\n")
@@ -327,8 +323,6 @@ def main():
         stream.write("## Notes\n\n")
         stream.write("- Non-divisible AllReduce counts remain on native NCCL before a compressed plan is built.\n")
         stream.write("- In-place columns are informational; overlapping buffers use the serial fallback.\n")
-        if memory_oom:
-            stream.write("- ZFP OneShot at 8 GiB reaches the pre-Arena capacity limit: the 40 GiB pipeline workspace plus generic DR scratch and user buffers exceed one 80 GiB GPU.\n")
     if not passed:
         raise SystemExit(1)
 

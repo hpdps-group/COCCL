@@ -137,8 +137,8 @@ void dumpPlans(ncclComm_t comm) {
   std::printf("algorithm,bytes,requested_depth,effective_depth,temp_index,"
               "temp_role,logical_bytes,aligned_bytes,offset,"
               "slice_workspace_bytes,workspace_bytes\n");
+  dumpPlan("oneshot", comm, oneShot, 3, 32ULL << 20, 1);
   for (size_t bytes : sizes) {
-    dumpPlan("oneshot", comm, oneShot, 3, bytes, 1);
     for (int depth : depths) {
       dumpPlan("twoshot", comm, twoShot, 5, bytes, depth);
     }
