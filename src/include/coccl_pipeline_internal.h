@@ -7,6 +7,7 @@
 
 constexpr int kCocclPipelineExplicitStages = 3;
 constexpr int kCocclPipelinePhysicalStages = 5;
+constexpr int kCocclPipelineStageKindCount = 6;
 constexpr int kCocclPipelineMaxTemps = 4;
 constexpr int kCocclPipelineMaxDepth = 16;
 constexpr size_t kCocclPipelineAlignment = 256;
@@ -29,6 +30,7 @@ struct cocclPipelineStageContext {
   size_t rawSliceBytes;
   size_t rawChunkBytes;
   ncclDataType_t rawDatatype;
+  cocclPolicyKey compressorPolicy;
   ncclComm_t ownerComm;
 };
 
@@ -36,6 +38,7 @@ enum cocclPipelineTempRole {
   cocclPipelineTempInputStaging,
   cocclPipelineTempCompressOutput,
   cocclPipelineTempAllToAllOutput,
+  cocclPipelineTempAllGatherOutput,
   cocclPipelineTempOutputStaging,
 };
 
@@ -92,6 +95,9 @@ inline bool cocclAlignPipelineBytes(size_t bytes, size_t* aligned) {
 ncclResult_t cocclPreparePipeline(const cocclPipelineSpec* spec,
                                   int requestedDepth,
                                   cocclPipelineContext* context);
+ncclResult_t cocclPipelineStageOutputChunks(
+    const cocclPipelineStage& stage, size_t inputChunks,
+    size_t* outputChunks);
 ncclResult_t cocclExecutePipelineStage(
     const cocclPipelineStageContext* context,
     const cocclPipelineStage* stage, cocclPipelineEdge* edge,

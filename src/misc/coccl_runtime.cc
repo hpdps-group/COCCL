@@ -1,6 +1,7 @@
 #include "coccl_runtime.h"
 
 #include "coccl_config.h"
+#include "coccl_allgather.h"
 #include "coccl_alltoall.h"
 #include "coccl_group_internal.h"
 #include "coccl_prepared_call.h"
@@ -229,9 +230,7 @@ ncclResult_t cocclExecutePreparedCall(const cocclPreparedCall* prepared) {
   ncclResult_t result = ncclInvalidArgument;
   switch (info.operation) {
     case cocclOperation::AllGather:
-      result = ncclAllGatherCompOverlap(
-          info.sendbuff, info.recvbuff, info.count, info.datatype,
-          info.comm, info.stream);
+      result = cocclExecuteAllGather(prepared);
       break;
     case cocclOperation::AllToAll:
       result = cocclExecuteAllToAll(prepared);

@@ -43,26 +43,6 @@ class CocclWorkspace {
   cudaStream_t stream_;
 };
 
-ncclResult_t executeAllGatherComp(const void* sendbuff, void* recvbuff,
-                                  size_t sendcount,
-                                  ncclDataType_t datatype, ncclComm_t comm,
-                                  cudaStream_t stream, void* workspace) {
-  size_t compSendCount;
-  ncclDataType_t compDatatype;
-  void* compbuff = workspace;
-  NCCLCHECK(ncclCompress(sendbuff, &compbuff, sendcount, datatype,
-                         &compSendCount, &compDatatype, 1, comm->rank,
-                         ncclCommOp_t::AllGather, stream));
-  struct ncclInfo info = {
-      ncclFuncAllGather, "AllGather", compbuff, compbuff, compSendCount,
-      compDatatype, ncclSum, 0, comm, stream, ALLGATHER_CHUNKSTEPS,
-      ALLGATHER_SLICESTEPS};
-  NCCLCHECK(ncclEnqueueCheck(&info));
-  return ncclDecompress(recvbuff, compbuff, sendcount, datatype,
-                        compSendCount, compDatatype, comm->nRanks,
-                        ncclCommOp_t::AllGather, stream);
-}
-
 ncclResult_t executeReduceScatterOneShot(
     const void* sendbuff, void* recvbuff, size_t recvcount,
     ncclDataType_t datatype, ncclComm_t comm, cudaStream_t stream,
@@ -162,77 +142,6 @@ ncclResult_t ncclAllGatherComp(const void* sendbuff, void* recvbuff, size_t send
 
   return ncclSuccess;
 }
-__thread cudaStream_t AGcompStream = nullptr, AGcommStream = nullptr, AGdecompStream = nullptr;
-__thread cudaEvent_t AGcompEvent = nullptr, AGcommEvent = nullptr, AGdecompEvent = nullptr;
-__thread cudaEvent_t AGmainEvent;
-
-NCCL_API(ncclResult_t, ncclAllGatherCompOverlap, const void* sendbuff, void* recvbuff, size_t sendcount,
-  ncclDataType_t datatype, ncclComm_t comm, cudaStream_t stream);
-ncclResult_t ncclAllGatherCompOverlap(const void* sendbuff, void* recvbuff, size_t sendcount,
-  ncclDataType_t datatype, ncclComm_t comm, cudaStream_t stream) {
-   // Compress
-  size_t compSendCount;
-  ncclDataType_t compDatatype;
-  CUDACHECK(cudaSetDevice(comm->cudaDev));
-
-  size_t totalSendBytes = (1 + comm->nRanks) * sendcount * ncclTypeSize(datatype);
-  pipelineDepth = ncclParamPipelineDepth();
-  CocclWorkspace workspace(stream);
-  NCCLCHECK(workspace.acquire(comm, totalSendBytes));
-  void* aGbuff = workspace.ptr();
-
-  if(pipelineDepth < 2){
-    NCCLCHECK(executeAllGatherComp(sendbuff, recvbuff, sendcount, datatype,
-                                   comm, stream, aGbuff));
-  }else{
-    if(AGcompStream == nullptr){
-      CUDACHECK(cudaStreamCreateWithFlags(&AGcompStream, cudaStreamNonBlocking));
-      CUDACHECK(cudaStreamCreateWithFlags(&AGcommStream, cudaStreamNonBlocking));
-      CUDACHECK(cudaStreamCreateWithFlags(&AGdecompStream, cudaStreamNonBlocking));
-      CUDACHECK(cudaEventCreateWithFlags(&AGcompEvent, cudaEventDefault));
-      CUDACHECK(cudaEventCreateWithFlags(&AGcommEvent, cudaEventDefault));
-      CUDACHECK(cudaEventCreateWithFlags(&AGdecompEvent, cudaEventDefault));
-      CUDACHECK(cudaEventCreateWithFlags(&AGmainEvent, cudaEventDefault));
-    }
-    CUDACHECK(cudaEventRecord(AGmainEvent, stream));
-    CUDACHECK(cudaStreamWaitEvent(AGcompStream, AGmainEvent, 0));
-    // NCCLCHECK(ncclCompress(sendbuff, &aGbuff, 
-    //   sendcount, datatype, &compSendCount, &compDatatype, 1, ncclCommOp_t::AllGather, AGcompStream));
-    // printf("dsadasdsadasdsad\n");
-    // NCCLCHECK(ncclCompress(sendbuff, &aGbuff, 
-    //   sendcount, datatype, &compSendCount, &compDatatype, 1, ncclCommOp_t::AllGather, AGcompStream));
-    //   compSendCount /= pipelineDepth;
-    // NCCLCHECK(ncclCompress(sendbuff, mayUpdateBuff ? &recvbuff: &aGbuff, 
-    //   sendcount, datatype, &compSendCount, &compDatatype, 1, ncclCommOp_t::AllGather, stream));
-    for(int i =0 ;i<pipelineDepth; i++){
-      void* sbuff = (char*)sendbuff + i * sendcount / pipelineDepth * ncclTypeSize(datatype);
-      void* sendCompbuff = (char*) aGbuff + i * sendcount / pipelineDepth  * ncclTypeSize(datatype);
-      // void* sendCompbuff = (char*) aGbuff + i * compSendCount  * ncclTypeSize(compDatatype);
-
-      NCCLCHECK(ncclCompress(sbuff, &sendCompbuff, 
-          sendcount / pipelineDepth, datatype, &compSendCount, &compDatatype, 1, comm->rank, ncclCommOp_t::AllGather, AGcompStream));
-      CUDACHECK(cudaEventRecord(AGcompEvent, AGcompStream));  
-      CUDACHECK(cudaStreamWaitEvent(AGcommStream, AGcompEvent, 0));
-      void* recvCompbuff = (char*) aGbuff + sendcount * ncclTypeSize(datatype) + i * compSendCount * comm->nRanks * ncclTypeSize(compDatatype);
-
-      struct ncclInfo info = { ncclFuncAllGather, "AllGather",
-        sendCompbuff, recvCompbuff, compSendCount, compDatatype, ncclSum, 0, comm, AGcommStream, /* Args */
-        ALLGATHER_CHUNKSTEPS, ALLGATHER_SLICESTEPS };
-      NCCLCHECK(ncclEnqueueCheck(&info));
-
-      CUDACHECK(cudaEventRecord(AGcommEvent, AGcommStream));  
-      CUDACHECK(cudaStreamWaitEvent(AGdecompStream, AGcommEvent, 0));
-      void* rbuff = (char*)recvbuff + i * sendcount / pipelineDepth * comm->nRanks  * ncclTypeSize(datatype);
-      NCCLCHECK(ncclDecompress(rbuff, (char*)recvCompbuff, sendcount / pipelineDepth, datatype, compSendCount, compDatatype, comm->nRanks, ncclCommOp_t::AllGather, AGdecompStream));
-    }
-    CUDACHECK(cudaEventRecord(AGdecompEvent, AGdecompStream));
-    CUDACHECK(cudaStreamWaitEvent(stream, AGdecompEvent, 0));
-  }
-
-  return workspace.release();
-}
-
-
 // TODO inter- and intra- overlap
 NCCL_API(ncclResult_t, ncclAllGatherCompTwoShot, const void* sendbuff, void* recvbuff, size_t sendcount,
   ncclDataType_t datatype, ncclComm_t comm, cudaStream_t stream);

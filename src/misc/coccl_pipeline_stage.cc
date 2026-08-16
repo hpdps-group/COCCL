@@ -5,8 +5,29 @@
 #include "comm.h"
 #include "compress.h"
 #include "coccl_pipeline_layout.h"
+#include "debug.h"
 
 namespace {
+
+ncclCommOp_t compressorOperation(const cocclPolicyKey& policy) {
+  const bool hierarchical =
+      policy.variant == cocclPolicyVariant::Hierarchical;
+  switch (policy.operation) {
+    case cocclOperation::AllToAll:
+      return hierarchical ? AlltoAll_Inter : AlltoAll;
+    case cocclOperation::AllGather:
+      return hierarchical ? AllGather_Inter : AllGather;
+    case cocclOperation::ReduceScatter:
+      return hierarchical ? ReduceScatter_Inter : ReduceScatter;
+    case cocclOperation::AllReduce:
+      return hierarchical ? AllReduce_Inter : AllReduce;
+    case cocclOperation::SendRecv:
+      return SendRecv;
+    case cocclOperation::Count:
+      break;
+  }
+  __builtin_unreachable();
+}
 
 bool buffersOverlap(const void* first, size_t firstBytes,
                     const void* second, size_t secondBytes) {
@@ -26,7 +47,8 @@ ncclResult_t runCompress(const cocclPipelineStageContext* context,
   NCCLCHECK(ncclCompress(
       edge->ptr, &encoded, context->rawSliceCount, context->rawDatatype,
       &encodedChunkCount, &encodedDatatype, edge->logicalChunks,
-      context->ownerComm->rank, ncclCommOp_t::AlltoAll, stream));
+      context->ownerComm->rank,
+      compressorOperation(context->compressorPolicy), stream));
 
   size_t encodedElements = 0;
   size_t encodedBytes = 0;
@@ -58,6 +80,21 @@ ncclResult_t runAllToAll(const cocclPipelineStageContext*,
   return ncclSuccess;
 }
 
+ncclResult_t runAllGather(const cocclPipelineStageContext*,
+                          const cocclPipelineStage* stage,
+                          cocclPipelineEdge* edge,
+                          const cocclPipelineStageOutput* output,
+                          cudaStream_t stream) {
+  NCCLCHECK(ncclAllGather(edge->ptr, output->ptr, edge->bytes, ncclUint8,
+                          stage->comm, stream));
+  const size_t ranks = (size_t)stage->comm->nRanks;
+  edge->ptr = output->ptr;
+  edge->bytes *= ranks;
+  edge->totalElements *= ranks;
+  edge->logicalChunks *= ranks;
+  return ncclSuccess;
+}
+
 ncclResult_t runDecompress(const cocclPipelineStageContext* context,
                            const cocclPipelineStage*,
                            cocclPipelineEdge* edge,
@@ -68,7 +105,8 @@ ncclResult_t runDecompress(const cocclPipelineStageContext* context,
   NCCLCHECK(ncclDecompress(
       output->ptr, edge->ptr, context->rawSliceCount,
       context->rawDatatype, encodedChunkCount, edge->datatype,
-      edge->logicalChunks, ncclCommOp_t::AlltoAll, stream));
+      edge->logicalChunks, compressorOperation(context->compressorPolicy),
+      stream));
   edge->ptr = output->ptr;
   edge->bytes = context->rawSliceBytes * edge->logicalChunks;
   edge->totalElements = context->rawSliceCount * edge->logicalChunks;
@@ -104,13 +142,15 @@ typedef ncclResult_t (*StageHandler)(
 
 static_assert(cocclPipelineStageCompress == 0 &&
                   cocclPipelineStageAllToAll == 1 &&
-                  cocclPipelineStageDecompress == 2 &&
-                  cocclPipelineStagePack == 3 &&
-                  cocclPipelineStageUnpack == 4,
+                  cocclPipelineStageAllGather == 2 &&
+                  cocclPipelineStageDecompress == 3 &&
+                  cocclPipelineStagePack == 4 &&
+                  cocclPipelineStageUnpack == 5,
               "pipeline stage kinds must match the handler table");
 
-const StageHandler handlers[kCocclPipelinePhysicalStages] = {
-    runCompress, runAllToAll, runDecompress, runPack, runUnpack};
+const StageHandler handlers[kCocclPipelineStageKindCount] = {
+    runCompress, runAllToAll, runAllGather,
+    runDecompress, runPack, runUnpack};
 
 }  // namespace
 
@@ -135,5 +175,13 @@ ncclResult_t cocclExecutePipelineStage(
   if (buffersOverlap(edge->ptr, inputSpan, output->ptr, outputSpan)) {
     return ncclInvalidUsage;
   }
-  return handlers[(int)stage->kind](context, stage, edge, output, stream);
+  const ncclResult_t result =
+      handlers[(int)stage->kind](context, stage, edge, output, stream);
+  if (result != ncclSuccess) {
+    WARN("COCCL pipeline stage %d failed with result %d bytes %zu "
+         "elements %zu datatype %d chunks %zu",
+         (int)stage->kind, (int)result, edge->bytes,
+         edge->totalElements, (int)edge->datatype, edge->logicalChunks);
+  }
+  return result;
 }

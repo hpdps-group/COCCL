@@ -13,7 +13,8 @@ ncclResult_t cocclExecuteAllToAll(const cocclPreparedCall* prepared) {
   };
   const cocclPipelineSpec spec = {
       "alltoall", info.sendbuff, info.recvbuff, info.count,
-      (size_t)info.comm->nRanks, info.datatype, info.comm, info.stream,
+      (size_t)info.comm->nRanks, info.datatype, prepared->policy,
+      info.comm, info.stream,
       stages, (int)(sizeof(stages) / sizeof(stages[0]))};
   return cocclRunPipeline(&spec);
 }

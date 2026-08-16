@@ -58,6 +58,11 @@ ncclResult_t ncclAllToAll(const void*, void*, size_t count,
   return ncclSuccess;
 }
 
+ncclResult_t ncclAllGather(const void*, void*, size_t, ncclDataType_t,
+                           ncclComm_t, cudaStream_t) {
+  return ncclInternalError;
+}
+
 ncclResult_t cocclLaunchPackSlice(const void*, size_t pitch, void*,
                                   size_t sliceBytes, size_t chunks,
                                   cudaStream_t) {
@@ -79,7 +84,8 @@ int main() {
   comm.nRanks = 4;
   comm.rank = 2;
   const cocclPipelineStageContext context = {
-      64, 256, 1024, ncclFloat32, &comm};
+      64, 256, 1024, ncclFloat32,
+      cocclDefaultPolicy(cocclOperation::AllToAll), &comm};
   cocclPipelineEdge edge = {
       reinterpret_cast<void*>(0x100000), 1024, 256, ncclFloat32, 4};
 

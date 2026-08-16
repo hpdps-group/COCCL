@@ -171,14 +171,16 @@ ncclResult_t runOverlap(const cocclPipelineContext& context, void* workspace,
   for (int slice = 0; slice < context.depth; ++slice) {
     cocclPipelineEdge edge = inputEdge(context, slice);
 
-    const cocclPipelineStage pack = cocclPipelinePack();
-    const cocclPipelineStageOutput packOutput = {
-        tempPtr(context, workspace, slice,
-                context.plan.inputStagingTemp),
-        edge.bytes};
-    NCCLCHECK(cocclExecutePipelineStage(
-        &context.stageContext, &pack, &edge, &packOutput,
-        resources->streams[cocclPipelinePhasePack]));
+    if (context.plan.inputStagingTemp >= 0) {
+      const cocclPipelineStage pack = cocclPipelinePack();
+      const cocclPipelineStageOutput packOutput = {
+          tempPtr(context, workspace, slice,
+                  context.plan.inputStagingTemp),
+          edge.bytes};
+      NCCLCHECK(cocclExecutePipelineStage(
+          &context.stageContext, &pack, &edge, &packOutput,
+          resources->streams[cocclPipelinePhasePack]));
+    }
     NCCLCHECK(recordPhase(resources, cocclPipelinePhasePack, slice));
 
     for (int stage = 0; stage < context.spec->stageCount; ++stage) {

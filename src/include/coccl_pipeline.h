@@ -3,16 +3,18 @@
 
 #include <stddef.h>
 
+#include "coccl_operation.h"
 #include "nccl.h"
 
 enum cocclPipelineStageKind {
   cocclPipelineStageCompress = 0,
   cocclPipelineStageAllToAll = 1,
-  cocclPipelineStageDecompress = 2,
+  cocclPipelineStageAllGather = 2,
+  cocclPipelineStageDecompress = 3,
   // Pack and Unpack are automatic boundary stages. Primitives do not list
   // them in their explicit stage arrays.
-  cocclPipelineStagePack = 3,
-  cocclPipelineStageUnpack = 4,
+  cocclPipelineStagePack = 4,
+  cocclPipelineStageUnpack = 5,
 };
 
 struct cocclPipelineStage {
@@ -26,6 +28,10 @@ static inline cocclPipelineStage cocclPipelineCompress() {
 
 static inline cocclPipelineStage cocclPipelineAllToAll(ncclComm_t comm) {
   return {cocclPipelineStageAllToAll, comm};
+}
+
+static inline cocclPipelineStage cocclPipelineAllGather(ncclComm_t comm) {
+  return {cocclPipelineStageAllGather, comm};
 }
 
 static inline cocclPipelineStage cocclPipelineDecompress() {
@@ -49,6 +55,7 @@ struct cocclPipelineSpec {
   size_t rawChunkCount;
   size_t inputChunks;
   ncclDataType_t datatype;
+  cocclPolicyKey compressorPolicy;
   ncclComm_t ownerComm;
   cudaStream_t stream;
   const cocclPipelineStage* stages;

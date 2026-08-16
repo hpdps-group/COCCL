@@ -130,8 +130,7 @@ ncclResult_t cocclGroupEnqueue(const cocclPreparedCall* prepared) {
   return ncclSuccess;
 }
 
-ncclResult_t ncclAllGatherCompOverlap(
-    const void*, void*, size_t, ncclDataType_t, ncclComm_t, cudaStream_t) {
+ncclResult_t cocclExecuteAllGather(const cocclPreparedCall*) {
   ++compressedCalls;
   return ncclSuccess;
 }

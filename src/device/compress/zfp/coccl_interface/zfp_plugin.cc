@@ -43,6 +43,12 @@ bool maximumCompressedBytes(zfp_stream* stream, zfp_field* field,
   return *maxBytes != 0;
 }
 
+bool checkedMultiply(size_t lhs, size_t rhs, size_t* result) {
+  if (lhs != 0 && rhs > SIZE_MAX / lhs) return false;
+  *result = lhs * rhs;
+  return true;
+}
+
 struct ZfpCompressor {
   using Config = ZfpConfig;
 
@@ -69,8 +75,10 @@ struct ZfpCompressor {
       zfp_stream_close(stream);
       return ncclInternalError;
     }
+    size_t chunkBytes = 0;
     const bool valid = maximumCompressedBytes(
-        stream, field, type, input.elements(), encodedBytes);
+        stream, field, type, input.elementsPerChunk(), &chunkBytes) &&
+        checkedMultiply(chunkBytes, input.chunks(), encodedBytes);
     zfp_field_free(field);
     zfp_stream_close(stream);
     return valid ? ncclSuccess : ncclInvalidArgument;
@@ -97,9 +105,16 @@ struct ZfpCompressor {
     cudaStream_t cudaStream = context.stream();
     stream->exec.params = &cudaStream;
 
-    size_t maxBytes = 0;
+    size_t maxChunkBytes = 0;
     if (!maximumCompressedBytes(
-            stream, field, type, input.elements(), &maxBytes)) {
+            stream, field, type, input.elementsPerChunk(),
+            &maxChunkBytes)) {
+      zfp_field_free(field);
+      zfp_stream_close(stream);
+      return ncclInvalidArgument;
+    }
+    size_t maxBytes = 0;
+    if (!checkedMultiply(maxChunkBytes, input.chunks(), &maxBytes)) {
       zfp_field_free(field);
       zfp_stream_close(stream);
       return ncclInvalidArgument;
@@ -115,21 +130,41 @@ struct ZfpCompressor {
       return ncclInvalidArgument;
     }
 
-    bitstream* bits = stream_open(output.data(), maxBytes);
-    if (bits == nullptr) {
-      zfp_field_free(field);
-      zfp_stream_close(stream);
-      return ncclInternalError;
+    const size_t inputChunkBytes = input.bytes() / input.chunks();
+    size_t compressedChunkBytes = 0;
+    for (size_t chunk = 0; chunk < input.chunks(); ++chunk) {
+      char* encoded = static_cast<char*>(output.data()) +
+          chunk * compressedChunkBytes;
+      if (chunk == 0) encoded = static_cast<char*>(output.data());
+      bitstream* bits = stream_open(encoded, maxChunkBytes);
+      if (bits == nullptr) {
+        zfp_field_free(field);
+        zfp_stream_close(stream);
+        return ncclInternalError;
+      }
+      zfp_stream_set_bit_stream(stream, bits);
+      zfp_stream_rewind(stream);
+      zfp_field_set_pointer(
+          field, static_cast<char*>(const_cast<void*>(input.data())) +
+              chunk * inputChunkBytes);
+      const size_t bytes = zfp_compress(stream, field);
+      stream_close(bits);
+      if (bytes == 0 ||
+          (chunk != 0 && bytes != compressedChunkBytes)) {
+        zfp_field_free(field);
+        zfp_stream_close(stream);
+        return ncclInternalError;
+      }
+      if (chunk == 0) compressedChunkBytes = bytes;
     }
-    zfp_stream_set_bit_stream(stream, bits);
-    zfp_stream_rewind(stream);
-    zfp_field_set_pointer(field, const_cast<void*>(input.data()));
-    const size_t compressedBytes = zfp_compress(stream, field);
-    stream_close(bits);
 
     zfp_field_free(field);
     zfp_stream_close(stream);
-    if (compressedBytes == 0) return ncclInternalError;
+    size_t compressedBytes = 0;
+    if (!checkedMultiply(
+            compressedChunkBytes, input.chunks(), &compressedBytes)) {
+      return ncclInvalidArgument;
+    }
     return output.commitBytes(compressedBytes, input.chunks());
   }
 
@@ -160,24 +195,46 @@ struct ZfpCompressor {
       return ncclInvalidArgument;
     }
 
-    zfp_field_set_type(field, type);
-    zfp_field_set_size_1d(field, output.elements());
-    bitstream* bits = stream_open(const_cast<void*>(input.data()),
-                                  input.bytes());
-    if (bits == nullptr) {
+    if (input.bytes() % input.chunks() != 0 ||
+        output.elements() % output.chunks() != 0) {
       zfp_field_free(field);
       zfp_stream_close(stream);
-      return ncclInternalError;
+      return ncclInvalidArgument;
     }
-    zfp_stream_set_bit_stream(stream, bits);
-    zfp_stream_rewind(stream);
-    zfp_field_set_pointer(field, output.data());
-    const size_t decompressedBytes = zfp_decompress(stream, field);
-    stream_close(bits);
+    const size_t inputChunkBytes = input.bytes() / input.chunks();
+    const size_t outputChunkElements =
+        output.elements() / output.chunks();
+    const size_t outputChunkBytes =
+        outputChunkElements * coccl::dataTypeSize(output.datatype());
+    zfp_field_set_type(field, type);
+    zfp_field_set_size_1d(field, outputChunkElements);
+    for (size_t chunk = 0; chunk < input.chunks(); ++chunk) {
+      bitstream* bits = stream_open(
+          static_cast<char*>(const_cast<void*>(input.data())) +
+              chunk * inputChunkBytes,
+          inputChunkBytes);
+      if (bits == nullptr) {
+        zfp_field_free(field);
+        zfp_stream_close(stream);
+        return ncclInternalError;
+      }
+      zfp_stream_set_bit_stream(stream, bits);
+      zfp_stream_rewind(stream);
+      zfp_field_set_pointer(
+          field, static_cast<char*>(output.data()) +
+              chunk * outputChunkBytes);
+      const size_t decompressedBytes = zfp_decompress(stream, field);
+      stream_close(bits);
+      if (decompressedBytes == 0) {
+        zfp_field_free(field);
+        zfp_stream_close(stream);
+        return ncclInternalError;
+      }
+    }
 
     zfp_field_free(field);
     zfp_stream_close(stream);
-    return decompressedBytes == 0 ? ncclInternalError : ncclSuccess;
+    return ncclSuccess;
   }
 };
 

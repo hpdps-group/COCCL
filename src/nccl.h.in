@@ -477,10 +477,6 @@ ncclResult_t ncclAllGatherCompTwoShot(const void* sendbuff, void* recvbuff, size
 ncclResult_t pncclAllGatherCompTwoShot(const void* sendbuff, void* recvbuff, size_t sendcount,
   ncclDataType_t datatype, ncclComm_t comm, cudaStream_t stream);
 
-ncclResult_t ncclAllGatherCompOverlap(const void* sendbuff, void* recvbuff, size_t sendcount,
-    ncclDataType_t datatype, ncclComm_t comm, cudaStream_t stream);
-ncclResult_t pncclAllGatherCompOverlap(const void* sendbuff, void* recvbuff, size_t sendcount,
-  ncclDataType_t datatype, ncclComm_t comm, cudaStream_t stream);
 /*
  * Send
  *
