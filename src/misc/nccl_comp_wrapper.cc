@@ -43,26 +43,6 @@ class CocclWorkspace {
   cudaStream_t stream_;
 };
 
-ncclResult_t executeReduceScatterOneShot(
-    const void* sendbuff, void* recvbuff, size_t recvcount,
-    ncclDataType_t datatype, ncclComm_t comm, cudaStream_t stream,
-    void* workspace) {
-  size_t compSendCount;
-  ncclDataType_t compDatatype;
-  void* sendCompbuff = workspace;
-  NCCLCHECK(ncclCompress(sendbuff, &sendCompbuff, recvcount, datatype,
-                         &compSendCount, &compDatatype, comm->nRanks,
-                         comm->rank, ncclCommOp_t::ReduceScatter, stream));
-  void* recvCompbuff = static_cast<char*>(workspace) +
-      compSendCount * comm->nRanks * ncclTypeSize(compDatatype);
-  NCCLCHECK(ncclAllToAll(sendCompbuff, recvCompbuff, compSendCount,
-                         compDatatype, comm, stream));
-  return ncclDecompressReduce(recvbuff, recvCompbuff, compSendCount,
-                              compDatatype, recvcount, datatype,
-                              comm->nRanks, ncclCommOp_t::ReduceScatter,
-                              stream, comm);
-}
-
 ncclResult_t executeAllReduceTwoShot(
     const void* sendbuff, void* recvbuff, size_t count,
     ncclDataType_t datatype, ncclComm_t comm, cudaStream_t stream,
@@ -84,7 +64,7 @@ ncclResult_t executeAllReduceTwoShot(
   NCCLCHECK(ncclDecompReduceComp(
       recvCompbuff, &sendCompbuff, count / comm->nRanks, datatype,
       compSendCount, compDatatype, &reCompSendCount, &reCompDatatype,
-      comm->nRanks, ncclCommOp_t::AllReduce, stream, comm));
+      comm->nRanks, comm->nRanks, ncclCommOp_t::AllReduce, stream, comm));
   struct ncclInfo info = {
       ncclFuncAllGather, "AllGather", sendCompbuff, recvCompbuff,
       reCompSendCount, reCompDatatype, ncclSum, 0, comm, stream,
@@ -252,69 +232,10 @@ ncclResult_t ncclReduceScatterCompOneShot(const void* sendbuff, void* recvbuff, 
   NCCLCHECK(ncclAllToAll((void*)sendCompbuff, (void*)recvCompbuff, compSendCount, compDatatype, comm, stream));
 
     // DecompReduce
-  NCCLCHECK(ncclDecompressReduce((void*)recvbuff, (void*)recvCompbuff, compSendCount, compDatatype, recvcount, datatype, comm->nRanks,
+  NCCLCHECK(ncclDecompressReduce((void*)recvbuff, (void*)recvCompbuff, compSendCount, compDatatype, recvcount, datatype, comm->nRanks, comm->nRanks,
                         ncclCommOp_t::ReduceScatter, stream, comm));
   return ncclSuccess;
 }
-__thread cudaStream_t RScompStream = nullptr, RScommStream = nullptr, RSdecompStream = nullptr;
-__thread cudaEvent_t RScompEvent = nullptr, RScommEvent = nullptr, RSdecompEvent = nullptr;
-__thread cudaEvent_t RSmainEvent;
-
-NCCL_API(ncclResult_t, ncclReduceScatterCompOneShotOverlap, const void* sendbuff, void* recvbuff, size_t recvcount,
-  ncclDataType_t datatype, ncclRedOp_t op, ncclComm* comm, cudaStream_t stream);
-ncclResult_t ncclReduceScatterCompOneShotOverlap(const void* sendbuff, void* recvbuff, size_t recvcount,
-  ncclDataType_t datatype, ncclRedOp_t op, ncclComm* comm, cudaStream_t stream){
-
-  size_t compSendCount;
-  ncclDataType_t compDatatype;
-    
-  CUDACHECK(cudaSetDevice(comm->cudaDev));
-  size_t totalSendBytes = 2 * comm->nRanks * recvcount * ncclTypeSize(datatype);
-  pipelineDepth = ncclParamPipelineDepth();
-  CocclWorkspace workspace(stream);
-  NCCLCHECK(workspace.acquire(comm, totalSendBytes));
-  void* rSbuff = workspace.ptr();
-
-  if(pipelineDepth < 2){
-    NCCLCHECK(executeReduceScatterOneShot(
-        sendbuff, recvbuff, recvcount, datatype, comm, stream, rSbuff));
-  }else{
-      if(RScompStream == nullptr){
-        CUDACHECK(cudaStreamCreateWithFlags(&RScompStream, cudaStreamNonBlocking));
-        CUDACHECK(cudaStreamCreateWithFlags(&RScommStream, cudaStreamNonBlocking));
-        CUDACHECK(cudaStreamCreateWithFlags(&RSdecompStream, cudaStreamNonBlocking));
-        CUDACHECK(cudaEventCreateWithFlags(&RScompEvent, cudaEventDefault));
-        CUDACHECK(cudaEventCreateWithFlags(&RScommEvent, cudaEventDefault));
-        CUDACHECK(cudaEventCreateWithFlags(&RSdecompEvent, cudaEventDefault));
-        CUDACHECK(cudaEventCreateWithFlags(&RSmainEvent, cudaEventDefault));
-      }
-      CUDACHECK(cudaEventRecord(RSmainEvent, stream));
-      CUDACHECK(cudaStreamWaitEvent(RScompStream, RSmainEvent, 0));
-      for(int i =0 ;i<pipelineDepth; i++){
-        void* sbuff = (char*)sendbuff + i * recvcount / pipelineDepth * comm->nRanks * ncclTypeSize(datatype);
-        void* sendCompbuff = (char*) rSbuff + i * recvcount / pipelineDepth * comm->nRanks  * ncclTypeSize(datatype);
-  
-        NCCLCHECK(ncclCompress(sbuff, &sendCompbuff, recvcount / pipelineDepth, datatype, &compSendCount, &compDatatype, comm->nRanks, comm->rank, ncclCommOp_t::ReduceScatter, RScompStream));
-        CUDACHECK(cudaEventRecord(RScompEvent, RScompStream));  
-        CUDACHECK(cudaStreamWaitEvent(RScommStream, RScompEvent, 0));
-        void* recvCompbuff = (char*) rSbuff + recvcount * comm->nRanks * ncclTypeSize(datatype) + i * compSendCount * comm->nRanks * ncclTypeSize(compDatatype);
-  
-        NCCLCHECK(ncclAllToAll((void*)sendCompbuff, (void*)recvCompbuff, compSendCount, compDatatype, comm, RScommStream));
-  
-        CUDACHECK(cudaEventRecord(RScommEvent, RScommStream));  
-        CUDACHECK(cudaStreamWaitEvent(RSdecompStream, RScommEvent, 0));
-        void* rbuff = (char*)recvbuff + i * recvcount / pipelineDepth * ncclTypeSize(datatype);
-        NCCLCHECK(ncclDecompressReduce((void*)rbuff, (void*)recvCompbuff, compSendCount, compDatatype, recvcount / pipelineDepth, datatype, comm->nRanks,
-            ncclCommOp_t::ReduceScatter, RSdecompStream, comm));
-      }
-      CUDACHECK(cudaEventRecord(RSdecompEvent, RSdecompStream));
-      CUDACHECK(cudaStreamWaitEvent(stream, RSdecompEvent, 0));
-
-  }
-  return workspace.release();
-}
-
-
 NCCL_API(ncclResult_t, ncclReduceScatterComp, const void* sendbuff, void* recvbuff, size_t recvcount,
   ncclDataType_t datatype, ncclRedOp_t op, ncclComm* comm, cudaStream_t stream);
 ncclResult_t ncclReduceScatterComp(const void* sendbuff, void* recvbuff, size_t recvcount,
@@ -372,7 +293,7 @@ ncclResult_t ncclReduceScatterComp(const void* sendbuff, void* recvbuff, size_t 
       ncclDataType_t reCompDatatype;
       // DecompReduceComp
       NCCLCHECK(ncclDecompReduceComp((void*)reducebuff, (void**)&reduceSendbuf, recvcount, datatype, 
-                  compSendCount, compDatatype, &reCompChunkCount, &reCompDatatype, 2, ncclCommOp_t::ReduceScatter, stream, comm));
+                  compSendCount, compDatatype, &reCompChunkCount, &reCompDatatype, 2, 2, ncclCommOp_t::ReduceScatter, stream, comm));
 
       NCCLCHECK(ncclGroupStart());
       NCCLCHECK(ncclRecvNaive((void*)reduceRecvbuf, reCompChunkCount, reCompDatatype, leftRank, comm, stream));
@@ -383,7 +304,7 @@ ncclResult_t ncclReduceScatterComp(const void* sendbuff, void* recvbuff, size_t 
         CUDACHECK(cudaMemcpyAsync(reducebuff, reduceSendbuf, compSendCount * ncclTypeSize(compDatatype), 
             cudaMemcpyDeviceToDevice, stream)); 
       // decompress - reduce
-      NCCLCHECK(ncclDecompressReduce((void*)recvbuff, reducebuff, compSendCount, compDatatype, recvcount, datatype, 2,
+      NCCLCHECK(ncclDecompressReduce((void*)recvbuff, reducebuff, compSendCount, compDatatype, recvcount, datatype, 2, 2,
                         ncclCommOp_t::ReduceScatter, stream, comm));
     }
   }
@@ -450,14 +371,14 @@ ncclResult_t ncclReduceScatterCompTwoShot(const void* sendbuff, void* recvbuff, 
   ncclDataType_t reCompDatatype;
     // DecompReduceComp
   NCCLCHECK(ncclDecompReduceComp((void*)intraRecvCompbuff, &interSendCompbuff, recvcount * nNodes, datatype,
-             intraSendCount, compDatatype, &reCompSendCount, &reCompDatatype, localRanks, ncclCommOp_t::ReduceScatter_Inter, stream, comm));
+             intraSendCount, compDatatype, &reCompSendCount, &reCompDatatype, localRanks, localRanks, ncclCommOp_t::ReduceScatter_Inter, stream, comm));
     // inter alltoall
   size_t interSendCount = reCompSendCount / nNodes;
 
   NCCLCHECK(ncclAllToAll((void*)interSendCompbuff, (void*)interRecvCompbuff, interSendCount, compDatatype, InterSubComm, stream));
     
   // DecompReduce
-  NCCLCHECK(ncclDecompressReduce((void*)recvbuff, interRecvCompbuff, interSendCount, reCompDatatype, recvcount, datatype, nNodes,
+  NCCLCHECK(ncclDecompressReduce((void*)recvbuff, interRecvCompbuff, interSendCount, reCompDatatype, recvcount, datatype, nNodes, nNodes,
                         ncclCommOp_t::ReduceScatter_Inter, stream, comm));
 
   return ncclSuccess;
@@ -465,198 +386,6 @@ ncclResult_t ncclReduceScatterCompTwoShot(const void* sendbuff, void* recvbuff, 
 
 __thread cudaStream_t* pipelineStream;
 __thread cudaEvent_t* pipelineEvent;
-__thread cudaEvent_t mainEvent;
-NCCL_API(ncclResult_t, ncclReduceScatterCompTwoShotOverlap, const void* sendbuff, void* recvbuff, size_t recvcount,
-  ncclDataType_t datatype, ncclRedOp_t op, ncclComm* comm, cudaStream_t stream);
-ncclResult_t ncclReduceScatterCompTwoShotOverlap(const void* sendbuff, void* recvbuff, size_t recvcount,
-  ncclDataType_t datatype, ncclRedOp_t op, ncclComm* comm, cudaStream_t stream){
-
-  
-  CUDACHECK(cudaSetDevice(comm->cudaDev));
-  int nRanks = comm->nRanks;
-  int localRanks = comm->localRanks;
-  int nNodes = nRanks / localRanks;
-  if(InterSubComm == nullptr || IntraSubComm == nullptr){
-    pipelineDepth = ncclParamPipelineDepth();
-    pipelineStream = (cudaStream_t*)malloc(sizeof(cudaStream_t) * (pipelineDepth));
-    pipelineEvent = (cudaEvent_t*)malloc(sizeof(cudaEvent_t) * (pipelineDepth));
-    for(int i=0; i < pipelineDepth; i++){
-      CUDACHECK(cudaStreamCreateWithFlags(pipelineStream + i, cudaStreamNonBlocking));
-      CUDACHECK(cudaEventCreateWithFlags(pipelineEvent + i, cudaEventDefault));
-    }
-    //intraSubComm
-    NCCLCHECK(ncclCommSplit(comm, comm->rank / localRanks, comm->rank, &IntraSubComm, NULL));
-    //interSubComm
-    NCCLCHECK(ncclCommSplit(comm, comm->rank % localRanks, comm->rank, &InterSubComm, NULL));
-  }
-  // INFO(NCCL_INIT, "reducescatter comp twoshot new");
-  // void* sendCompbuff = nullptr;
-  // void* recvCompbuff = nullptr;
-  size_t compSendCount;
-  ncclDataType_t compDatatype;
-
-  size_t totalSendBytes = 2 * (nRanks + nNodes) * recvcount * ncclTypeSize(datatype);
-  CocclWorkspace workspace(stream);
-  NCCLCHECK(workspace.acquire(comm, totalSendBytes));
-  void* rSbuff = workspace.ptr();
-  NCCLCHECK(ncclCompress(sendbuff, &rSbuff, recvcount, datatype,
-                         &compSendCount, &compDatatype, nRanks, comm->rank,
-                         ncclCommOp_t::ReduceScatter_Inter, stream));
-  if(mainEvent == nullptr)
-    CUDACHECK(cudaEventCreateWithFlags(&mainEvent, cudaEventDefault));
-
-  CUDACHECK(cudaEventRecord(mainEvent, stream));
-  size_t pipeCompCount = compSendCount / pipelineDepth;
-  size_t pipeSendOffset = pipeCompCount * nRanks;
-  size_t pipeOffset = pipeCompCount * (nRanks + 2 * nNodes);
-  size_t totalSendCount = compSendCount * nRanks;
-  for(int i = 0; i < pipelineDepth; i++){
-    CUDACHECK(cudaStreamWaitEvent(pipelineStream[i], mainEvent, 0));
-
-    void* pipebuff = (char*)rSbuff + (totalSendCount + i * pipeOffset) * ncclTypeSize(compDatatype);
-    void* intraSendCompbuff = (char*)rSbuff + i * pipeSendOffset * ncclTypeSize(compDatatype);
-    void* intraRecvCompbuff = pipebuff;
-    // reuse buff may have some wrong, some data may not send/recv sometimes
-    // swizzle and quan
-    // intra alltoall
-    size_t intraSendCount = pipeCompCount * nNodes;
-    NCCLCHECK(ncclAllToAll((void*)intraSendCompbuff, (void*)intraRecvCompbuff, intraSendCount, compDatatype, IntraSubComm, pipelineStream[i]));
-
-    size_t interOffset = pipeCompCount * nRanks;
-    void* interSendCompbuff = (char*) pipebuff + interOffset * ncclTypeSize(compDatatype);
-    void* interRecvCompbuff = (char*) pipebuff + (interOffset + pipeCompCount * nNodes) * ncclTypeSize(compDatatype);
-    
-    size_t reCompSendCount;
-    ncclDataType_t reCompDatatype;
-      // DecompReduceComp
-    NCCLCHECK(ncclDecompReduceComp((void*)intraRecvCompbuff, &interSendCompbuff, recvcount / pipelineDepth * nNodes, datatype,
-                intraSendCount, compDatatype, &reCompSendCount, &reCompDatatype, localRanks, ncclCommOp_t::ReduceScatter_Inter, 
-                pipelineStream[i], comm));
-      // inter alltoall
-    size_t interSendCount = reCompSendCount / nNodes;
-
-    NCCLCHECK(ncclAllToAll((void*)interSendCompbuff, (void*)interRecvCompbuff, interSendCount, compDatatype, InterSubComm, pipelineStream[i]));
-
-    void* piperecvbuff = (char*) recvbuff + (size_t)i * recvcount / pipelineDepth * ncclTypeSize(datatype);
-    // DecompReduce
-    NCCLCHECK(ncclDecompressReduce((void*)piperecvbuff, interRecvCompbuff, interSendCount, reCompDatatype, recvcount / pipelineDepth, datatype, nNodes,
-                          ncclCommOp_t::ReduceScatter_Inter, pipelineStream[i], comm));
-  }
-
-  for(int i=0;i<pipelineDepth;i++){
-    CUDACHECK(cudaEventRecord(pipelineEvent[i], pipelineStream[i]));  
-    CUDACHECK(cudaStreamWaitEvent(stream, pipelineEvent[i], 0));
-  }
-
-  return workspace.release();
-}
-__thread cudaStream_t RScompStream_Inter = nullptr, RScommStream_Inter = nullptr, RSdecompStream_Inter = nullptr;
-__thread cudaEvent_t RScompEvent_Inter = nullptr, RScommEvent_Inter = nullptr, RSdecompEvent_Inter = nullptr;
-
-NCCL_API(ncclResult_t, ncclReduceScatterCompTwoShotTLOverlap, const void* sendbuff, void* recvbuff, size_t recvcount,
-  ncclDataType_t datatype, ncclRedOp_t op, ncclComm* comm, cudaStream_t stream);
-ncclResult_t ncclReduceScatterCompTwoShotTLOverlap(const void* sendbuff, void* recvbuff, size_t recvcount,
-  ncclDataType_t datatype, ncclRedOp_t op, ncclComm* comm, cudaStream_t stream){
-  pipelineDepth = ncclParamPipelineDepth();
-  if(pipelineDepth < 2){
-    NCCLCHECK(ncclReduceScatterCompTwoShot(sendbuff, recvbuff, recvcount, datatype, op, comm, stream));
-    return ncclSuccess;
-  }
-  CUDACHECK(cudaSetDevice(comm->cudaDev));
-  int nRanks = comm->nRanks;
-  int localRanks = comm->localRanks;
-  int nNodes = nRanks / localRanks;
-  if(InterSubComm == nullptr || IntraSubComm == nullptr){
-    pipelineDepth = ncclParamPipelineDepth();
-    pipelineStream = (cudaStream_t*)malloc(sizeof(cudaStream_t) * (pipelineDepth));
-    pipelineEvent = (cudaEvent_t*)malloc(sizeof(cudaEvent_t) * (pipelineDepth));
-    for(int i=0; i < pipelineDepth; i++){
-      CUDACHECK(cudaStreamCreateWithFlags(pipelineStream + i, cudaStreamNonBlocking));
-      CUDACHECK(cudaEventCreateWithFlags(pipelineEvent + i, cudaEventDefault));
-    }
-    //intraSubComm
-    NCCLCHECK(ncclCommSplit(comm, comm->rank / localRanks, comm->rank, &IntraSubComm, NULL));
-    //interSubComm
-    NCCLCHECK(ncclCommSplit(comm, comm->rank % localRanks, comm->rank, &InterSubComm, NULL));
-  }
-
-  size_t compSendCount;
-  ncclDataType_t compDatatype;
-
-  size_t totalSendBytes = 2 * (nRanks + nNodes) * recvcount * ncclTypeSize(datatype);
-  if(RScompStream == nullptr){
-    CUDACHECK(cudaStreamCreateWithFlags(&RScompStream, cudaStreamNonBlocking));
-    CUDACHECK(cudaStreamCreateWithFlags(&RScommStream, cudaStreamNonBlocking));
-    CUDACHECK(cudaStreamCreateWithFlags(&RSdecompStream, cudaStreamNonBlocking));
-    CUDACHECK(cudaEventCreateWithFlags(&RScompEvent, cudaEventDefault));
-    CUDACHECK(cudaEventCreateWithFlags(&RScommEvent, cudaEventDefault));
-    CUDACHECK(cudaEventCreateWithFlags(&RSdecompEvent, cudaEventDefault));
-
-    CUDACHECK(cudaStreamCreateWithFlags(&RScompStream_Inter, cudaStreamNonBlocking));
-    CUDACHECK(cudaStreamCreateWithFlags(&RScommStream_Inter, cudaStreamNonBlocking));
-    CUDACHECK(cudaStreamCreateWithFlags(&RSdecompStream_Inter, cudaStreamNonBlocking));
-    CUDACHECK(cudaEventCreateWithFlags(&RScompEvent_Inter, cudaEventDefault));
-    CUDACHECK(cudaEventCreateWithFlags(&RScommEvent_Inter, cudaEventDefault));
-    CUDACHECK(cudaEventCreateWithFlags(&RSdecompEvent_Inter, cudaEventDefault));
-
-    CUDACHECK(cudaEventCreateWithFlags(&RSmainEvent, cudaEventDefault));
-  }
-  NCCLCHECK(cocclBuffAlloc(&rSbuff, totalSendBytes, comm));
-  
-
-  CUDACHECK(cudaEventRecord(RSmainEvent, stream));
-  CUDACHECK(cudaStreamWaitEvent(RScompStream, RSmainEvent, 0));
-  void* intrabuff =(char* ) rSbuff;
-  void* interbuff =(char* ) rSbuff + 2 * recvcount * nRanks * ncclTypeSize(datatype);
-  size_t intraRecvOffset = recvcount * nRanks * ncclTypeSize(datatype);
-  size_t interRecvOffset = recvcount * nNodes * ncclTypeSize(datatype);
-  
-  for(size_t i =0 ;i<pipelineDepth; i++){
-    void* sbuff = (char*)sendbuff + i * recvcount / pipelineDepth * nRanks * ncclTypeSize(datatype);
-    void* intraSendCompbuff = (char*) intrabuff + i * recvcount / pipelineDepth * nRanks * ncclTypeSize(datatype);
-
-    NCCLCHECK(ncclCompress(sbuff, &intraSendCompbuff, recvcount / pipelineDepth, datatype, &compSendCount,
-                              &compDatatype, nRanks, comm->rank, ncclCommOp_t::ReduceScatter_Inter, RScompStream));
-
-    CUDACHECK(cudaEventRecord(RScompEvent, RScompStream));  
-    CUDACHECK(cudaStreamWaitEvent(RScommStream, RScompEvent, 0));
-    void* intraRecvCompbuff = (char*) intrabuff + intraRecvOffset + i * compSendCount * nNodes * localRanks * ncclTypeSize(compDatatype);
-    size_t intraSendCount = compSendCount * nNodes;
-
-    NCCLCHECK(ncclAllToAll((void*)intraSendCompbuff, (void*)intraRecvCompbuff, intraSendCount, compDatatype, IntraSubComm, RScommStream));
-    CUDACHECK(cudaEventRecord(RScommEvent, RScommStream));  
-    CUDACHECK(cudaStreamWaitEvent(RSdecompStream, RScommEvent, 0));
-    // size_t interOffset = pipeCompCount * nRanks;
-    // void* interSendCompbuff = (char*) pipebuff + interOffset * ncclTypeSize(compDatatype);
-    // void* interRecvCompbuff = (char*) pipebuff + (interOffset + pipeCompCount * nNodes) * ncclTypeSize(compDatatype);
-    void* interSendCompbuff = (char*) interbuff + i * recvcount * nNodes / pipelineDepth * ncclTypeSize(datatype);
-    size_t reCompSendCount;
-    ncclDataType_t reCompDatatype;
-    NCCLCHECK(ncclDecompReduceComp((void*)intraRecvCompbuff, &interSendCompbuff, compSendCount * nNodes, datatype,
-                intraSendCount, compDatatype, &reCompSendCount, &reCompDatatype, localRanks, ncclCommOp_t::ReduceScatter_Inter, 
-                RSdecompStream, comm));
-    CUDACHECK(cudaEventRecord(RSdecompEvent, RSdecompStream));  
-    CUDACHECK(cudaStreamWaitEvent(RScommStream, RSdecompEvent, 0));
-    void* interRecvCompbuff = (char*) interbuff + interRecvOffset + i * reCompSendCount * ncclTypeSize(reCompDatatype);
-    
-    //  (interOffset + pipeCompCount * nNodes) * ncclTypeSize(compDatatype);
-    size_t interSendCount = reCompSendCount / nNodes;
-
-    NCCLCHECK(ncclAllToAll((void*)interSendCompbuff, (void*)interRecvCompbuff, interSendCount, reCompDatatype, InterSubComm, RScommStream));
-    CUDACHECK(cudaEventRecord(RScommEvent_Inter, RScommStream));  
-    CUDACHECK(cudaStreamWaitEvent(RSdecompStream, RScommEvent_Inter, 0));
-    void* piperecvbuff = (char*) recvbuff + i * recvcount / pipelineDepth * ncclTypeSize(datatype);
-
-    // DecompReduce
-    NCCLCHECK(ncclDecompressReduce((void*)piperecvbuff, interRecvCompbuff, interSendCount, reCompDatatype, recvcount / pipelineDepth, datatype, nNodes,
-                          ncclCommOp_t::ReduceScatter_Inter, RSdecompStream, comm));
-  }
-  CUDACHECK(cudaEventRecord(RSdecompEvent_Inter, RSdecompStream));
-  CUDACHECK(cudaStreamWaitEvent(stream, RSdecompEvent_Inter, 0));
-
-
-  return ncclSuccess;
-}
 // max reduceScatter sendSize
 __thread size_t aRMaxSendSize = 0;
 __thread void* aRbuff = nullptr;
@@ -715,7 +444,7 @@ ncclResult_t ncclAllReduceCompOneShot(const void* sendbuff, void* recvbuff, size
 
 
 
-  NCCLCHECK(ncclDecompressReduce((void*)recvbuff, recvCompbuff, numChunks * compSendCount, compDatatype, numChunks * chunkCount, datatype, comm->nRanks,
+  NCCLCHECK(ncclDecompressReduce((void*)recvbuff, recvCompbuff, numChunks * compSendCount, compDatatype, numChunks * chunkCount, datatype, comm->nRanks, comm->nRanks,
   ncclCommOp_t::AllReduce, stream, comm));
   // NCCLCHECK(ncclDecompress(recvTempbuff, (void*)recvCompbuff, numChunks * chunkCount, datatype, compSendCount, compDatatype, comm->nRanks, ncclCommOp_t::AllReduce, stream));
   // // Reduce chunk
@@ -766,7 +495,7 @@ ncclResult_t ncclAllReduceCompTwoShot(const void* sendbuff, void* recvbuff, size
   ncclDataType_t reCompDatatype;
   // DecompReduceComp
   NCCLCHECK(ncclDecompReduceComp((void*)recvCompbuff, &sendCompbuff, count / comm->nRanks, datatype,
-              compSendCount, compDatatype, &reCompSendCount, &reCompDatatype, comm->nRanks, ncclCommOp_t::AllReduce, stream, comm));
+              compSendCount, compDatatype, &reCompSendCount, &reCompDatatype, comm->nRanks, comm->nRanks, ncclCommOp_t::AllReduce, stream, comm));
 
   struct ncclInfo info = { ncclFuncAllGather, "AllGather",
     sendCompbuff, recvCompbuff, reCompSendCount, reCompDatatype, ncclSum, 0, comm, stream, /* Args */
@@ -835,7 +564,7 @@ ncclResult_t ncclAllReduceCompTwoShotOverlap(const void* sendbuff, void* recvbuf
         ncclDataType_t reCompDatatype;
         // DecompReduceComp
         NCCLCHECK(ncclDecompReduceComp((void*)recvCompbuff, &sendCompbuff, recvcount / pipelineDepth, datatype,
-              compSendCount, compDatatype, &reCompSendCount, &reCompDatatype, comm->nRanks, ncclCommOp_t::AllReduce, ARdecompStream, comm));
+              compSendCount, compDatatype, &reCompSendCount, &reCompDatatype, comm->nRanks, comm->nRanks, ncclCommOp_t::AllReduce, ARdecompStream, comm));
         CUDACHECK(cudaEventRecord(ARdecompEvent, ARdecompStream));  
         CUDACHECK(cudaStreamWaitEvent(ARAGStream, ARdecompEvent, 0));
         struct ncclInfo info = { ncclFuncAllGather, "AllGather",
@@ -899,7 +628,7 @@ ncclResult_t ncclAllReduceCompTripleShot(const void* sendbuff, void* recvbuff, s
   ncclDataType_t reCompDatatype;
     // DecompReduceComp
   NCCLCHECK(ncclDecompReduceComp((void*)intraRecvCompbuff, &interSendCompbuff, recvcount * nNodes, datatype,
-             intraSendCount, compDatatype, &reCompSendCount, &reCompDatatype, localRanks, ncclCommOp_t::AllReduce_Inter, stream, comm));
+             intraSendCount, compDatatype, &reCompSendCount, &reCompDatatype, localRanks, localRanks, ncclCommOp_t::AllReduce_Inter, stream, comm));
     // inter alltoall
   size_t interSendCount = reCompSendCount / nNodes;
 
@@ -908,7 +637,7 @@ ncclResult_t ncclAllReduceCompTripleShot(const void* sendbuff, void* recvbuff, s
   // DecompReduce
   
   NCCLCHECK(ncclDecompReduceComp((void*)interRecvCompbuff, &intraSendCompbuff, recvcount, datatype,
-             interSendCount, compDatatype, &reCompSendCount, &reCompDatatype, nNodes, ncclCommOp_t::AllReduce_Inter, stream, comm));
+             interSendCount, compDatatype, &reCompSendCount, &reCompDatatype, nNodes, nNodes, ncclCommOp_t::AllReduce_Inter, stream, comm));
     
   struct ncclInfo info = { ncclFuncAllGather, "AllGather",
     aRbuff, aRbuff, reCompSendCount, reCompDatatype, ncclSum, 0, comm, stream, /* Args */
@@ -969,10 +698,8 @@ ncclResult_t ncclAllReduceCompTripleShotTLOverlap(const void* sendbuff, void* re
       CUDACHECK(cudaStreamCreateWithFlags(&ARAGdecompStream, cudaStreamNonBlocking));
       CUDACHECK(cudaStreamCreateWithFlags(&ARAGStream, cudaStreamNonBlocking));
 
-      CUDACHECK(cudaStreamCreateWithFlags(&RScompStream_Inter, cudaStreamNonBlocking));
       CUDACHECK(cudaStreamCreateWithFlags(&ARcommStream_Inter, cudaStreamNonBlocking));
       CUDACHECK(cudaStreamCreateWithFlags(&ARdecompStream_Inter, cudaStreamNonBlocking));
-      CUDACHECK(cudaEventCreateWithFlags(&RScompEvent_Inter, cudaEventDefault));
       CUDACHECK(cudaEventCreateWithFlags(&ARcommEvent_Inter, cudaEventDefault));
       CUDACHECK(cudaEventCreateWithFlags(&ARdecompEvent_Inter, cudaEventDefault));
       CUDACHECK(cudaEventCreateWithFlags(&ARAGdecompEvent, cudaEventDefault));
@@ -1013,7 +740,7 @@ ncclResult_t ncclAllReduceCompTripleShotTLOverlap(const void* sendbuff, void* re
       size_t reCompSendCount;
       ncclDataType_t reCompDatatype;
       NCCLCHECK(ncclDecompReduceComp((void*)intraRecvCompbuff, &interSendCompbuff, compSendCount * nNodes, datatype,
-                  intraSendCount, compDatatype, &reCompSendCount, &reCompDatatype, localRanks, ncclCommOp_t::AllReduce_Inter, 
+                  intraSendCount, compDatatype, &reCompSendCount, &reCompDatatype, localRanks, localRanks, ncclCommOp_t::AllReduce_Inter,
                   ARdecompStream, comm));
       CUDACHECK(cudaEventRecord(ARdecompEvent, ARdecompStream));  
       CUDACHECK(cudaStreamWaitEvent(ARcommStream_Inter, ARdecompEvent, 0));
@@ -1032,7 +759,7 @@ ncclResult_t ncclAllReduceCompTripleShotTLOverlap(const void* sendbuff, void* re
 
       void* agSendCompbuff = (char*) intrabuff + i * interSendCount * nRanks * ncclTypeSize(datatype);
       NCCLCHECK(ncclDecompReduceComp((void*)interRecvCompbuff, &agSendCompbuff, recvcount / pipelineDepth, datatype,
-            interSendCount, compDatatype, &reCompSendCount, &reCompDatatype, nNodes, ncclCommOp_t::AllReduce_Inter, ARdecompStream_Inter, comm));
+            interSendCount, compDatatype, &reCompSendCount, &reCompDatatype, nNodes, nNodes, ncclCommOp_t::AllReduce_Inter, ARdecompStream_Inter, comm));
       CUDACHECK(cudaEventRecord(ARdecompEvent_Inter, ARdecompStream_Inter));  
       CUDACHECK(cudaStreamWaitEvent(ARAGStream, ARdecompEvent_Inter, 0));
             

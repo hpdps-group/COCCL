@@ -140,19 +140,9 @@ ncclResult_t cocclExecuteAllToAll(const cocclPreparedCall*) {
   return ncclSuccess;
 }
 
-ncclResult_t ncclReduceScatterCompOneShotOverlap(
-    const void*, void*, size_t, ncclDataType_t, ncclRedOp_t, ncclComm_t,
-    cudaStream_t) {
+ncclResult_t cocclExecuteReduceScatter(const cocclPreparedCall* prepared) {
   ++compressedCalls;
-  executedAlgorithm = cocclAlgorithmReduceScatterOneShot;
-  return ncclSuccess;
-}
-
-ncclResult_t ncclReduceScatterCompTwoShotOverlap(
-    const void*, void*, size_t, ncclDataType_t, ncclRedOp_t, ncclComm_t,
-    cudaStream_t) {
-  ++compressedCalls;
-  executedAlgorithm = cocclAlgorithmReduceScatterTwoShot;
+  executedAlgorithm = prepared->algorithm;
   return ncclSuccess;
 }
 

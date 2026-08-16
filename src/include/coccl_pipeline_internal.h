@@ -5,10 +5,10 @@
 
 #include "coccl_pipeline.h"
 
-constexpr int kCocclPipelineExplicitStages = 3;
-constexpr int kCocclPipelinePhysicalStages = 5;
-constexpr int kCocclPipelineStageKindCount = 6;
-constexpr int kCocclPipelineMaxTemps = 4;
+constexpr int kCocclPipelineExplicitStages = 5;
+constexpr int kCocclPipelinePhysicalStages = 7;
+constexpr int kCocclPipelineStageKindCount = 8;
+constexpr int kCocclPipelineMaxTemps = 5;
 constexpr int kCocclPipelineMaxDepth = 16;
 constexpr size_t kCocclPipelineAlignment = 256;
 
@@ -39,6 +39,8 @@ enum cocclPipelineTempRole {
   cocclPipelineTempCompressOutput,
   cocclPipelineTempAllToAllOutput,
   cocclPipelineTempAllGatherOutput,
+  cocclPipelineTempDecompReduceCompOutput,
+  cocclPipelineTempDecompressReduceOutput,
   cocclPipelineTempOutputStaging,
 };
 

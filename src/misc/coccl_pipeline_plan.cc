@@ -22,6 +22,10 @@ cocclPipelineTempRole outputRole(cocclPipelineStageKind kind) {
       return cocclPipelineTempAllToAllOutput;
     case cocclPipelineStageAllGather:
       return cocclPipelineTempAllGatherOutput;
+    case cocclPipelineStageDecompReduceComp:
+      return cocclPipelineTempDecompReduceCompOutput;
+    case cocclPipelineStageDecompressReduce:
+      return cocclPipelineTempDecompressReduceOutput;
     case cocclPipelineStageDecompress:
     case cocclPipelineStagePack:
     case cocclPipelineStageUnpack:
@@ -64,6 +68,14 @@ ncclResult_t cocclPipelineStageOutputChunks(
         return ncclInvalidArgument;
       }
       return ncclSuccess;
+    case cocclPipelineStageDecompReduceComp:
+    case cocclPipelineStageDecompressReduce:
+      if (stage.reduceChunks == 0 ||
+          inputChunks % stage.reduceChunks != 0) {
+        return ncclInvalidArgument;
+      }
+      *outputChunks = inputChunks / stage.reduceChunks;
+      return ncclSuccess;
   }
   __builtin_unreachable();
 }
@@ -74,8 +86,8 @@ ncclResult_t cocclPreparePipeline(const cocclPipelineSpec* spec,
   if (spec == nullptr || context == nullptr || spec->input == nullptr ||
       spec->output == nullptr || spec->ownerComm == nullptr ||
       spec->rawChunkCount == 0 || spec->inputChunks == 0 ||
-      spec->stages == nullptr ||
-      spec->stageCount != kCocclPipelineExplicitStages) {
+      spec->stages == nullptr || spec->stageCount <= 0 ||
+      spec->stageCount > kCocclPipelineExplicitStages) {
     return ncclInvalidArgument;
   }
 

@@ -13,10 +13,8 @@ namespace {
 
 enum cocclPipelinePhase {
   cocclPipelinePhasePack = 0,
-  cocclPipelinePhaseCompress = 1,
-  cocclPipelinePhaseAllToAll = 2,
-  cocclPipelinePhaseDecompress = 3,
-  cocclPipelinePhaseUnpack = 4,
+  cocclPipelinePhaseFirstStage = 1,
+  cocclPipelinePhaseUnpack = kCocclPipelinePhysicalStages - 1,
 };
 
 struct cocclPipelineResources {
@@ -164,6 +162,8 @@ ncclResult_t recordPhase(cocclPipelineResources* resources, int phase,
 
 ncclResult_t runOverlap(const cocclPipelineContext& context, void* workspace,
                         cocclPipelineResources* resources) {
+  const int finalStagePhase =
+      cocclPipelinePhaseFirstStage + context.spec->stageCount - 1;
   CUDACHECK(cudaEventRecord(resources->inputReady, context.spec->stream));
   CUDACHECK(cudaStreamWaitEvent(
       resources->streams[cocclPipelinePhasePack], resources->inputReady, 0));
@@ -184,7 +184,7 @@ ncclResult_t runOverlap(const cocclPipelineContext& context, void* workspace,
     NCCLCHECK(recordPhase(resources, cocclPipelinePhasePack, slice));
 
     for (int stage = 0; stage < context.spec->stageCount; ++stage) {
-      const int phase = cocclPipelinePhaseCompress + stage;
+      const int phase = cocclPipelinePhaseFirstStage + stage;
       NCCLCHECK(waitForPhase(resources, phase, phase - 1, slice));
       const cocclPipelineStageOutput output =
           stageOutput(context, workspace, stage, slice);
@@ -194,24 +194,28 @@ ncclResult_t runOverlap(const cocclPipelineContext& context, void* workspace,
       NCCLCHECK(recordPhase(resources, phase, slice));
     }
 
-    NCCLCHECK(waitForPhase(resources, cocclPipelinePhaseUnpack,
-                            cocclPipelinePhaseDecompress, slice));
-    const cocclPipelineStage unpack = cocclPipelineUnpack();
-    const cocclPipelineStageOutput unpackOutput = {
-        static_cast<char*>(context.spec->output) +
-            (size_t)slice * context.stageContext.rawSliceBytes,
-        edge.bytes};
-    NCCLCHECK(cocclExecutePipelineStage(
-        &context.stageContext, &unpack, &edge, &unpackOutput,
-        resources->streams[cocclPipelinePhaseUnpack]));
-    if (slice == context.depth - 1) {
-      NCCLCHECK(recordPhase(resources, cocclPipelinePhaseUnpack, slice));
+    if (context.plan.outputStagingTemp >= 0) {
+      NCCLCHECK(waitForPhase(resources, cocclPipelinePhaseUnpack,
+                              finalStagePhase, slice));
+      const cocclPipelineStage unpack = cocclPipelineUnpack();
+      const cocclPipelineStageOutput unpackOutput = {
+          static_cast<char*>(context.spec->output) +
+              (size_t)slice * context.stageContext.rawSliceBytes,
+          edge.bytes};
+      NCCLCHECK(cocclExecutePipelineStage(
+          &context.stageContext, &unpack, &edge, &unpackOutput,
+          resources->streams[cocclPipelinePhaseUnpack]));
+      if (slice == context.depth - 1) {
+        NCCLCHECK(recordPhase(resources, cocclPipelinePhaseUnpack, slice));
+      }
     }
   }
 
+  const int completionPhase = context.plan.outputStagingTemp >= 0
+      ? cocclPipelinePhaseUnpack : finalStagePhase;
   CUDACHECK(cudaStreamWaitEvent(
       context.spec->stream,
-      resources->events[cocclPipelinePhaseUnpack][context.depth - 1], 0));
+      resources->events[completionPhase][context.depth - 1], 0));
   return ncclSuccess;
 }
 

@@ -10,40 +10,53 @@ enum cocclPipelineStageKind {
   cocclPipelineStageCompress = 0,
   cocclPipelineStageAllToAll = 1,
   cocclPipelineStageAllGather = 2,
-  cocclPipelineStageDecompress = 3,
+  cocclPipelineStageDecompReduceComp = 3,
+  cocclPipelineStageDecompressReduce = 4,
+  cocclPipelineStageDecompress = 5,
   // Pack and Unpack are automatic boundary stages. Primitives do not list
   // them in their explicit stage arrays.
-  cocclPipelineStagePack = 4,
-  cocclPipelineStageUnpack = 5,
+  cocclPipelineStagePack = 6,
+  cocclPipelineStageUnpack = 7,
 };
 
 struct cocclPipelineStage {
   cocclPipelineStageKind kind;
   ncclComm_t comm;
+  size_t reduceChunks;
 };
 
 static inline cocclPipelineStage cocclPipelineCompress() {
-  return {cocclPipelineStageCompress, nullptr};
+  return {cocclPipelineStageCompress, nullptr, 0};
 }
 
 static inline cocclPipelineStage cocclPipelineAllToAll(ncclComm_t comm) {
-  return {cocclPipelineStageAllToAll, comm};
+  return {cocclPipelineStageAllToAll, comm, 0};
 }
 
 static inline cocclPipelineStage cocclPipelineAllGather(ncclComm_t comm) {
-  return {cocclPipelineStageAllGather, comm};
+  return {cocclPipelineStageAllGather, comm, 0};
+}
+
+static inline cocclPipelineStage cocclPipelineDecompReduceComp(
+    size_t reduceChunks) {
+  return {cocclPipelineStageDecompReduceComp, nullptr, reduceChunks};
+}
+
+static inline cocclPipelineStage cocclPipelineDecompressReduce(
+    size_t reduceChunks) {
+  return {cocclPipelineStageDecompressReduce, nullptr, reduceChunks};
 }
 
 static inline cocclPipelineStage cocclPipelineDecompress() {
-  return {cocclPipelineStageDecompress, nullptr};
+  return {cocclPipelineStageDecompress, nullptr, 0};
 }
 
 static inline cocclPipelineStage cocclPipelinePack() {
-  return {cocclPipelineStagePack, nullptr};
+  return {cocclPipelineStagePack, nullptr, 0};
 }
 
 static inline cocclPipelineStage cocclPipelineUnpack() {
-  return {cocclPipelineStageUnpack, nullptr};
+  return {cocclPipelineStageUnpack, nullptr, 0};
 }
 
 // rawChunkCount is the unsliced element count in one rank chunk.

@@ -422,22 +422,25 @@ ncclResult_t executeDecompress(CompressorPolicy* policy, void* output,
 ncclResult_t genericDecompressReduce(
     CompressorPolicy* policy, void* output, const void* input,
     size_t inputChunkElements, ncclDataType_t inputDatatype,
-    size_t outputChunkElements, ncclDataType_t outputDatatype,
-    size_t chunks, cudaStream_t stream, ncclComm_t ownerComm) {
-  const size_t bytes =
-      outputChunkElements * chunks * ncclTypeSize(outputDatatype);
+    size_t outputElements, ncclDataType_t outputDatatype,
+    size_t inputChunks, size_t reduceChunks, cudaStream_t stream,
+    ncclComm_t ownerComm) {
+  const size_t outputChunks = inputChunks / reduceChunks;
+  const size_t rawChunkElements = outputElements / outputChunks;
+  const size_t bytes = rawChunkElements * inputChunks *
+      ncclTypeSize(outputDatatype);
   cocclBufferHandle temporary;
   ncclResult_t ret = cocclGetUnregisteredBuffer(ownerComm, bytes, stream,
                                                  &temporary);
   if (ret == ncclSuccess) {
     ret = executeDecompress(policy, temporary.ptr, input,
-                            outputChunkElements, outputDatatype,
-                            inputChunkElements, inputDatatype, chunks,
+                            rawChunkElements, outputDatatype,
+                            inputChunkElements, inputDatatype, inputChunks,
                             stream);
   }
   if (ret == ncclSuccess) {
-    ret = ncclReduceChunk(temporary.ptr, outputChunkElements, output,
-                          outputDatatype, chunks, stream);
+    ret = ncclReduceChunk(temporary.ptr, outputElements, output,
+                          outputDatatype, reduceChunks, stream);
   }
   ncclResult_t releaseRet = cocclReleaseBuffer(&temporary, stream);
   return ret == ncclSuccess ? releaseRet : ret;
@@ -508,27 +511,34 @@ ncclResult_t ncclDecompress(
 
 ncclResult_t ncclDecompressReduce(
     void* reducebuff, const void* compbuff, const size_t compChunkCount,
-    ncclDataType_t compDatatype, const size_t reduceChunkCount,
-    ncclDataType_t reduceDatatype, const size_t numChunks,
+    ncclDataType_t compDatatype, const size_t outputElements,
+    ncclDataType_t reduceDatatype, const size_t inputChunks,
+    const size_t reduceChunks,
     ncclCommOp_t commOp, cudaStream_t stream, ncclComm_t ownerComm) {
   CompressorPolicy* policy = policyFor(commOp);
   if (policy == nullptr) return ncclInvalidUsage;
+  if (reduceChunks == 0 || inputChunks % reduceChunks != 0) {
+    return ncclInvalidArgument;
+  }
+  const size_t outputChunks = inputChunks / reduceChunks;
+  if (outputElements % outputChunks != 0) return ncclInvalidArgument;
   if (compDatatype == COCCL_COMPRESSOR_RAW_PASSTHROUGH ||
       (policy->plugin->capabilities &
        cocclCompressorCapabilityDecompressReduce) == 0) {
     return genericDecompressReduce(
         policy, reducebuff, compbuff, compChunkCount, compDatatype,
-        reduceChunkCount, reduceDatatype, numChunks, stream, ownerComm);
+        outputElements, reduceDatatype, inputChunks, reduceChunks, stream,
+        ownerComm);
   }
 
-  const size_t inputElements = compChunkCount * numChunks;
+  const size_t inputElements = compChunkCount * inputChunks;
   const size_t inputBytes = inputElements * ncclTypeSize(compDatatype);
-  const size_t outputBytes = reduceChunkCount * ncclTypeSize(reduceDatatype);
+  const size_t outputBytes = outputElements * ncclTypeSize(reduceDatatype);
   const cocclCompressorView input = {
       const_cast<void*>(compbuff), inputBytes, inputBytes, inputElements,
-      numChunks, compDatatype, nullptr, 0};
+      inputChunks, compDatatype, nullptr, 0};
   cocclCompressorView output = {
-      reducebuff, outputBytes, 0, reduceChunkCount, 1, reduceDatatype,
+      reducebuff, outputBytes, 0, outputElements, outputChunks, reduceDatatype,
       nullptr, 0};
   int cudaDev = 0;
   CUDACHECK(cudaGetDevice(&cudaDev));
@@ -539,59 +549,67 @@ ncclResult_t ncclDecompressReduce(
       input,
       &output,
       rank,
-      numChunks,
+      reduceChunks,
       reduceDatatype,
-      reduceChunkCount,
+      outputElements,
       nullptr,
       nullptr};
   return execute(policy, &call, rank, stream);
 }
 
 ncclResult_t ncclDecompReduceComp(
-    const void* compbuff, void** recompbuff, const size_t orgChunkCount,
+    const void* compbuff, void** recompbuff, const size_t originalElements,
     ncclDataType_t orgDatatype, const size_t compChunkCount,
     ncclDataType_t compDatatype, size_t* reCompChunkCount,
-    ncclDataType_t* reCompDatatype, const size_t numChunks,
+    ncclDataType_t* reCompDatatype, const size_t inputChunks,
+    const size_t reduceChunks,
     ncclCommOp_t commOp, cudaStream_t stream, ncclComm_t ownerComm) {
   CompressorPolicy* policy = policyFor(commOp);
   if (policy == nullptr) return ncclInvalidUsage;
-  if (compDatatype == COCCL_COMPRESSOR_RAW_PASSTHROUGH ||
+  if (reduceChunks == 0 || inputChunks % reduceChunks != 0) {
+    return ncclInvalidArgument;
+  }
+  const size_t outputChunks = inputChunks / reduceChunks;
+  if (originalElements % outputChunks != 0) return ncclInvalidArgument;
+  const size_t rawChunkElements = originalElements / outputChunks;
+  if (outputChunks != 1 ||
+      compDatatype == COCCL_COMPRESSOR_RAW_PASSTHROUGH ||
       (policy->plugin->capabilities &
        cocclCompressorCapabilityDecompressReduceCompress) == 0) {
-    const size_t bytes =
-        orgChunkCount * numChunks * ncclTypeSize(orgDatatype);
+    const size_t bytes = rawChunkElements * inputChunks *
+        ncclTypeSize(orgDatatype);
     cocclBufferHandle temporary;
     ncclResult_t ret = cocclGetUnregisteredBuffer(ownerComm, bytes, stream,
                                                    &temporary);
     if (ret == ncclSuccess) {
       ret = executeDecompress(policy, temporary.ptr, compbuff,
-                              orgChunkCount, orgDatatype, compChunkCount,
-                              compDatatype, numChunks, stream);
+                              rawChunkElements, orgDatatype, compChunkCount,
+                              compDatatype, inputChunks, stream);
     }
     if (ret == ncclSuccess) {
-      ret = ncclReduceChunk(temporary.ptr, orgChunkCount, temporary.ptr,
-                            orgDatatype, numChunks, stream);
+      ret = ncclReduceChunk(temporary.ptr, originalElements, temporary.ptr,
+                            orgDatatype, reduceChunks, stream);
     }
     if (ret == ncclSuccess) {
       ret = executeCompress(policy, temporary.ptr, recompbuff,
-                            orgChunkCount, orgDatatype, 1, 0,
+                            rawChunkElements, orgDatatype, outputChunks, 0,
                             reCompChunkCount, reCompDatatype, stream);
     }
     ncclResult_t releaseRet = cocclReleaseBuffer(&temporary, stream);
     return ret == ncclSuccess ? releaseRet : ret;
   }
 
-  const size_t inputElements = compChunkCount * numChunks;
+  const size_t inputElements = compChunkCount * inputChunks;
   const size_t inputBytes = inputElements * ncclTypeSize(compDatatype);
-  const size_t rawOutputBytes = orgChunkCount * ncclTypeSize(orgDatatype);
+  const size_t rawOutputBytes = originalElements * ncclTypeSize(orgDatatype);
   bool allocated = false;
   NCCLCHECK(allocateEncodedOutput(recompbuff, rawOutputBytes, stream,
                                  &allocated));
   const cocclCompressorView input = {
       const_cast<void*>(compbuff), inputBytes, inputBytes, inputElements,
-      numChunks, compDatatype, nullptr, 0};
+      inputChunks, compDatatype, nullptr, 0};
   cocclCompressorView output = {
-      *recompbuff, rawOutputBytes, 0, 0, 1, ncclInt8, nullptr, 0};
+      *recompbuff, rawOutputBytes, 0, 0, outputChunks, ncclInt8, nullptr, 0};
   int cudaDev = 0;
   CUDACHECK(cudaGetDevice(&cudaDev));
   const int rank = rankForDevice(cudaDev);
@@ -601,13 +619,15 @@ ncclResult_t ncclDecompReduceComp(
       input,
       &output,
       rank,
-      numChunks,
+      reduceChunks,
       orgDatatype,
-      orgChunkCount,
+      originalElements,
       nullptr,
       nullptr};
   ncclResult_t result = execute(policy, &call, rank, stream);
-  if (result == ncclSuccess) result = validateEncodedOutput(output, 1);
+  if (result == ncclSuccess) {
+    result = validateEncodedOutput(output, outputChunks);
+  }
   if (result != ncclSuccess) {
     if (allocated) {
       (void)cudaFreeAsync(*recompbuff, stream);
@@ -615,7 +635,7 @@ ncclResult_t ncclDecompReduceComp(
     }
     return result;
   }
-  *reCompChunkCount = output.elements;
+  *reCompChunkCount = output.elements / output.chunks;
   *reCompDatatype = output.datatype;
   return ncclSuccess;
 }

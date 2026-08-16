@@ -73,8 +73,8 @@ ncclResult_t runAllToAll(const cocclPipelineStageContext*,
                          cocclPipelineEdge* edge,
                          const cocclPipelineStageOutput* output,
                          cudaStream_t stream) {
-  const size_t sendCount = edge->totalElements / edge->logicalChunks;
-  NCCLCHECK(ncclAllToAll(edge->ptr, output->ptr, sendCount, edge->datatype,
+  const size_t sendBytes = edge->bytes / (size_t)stage->comm->nRanks;
+  NCCLCHECK(ncclAllToAll(edge->ptr, output->ptr, sendBytes, ncclUint8,
                          stage->comm, stream));
   edge->ptr = output->ptr;
   return ncclSuccess;
@@ -114,6 +114,73 @@ ncclResult_t runDecompress(const cocclPipelineStageContext* context,
   return ncclSuccess;
 }
 
+ncclResult_t runDecompReduceComp(
+    const cocclPipelineStageContext* context,
+    const cocclPipelineStage* stage, cocclPipelineEdge* edge,
+    const cocclPipelineStageOutput* output, cudaStream_t stream) {
+  const size_t outputChunks = edge->logicalChunks / stage->reduceChunks;
+  size_t reductionElements = 0;
+  if (!cocclPipelineCheckedMultiply(context->rawSliceCount, outputChunks,
+                                    &reductionElements)) {
+    return ncclInvalidArgument;
+  }
+
+  void* encoded = output->ptr;
+  const size_t encodedChunkCount =
+      edge->totalElements / edge->logicalChunks;
+  size_t recompressedChunkCount = 0;
+  ncclDataType_t recompressedDatatype = ncclNumTypes;
+  NCCLCHECK(ncclDecompReduceComp(
+      edge->ptr, &encoded, reductionElements, context->rawDatatype,
+      encodedChunkCount, edge->datatype, &recompressedChunkCount,
+      &recompressedDatatype, edge->logicalChunks, stage->reduceChunks,
+      compressorOperation(context->compressorPolicy), stream,
+      context->ownerComm));
+
+  size_t encodedElements = 0;
+  size_t encodedBytes = 0;
+  const int typeBytes = ncclTypeSize(recompressedDatatype);
+  if (typeBytes <= 0 ||
+      !cocclPipelineCheckedMultiply(recompressedChunkCount, outputChunks,
+                                    &encodedElements) ||
+      !cocclPipelineCheckedMultiply(encodedElements, (size_t)typeBytes,
+                                    &encodedBytes) ||
+      encodedBytes > output->capacityBytes) {
+    return ncclInvalidUsage;
+  }
+  edge->ptr = encoded;
+  edge->bytes = encodedBytes;
+  edge->totalElements = encodedElements;
+  edge->datatype = recompressedDatatype;
+  edge->logicalChunks = outputChunks;
+  return ncclSuccess;
+}
+
+ncclResult_t runDecompressReduce(
+    const cocclPipelineStageContext* context,
+    const cocclPipelineStage* stage, cocclPipelineEdge* edge,
+    const cocclPipelineStageOutput* output, cudaStream_t stream) {
+  const size_t outputChunks = edge->logicalChunks / stage->reduceChunks;
+  size_t reductionElements = 0;
+  if (!cocclPipelineCheckedMultiply(context->rawSliceCount, outputChunks,
+                                    &reductionElements)) {
+    return ncclInvalidArgument;
+  }
+  const size_t encodedChunkCount =
+      edge->totalElements / edge->logicalChunks;
+  NCCLCHECK(ncclDecompressReduce(
+      output->ptr, edge->ptr, encodedChunkCount, edge->datatype,
+      reductionElements, context->rawDatatype, edge->logicalChunks,
+      stage->reduceChunks, compressorOperation(context->compressorPolicy),
+      stream, context->ownerComm));
+  edge->ptr = output->ptr;
+  edge->bytes = context->rawSliceBytes * outputChunks;
+  edge->totalElements = reductionElements;
+  edge->datatype = context->rawDatatype;
+  edge->logicalChunks = outputChunks;
+  return ncclSuccess;
+}
+
 ncclResult_t runPack(const cocclPipelineStageContext* context,
                      const cocclPipelineStage*, cocclPipelineEdge* edge,
                      const cocclPipelineStageOutput* output,
@@ -143,14 +210,17 @@ typedef ncclResult_t (*StageHandler)(
 static_assert(cocclPipelineStageCompress == 0 &&
                   cocclPipelineStageAllToAll == 1 &&
                   cocclPipelineStageAllGather == 2 &&
-                  cocclPipelineStageDecompress == 3 &&
-                  cocclPipelineStagePack == 4 &&
-                  cocclPipelineStageUnpack == 5,
+                  cocclPipelineStageDecompReduceComp == 3 &&
+                  cocclPipelineStageDecompressReduce == 4 &&
+                  cocclPipelineStageDecompress == 5 &&
+                  cocclPipelineStagePack == 6 &&
+                  cocclPipelineStageUnpack == 7,
               "pipeline stage kinds must match the handler table");
 
 const StageHandler handlers[kCocclPipelineStageKindCount] = {
     runCompress, runAllToAll, runAllGather,
-    runDecompress, runPack, runUnpack};
+    runDecompReduceComp, runDecompressReduce, runDecompress,
+    runPack, runUnpack};
 
 }  // namespace
 

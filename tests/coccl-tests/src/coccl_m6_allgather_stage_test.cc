@@ -61,6 +61,19 @@ ncclResult_t ncclAllToAll(const void*, void*, size_t, ncclDataType_t,
   return ncclInternalError;
 }
 
+ncclResult_t ncclDecompReduceComp(
+    const void*, void**, size_t, ncclDataType_t, size_t, ncclDataType_t,
+    size_t*, ncclDataType_t*, size_t, size_t, ncclCommOp_t, cudaStream_t,
+    ncclComm_t) {
+  return ncclInternalError;
+}
+
+ncclResult_t ncclDecompressReduce(
+    void*, const void*, size_t, ncclDataType_t, size_t, ncclDataType_t,
+    size_t, size_t, ncclCommOp_t, cudaStream_t, ncclComm_t) {
+  return ncclInternalError;
+}
+
 ncclResult_t cocclLaunchPackSlice(const void*, size_t, void*, size_t,
                                   size_t, cudaStream_t) {
   return ncclInternalError;

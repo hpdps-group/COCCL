@@ -5,6 +5,7 @@
 #include "coccl_alltoall.h"
 #include "coccl_group_internal.h"
 #include "coccl_prepared_call.h"
+#include "coccl_reducescatter.h"
 #include "collectives.h"
 #include "comm.h"
 #include "compress.h"
@@ -236,13 +237,7 @@ ncclResult_t cocclExecutePreparedCall(const cocclPreparedCall* prepared) {
       result = cocclExecuteAllToAll(prepared);
       break;
     case cocclOperation::ReduceScatter:
-      result = prepared->algorithm == cocclAlgorithmReduceScatterTwoShot
-          ? ncclReduceScatterCompTwoShotOverlap(
-                info.sendbuff, info.recvbuff, info.count, info.datatype,
-                info.op, info.comm, info.stream)
-          : ncclReduceScatterCompOneShotOverlap(
-                info.sendbuff, info.recvbuff, info.count, info.datatype,
-                info.op, info.comm, info.stream);
+      result = cocclExecuteReduceScatter(prepared);
       break;
     case cocclOperation::AllReduce:
       if (prepared->algorithm == cocclAlgorithmAllReduceOneShot) {

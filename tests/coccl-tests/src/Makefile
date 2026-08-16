@@ -69,7 +69,8 @@ else
 endif
 
 .PHONY: build clean m1-host-tests m1-plugin-load-test m2-host-tests \
-	m3-host-tests m4-host-tests m5-host-tests m5-layout-test m6-host-tests
+	m3-host-tests m4-host-tests m5-host-tests m5-layout-test m6-host-tests \
+	m7-host-tests
 
 BUILDDIR ?= ../build
 ifneq ($(NCCL_HOME), "")
@@ -95,8 +96,8 @@ BIN_FILES_LIST := all_reduce all_gather broadcast reduce_scatter reduce alltoall
 alltoall_comp alltoall_p2p reduce_scatter_ring reduce_scatter_comp all_gather_comp all_gather_ring\
 all_reduce_twoShot all_reduce_ring all_reduce_optim all_reduce_comp_ring all_reduce_comp_twoshot all_reduce_comp_twoshot_overlap\
 all_reduce_comp_optim reduce_scatter_comp_oneshot reduce_scatter_comp_twoshot \
-all_gather_comp_twoshot reduce_scatter_comp_twoshot_new_multi all_reduce_comp_tripleshot_tl_overlap all_reduce_comp_tripleshot sendrecv_comp reduce_scatter_comp_oneshot_overlap \
-reduce_scatter_comp_twoshot_tl_overlap all_reduce_comp_oneshot
+all_gather_comp_twoshot all_reduce_comp_tripleshot_tl_overlap all_reduce_comp_tripleshot sendrecv_comp \
+all_reduce_comp_oneshot
 BIN_FILES := $(BIN_FILES_LIST:%=${DST_DIR}/%_perf)
 
 build: ${BIN_FILES}
@@ -120,6 +121,12 @@ M5_PIPELINE_STAGE_TEST := $(DST_DIR)/coccl_m5_pipeline_stage_test
 M5_PIPELINE_LAYOUT_TEST := $(DST_DIR)/coccl_m5_pipeline_layout_test
 M6_ALLGATHER_PLAN_TEST := $(DST_DIR)/coccl_m6_allgather_plan_test
 M6_ALLGATHER_STAGE_TEST := $(DST_DIR)/coccl_m6_allgather_stage_test
+M7_REDUCESCATTER_PLAN_TEST := $(DST_DIR)/coccl_m7_reducescatter_plan_test
+M7_REDUCESCATTER_STAGE_TEST := $(DST_DIR)/coccl_m7_reducescatter_stage_test
+
+m7-host-tests: $(M7_REDUCESCATTER_PLAN_TEST) $(M7_REDUCESCATTER_STAGE_TEST)
+	$(M7_REDUCESCATTER_PLAN_TEST)
+	$(M7_REDUCESCATTER_STAGE_TEST)
 
 m6-host-tests: $(M6_ALLGATHER_PLAN_TEST) $(M6_ALLGATHER_STAGE_TEST)
 	$(M6_ALLGATHER_PLAN_TEST)
@@ -226,6 +233,18 @@ $(M6_ALLGATHER_PLAN_TEST): coccl_m6_allgather_plan_test.cc \
 	$(CXX) $(M1_CXXFLAGS) $(COCCL_INC) -I$(COCCL_SRC) -o $@ $^
 
 $(M6_ALLGATHER_STAGE_TEST): coccl_m6_allgather_stage_test.cc \
+		$(COCCL_SRC)/misc/coccl_pipeline_stage.cc
+	@printf "Linking  %-35s > %s\n" $< $@
+	@mkdir -p $(DST_DIR)
+	$(CXX) $(M1_CXXFLAGS) $(COCCL_INC) -I$(COCCL_SRC) -o $@ $^
+
+$(M7_REDUCESCATTER_PLAN_TEST): coccl_m7_reducescatter_plan_test.cc \
+		$(COCCL_SRC)/misc/coccl_pipeline_plan.cc
+	@printf "Linking  %-35s > %s\n" $< $@
+	@mkdir -p $(DST_DIR)
+	$(CXX) $(M1_CXXFLAGS) $(COCCL_INC) -I$(COCCL_SRC) -o $@ $^
+
+$(M7_REDUCESCATTER_STAGE_TEST): coccl_m7_reducescatter_stage_test.cc \
 		$(COCCL_SRC)/misc/coccl_pipeline_stage.cc
 	@printf "Linking  %-35s > %s\n" $< $@
 	@mkdir -p $(DST_DIR)

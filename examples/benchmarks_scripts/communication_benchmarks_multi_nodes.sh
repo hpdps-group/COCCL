@@ -264,7 +264,7 @@ mpirun  -np $gpus \
         -x NCCL_PIPELINE_DEPTH=$pipe \
         -x NCCL_COMPRESSORS_CONFIG_PATH=${NCCL_COMPRESSORS_CONFIG_PATH} \
         -x NCCL_COMPRESSORS_LIB_PATH=${NCCL_COMPRESSORS_LIB_PATH} \
-        $COCCL_PATH/tests/coccl-tests/build/reduce_scatter_comp_oneshot_overlap_perf -b 1MB -e 8G -f 2 -t 1 -g 1 -w 50 -n 100 -c 0
+        $COCCL_PATH/tests/coccl-tests/build/reduce_scatter_comp_oneshot_perf -b 1MB -e 8G -f 2 -t 1 -g 1 -w 50 -n 100 -c 0
 done
 done
 
@@ -296,7 +296,7 @@ mpirun  -np $gpus \
         -x NCCL_PIPELINE_DEPTH=$pipe \
         -x NCCL_COMPRESSORS_CONFIG_PATH=${NCCL_COMPRESSORS_CONFIG_PATH} \
         -x NCCL_COMPRESSORS_LIB_PATH=${NCCL_COMPRESSORS_LIB_PATH} \
-        $COCCL_PATH/tests/coccl-tests/build/reduce_scatter_comp_twoshot_tl_overlap_perf -b 1MB -e 8G -f 2 -t 1 -g 1 -w 50 -n 100 -c 0
+        $COCCL_PATH/tests/coccl-tests/build/reduce_scatter_comp_twoshot_perf -b 1MB -e 8G -f 2 -t 1 -g 1 -w 50 -n 100 -c 0
 done
 done
 echo ' '
