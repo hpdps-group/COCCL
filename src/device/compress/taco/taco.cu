@@ -1,116 +1,54 @@
-#include "taco.h"
-#include <cstdio>
-#include <cstdlib>
-#include <cstring>
-#include <algorithm>
-#include <cuda_runtime.h>
-#include <cuda_fp16.h>
+#include "compressor_plugin/coccl_compressor_plugin.h"
+
+#include <cfloat>
 #include <cuda_bf16.h>
 #include <cuda_fp8.h>
-#include <nvtx3/nvToolsExt.h>
-#include "nccl.h"
-
-
-#ifndef HAS_CUDA_MALLOC_ASYNC
-#if CUDART_VERSION >= 11020
-#define HAS_CUDA_MALLOC_ASYNC 1
-#else
-#define HAS_CUDA_MALLOC_ASYNC 0
-#endif
-#endif
+#include <cuda_fp16.h>
+#include <cuda_runtime.h>
+#include <stdint.h>
+#include <type_traits>
 
 #define WARP_SIZE 32
-#define MAX_THREADS 1024
 #define DIVUP(x, y) (((x) + (y) - 1) / (y))
-#define __hidden __attribute__((visibility("hidden")))
 
+namespace {
 
-inline cudaError_t safeCudaMallocAsync(void** ptr, size_t bytes, cudaStream_t stream) {
-#if HAS_CUDA_MALLOC_ASYNC
-    return cudaMallocAsync(ptr, bytes, stream);
-#else
-    return cudaMalloc(ptr, bytes);
-#endif
-}
+struct TacoConfig {
+    int fp8Format = 0;
+    bool saturate = true;
+    int groupSize = 128;
+    float targetRange = 448.0f;
+    float lambda = 1e-6f;
+    float fp8MaxValue = 0.0f;
 
-inline cudaError_t safeCudaFreeAsync(void* ptr, cudaStream_t stream) {
-#if HAS_CUDA_MALLOC_ASYNC
-    return cudaFreeAsync(ptr, stream);
-#else
-    return cudaFree(ptr);
-#endif
-}
-
-inline size_t getTypeSize(ncclDataType_t type) {
-    switch (type) {
-        case ncclFloat32:  return 4;
-        case ncclFloat16:  return 2;
-#if defined(__CUDA_BF16_TYPES_EXIST__)
-        case ncclBfloat16: return 2;
-#endif
-        default:           return 1;
+    float maxValue() const {
+        return fp8MaxValue > 0.0f ? fp8MaxValue
+                                  : (fp8Format == 0 ? 448.0f : 57344.0f);
     }
-}
-
-struct fp8Config {
-    int fp8_format;
-    int saturation;
-    int use_scale;
-    int group_size;
-    float target_range;
-    int safe_mode;
-    int use_as_hadamard;
-    float lambda;
-    float fp8_max_val;
-    int pivotSwap;
 };
 
-__hidden void parseFp8Config(const char* configFile, void** compConfig, int nodes, int devicesPerNodes) {
-    *compConfig = (void*)malloc(sizeof(fp8Config));
-    fp8Config* config = reinterpret_cast<fp8Config*>(*compConfig);
+bool validGroupSize(int value) {
+    return value == 32 || value == 64 || value == 128 || value == 256 ||
+           value == 512;
+}
 
-    // Default Configuration
-    config->fp8_format = 0;
-    config->saturation = 1;
-    config->use_scale = 1;
-    config->group_size = 128;
-    config->target_range = 448.0f;
-    config->safe_mode = 0;
-    config->use_as_hadamard = 1;
-    config->lambda = 1e-6f;
-    config->fp8_max_val = 448.0f;
-    config->pivotSwap = 0;
-
-    if (!configFile) return;
-
-    std::pair<const char*, const char*>* configPairs = nullptr;
-    int configPairCount = 0;
-    loadConfigPair(configFile, &configPairs, &configPairCount);
-    if (!configPairs) return;
-
-    for (int i = 0; i < configPairCount; i++) {
-        const char* key = configPairs[i].first;
-        const char* val = configPairs[i].second;
-
-        if (!strcmp(key, "fp8_type") || !strcmp(key, "fp8_format")) {
-            config->fp8_format = (!strcmp(val, "E5M2")) ? 1 : 0;
-            config->fp8_max_val = (config->fp8_format == 1) ? 57344.0f : 448.0f;
-        } else if (!strcmp(key, "saturate") || !strcmp(key, "saturation")) {
-            config->saturation = atoi(val);
-        } else if (!strcmp(key, "group_size")) {
-            config->group_size = atoi(val);
-        } else if (!strcmp(key, "target_range")) {
-            config->target_range = atof(val);
-        } else if (!strcmp(key, "safe_mode")) {
-            config->safe_mode = atoi(val);
-        } else if (!strcmp(key, "as_hadamard")) {
-            config->use_as_hadamard = atoi(val);
-        } else if (!strcmp(key, "lambda")) {
-            config->lambda = atof(val);
-        } else if (!strcmp(key, "fp8_max_val")) {
-            config->fp8_max_val = atof(val);
-        }
+template <typename Shape>
+bool compressedBytes(const Shape& input, const TacoConfig& config,
+                     size_t* bytes) {
+    if (bytes == nullptr || input.elementsPerChunk() == 0 ||
+        !validGroupSize(config.groupSize)) {
+        return false;
     }
+    const size_t groups =
+        DIVUP(input.elementsPerChunk(), (size_t)config.groupSize);
+    size_t scaleBytes = 0;
+    size_t metadataBytes = 0;
+    size_t outputChunkBytes = 0;
+    return coccl::checkedMultiply(groups, sizeof(float), &scaleBytes) &&
+        coccl::checkedMultiply(scaleBytes, 2, &metadataBytes) &&
+        coccl::checkedAdd(input.elementsPerChunk(), metadataBytes,
+                          &outputChunkBytes) &&
+        coccl::checkedMultiply(outputChunkBytes, input.chunks(), bytes);
 }
 
 
@@ -270,11 +208,12 @@ __global__ void __launch_bounds__(GROUP_SIZE) fused_ash_compress_kernel(
     unsigned int b2 = __shfl_down_sync(0xffffffff, packed, 2);
     unsigned int b3 = __shfl_down_sync(0xffffffff, packed, 3);
 
-    if ((tid & 3) == 0 && (idx + 3 < orgChunkCount)) {
+    const int wordStart = idx - (tid & 3);
+    const bool fullWord = wordStart + 3 < orgChunkCount;
+    if ((tid & 3) == 0 && fullWord) {
         unsigned int final_int = packed | (b1 << 8) | (b2 << 16) | (b3 << 24);
         reinterpret_cast<unsigned int*>(out_base)[idx / 4] = final_int;
-    }
-    else if (idx < orgChunkCount && (tid & 3) != 0 && (idx / 4 != (idx + 3) / 4)) {
+    } else if (idx < orgChunkCount && !fullWord) {
         ((__nv_fp8_storage_t*)out_base)[idx] = (__nv_fp8_storage_t)q8;
     }
 }
@@ -357,195 +296,233 @@ __global__ void __launch_bounds__(GROUP_SIZE) fused_ash_decompress_kernel(
 
 
 template<int GROUP_SIZE>
-void launch_compress_template(
-    ncclDataType_t datatype, const void* orgbuff, void* compbuff, 
-    int orgChunkCount, size_t in_stride, size_t out_stride, size_t quant_scale_bytes,
-    float target_range, float lambda, float fp8_max_val, 
-    __nv_saturation_t saturate, __nv_fp8_interpretation_t fp8_type,
-    dim3 grid, size_t smem, cudaStream_t stream) 
-{
+void launchCompressKernel(
+    ncclDataType_t datatype, const void* input, void* output,
+    int elementsPerChunk, size_t inputStride, size_t outputStride,
+    size_t scaleBytes, const TacoConfig& config, dim3 grid,
+    size_t sharedBytes, cudaStream_t stream) {
+    const __nv_fp8_interpretation_t fp8Type =
+        config.fp8Format == 0 ? __NV_E4M3 : __NV_E5M2;
+    const __nv_saturation_t saturation =
+        config.saturate ? __NV_SATFINITE : __NV_NOSAT;
     if (datatype == ncclFloat32) {
-        fused_ash_compress_kernel<float, GROUP_SIZE><<<grid, GROUP_SIZE, smem, stream>>>(
-            orgbuff, compbuff, nullptr, nullptr, orgChunkCount,
-            in_stride, out_stride, quant_scale_bytes,
-            target_range, lambda, fp8_max_val, saturate, fp8_type);
+        fused_ash_compress_kernel<float, GROUP_SIZE>
+            <<<grid, GROUP_SIZE, sharedBytes, stream>>>(
+                input, output, nullptr, nullptr, elementsPerChunk,
+                inputStride, outputStride, scaleBytes, config.targetRange,
+                config.lambda, config.maxValue(), saturation, fp8Type);
     } else {
-        fused_ash_compress_kernel<__nv_bfloat16, GROUP_SIZE><<<grid, GROUP_SIZE, smem, stream>>>(
-            orgbuff, compbuff, nullptr, nullptr, orgChunkCount,
-            in_stride, out_stride, quant_scale_bytes,
-            target_range, lambda, fp8_max_val, saturate, fp8_type);
+        fused_ash_compress_kernel<__nv_bfloat16, GROUP_SIZE>
+            <<<grid, GROUP_SIZE, sharedBytes, stream>>>(
+                input, output, nullptr, nullptr, elementsPerChunk,
+                inputStride, outputStride, scaleBytes, config.targetRange,
+                config.lambda, config.maxValue(), saturation, fp8Type);
     }
-}
-
-__hidden cudaError_t launchCompress(const void* orgbuff, void** compbuff,
-                                    size_t orgChunkCount, ncclDataType_t orgDatatype,
-                                    size_t* compChunkCount, ncclDataType_t* compDatatype,
-                                    size_t numChunks, const int rank, void* config,
-                                    cudaMemPool_t compMemPool, cudaStream_t stream) 
-{
-    if (orgChunkCount == 0 || numChunks == 0) return cudaSuccess;
-
-    // Parse Config
-    fp8Config cfg = config ? *reinterpret_cast<fp8Config*>(config) : fp8Config();
-    if (!config) {
-        cfg.group_size = 128; cfg.fp8_format = 0; cfg.saturation = 1;
-        cfg.use_as_hadamard = 1; cfg.target_range = 448.0f; 
-        cfg.lambda = 1e-6f; cfg.fp8_max_val = 448.0f;
-    }
-
-    *compDatatype = ncclUint8;
-    __nv_fp8_interpretation_t fp8_type = (cfg.fp8_format == 0) ? __NV_E4M3 : __NV_E5M2;
-    __nv_saturation_t saturate = (cfg.saturation == 1) ? __NV_SATFINITE : __NV_NOSAT;
-
-    int groups_per_chunk = DIVUP((int)orgChunkCount, cfg.group_size);
-    size_t quant_scale_bytes = groups_per_chunk * sizeof(float);
-    size_t ada_scale_bytes = groups_per_chunk * sizeof(float);
-    size_t total_out_chunk_bytes = orgChunkCount + quant_scale_bytes + ada_scale_bytes;
-
-    *compChunkCount = total_out_chunk_bytes;
-
-    if (*compbuff == nullptr) {
-        size_t totalBytes = total_out_chunk_bytes * numChunks;
-        cudaError_t err = safeCudaMallocAsync((void**)compbuff, totalBytes, stream);
-        if (err != cudaSuccess) return err;
-    }
-
-    dim3 grid(groups_per_chunk, (int)numChunks, 1);
-    
-    // Shared memory: Only needed if group_size > 32
-    size_t smem = (cfg.group_size > 32) ? cfg.group_size * sizeof(float) : 0;
-    
-    size_t in_stride = orgChunkCount * getTypeSize(orgDatatype);
-    size_t out_stride = total_out_chunk_bytes;
-
-    switch (cfg.group_size) {
-        case 32:
-            launch_compress_template<32>(
-                orgDatatype, orgbuff, *compbuff, (int)orgChunkCount, 
-                in_stride, out_stride, quant_scale_bytes, 
-                cfg.target_range, cfg.lambda, cfg.fp8_max_val, saturate, fp8_type,
-                grid, smem, stream);
-            break;
-        case 64:
-            launch_compress_template<64>(
-                orgDatatype, orgbuff, *compbuff, (int)orgChunkCount, 
-                in_stride, out_stride, quant_scale_bytes, 
-                cfg.target_range, cfg.lambda, cfg.fp8_max_val, saturate, fp8_type,
-                grid, smem, stream);
-            break;
-        case 128:
-            launch_compress_template<128>(
-                orgDatatype, orgbuff, *compbuff, (int)orgChunkCount, 
-                in_stride, out_stride, quant_scale_bytes, 
-                cfg.target_range, cfg.lambda, cfg.fp8_max_val, saturate, fp8_type,
-                grid, smem, stream);
-            break;
-        case 256:
-            launch_compress_template<256>(
-                orgDatatype, orgbuff, *compbuff, (int)orgChunkCount, 
-                in_stride, out_stride, quant_scale_bytes, 
-                cfg.target_range, cfg.lambda, cfg.fp8_max_val, saturate, fp8_type,
-                grid, smem, stream);
-            break;
-        case 512:
-            launch_compress_template<512>(
-                orgDatatype, orgbuff, *compbuff, (int)orgChunkCount, 
-                in_stride, out_stride, quant_scale_bytes, 
-                cfg.target_range, cfg.lambda, cfg.fp8_max_val, saturate, fp8_type,
-                grid, smem, stream);
-            break;
-        default:
-            printf("[TACO Error] Unsupported group_size: %d. Supported: 32, 64, 128, 256, 512.\n", cfg.group_size);
-            return cudaErrorInvalidValue;
-    }
-
-    return cudaGetLastError();
 }
 
 template<int GROUP_SIZE>
-void launch_decompress_template(
-    ncclDataType_t datatype, void* decompbuff, const void* compbuff, 
-    int decompChunkCount, size_t in_stride, size_t out_stride, size_t scale_chunk_stride_bytes,
-    __nv_fp8_interpretation_t fp8_type,
-    dim3 grid, size_t smem, cudaStream_t stream)
-{
+void launchDecompressKernel(
+    ncclDataType_t datatype, void* output, const void* input,
+    int elementsPerChunk, size_t inputStride, size_t outputStride,
+    size_t scaleBytes, const TacoConfig& config, dim3 grid,
+    size_t sharedBytes, cudaStream_t stream) {
+    const __nv_fp8_interpretation_t fp8Type =
+        config.fp8Format == 0 ? __NV_E4M3 : __NV_E5M2;
     if (datatype == ncclFloat32) {
-        fused_ash_decompress_kernel<float, GROUP_SIZE><<<grid, GROUP_SIZE, smem, stream>>>(
-            compbuff, decompbuff, nullptr, nullptr, decompChunkCount,
-            in_stride, out_stride, scale_chunk_stride_bytes, fp8_type);
+        fused_ash_decompress_kernel<float, GROUP_SIZE>
+            <<<grid, GROUP_SIZE, sharedBytes, stream>>>(
+                input, output, nullptr, nullptr, elementsPerChunk,
+                inputStride, outputStride, scaleBytes, fp8Type);
     } else {
-        fused_ash_decompress_kernel<__nv_bfloat16, GROUP_SIZE><<<grid, GROUP_SIZE, smem, stream>>>(
-            compbuff, decompbuff, nullptr, nullptr, decompChunkCount,
-            in_stride, out_stride, scale_chunk_stride_bytes, fp8_type);
+        fused_ash_decompress_kernel<__nv_bfloat16, GROUP_SIZE>
+            <<<grid, GROUP_SIZE, sharedBytes, stream>>>(
+                input, output, nullptr, nullptr, elementsPerChunk,
+                inputStride, outputStride, scaleBytes, fp8Type);
     }
 }
 
-__hidden cudaError_t launchDecompress(void* decompbuff, const void* compbuff,
-                                      size_t decompChunkCount, ncclDataType_t decompDatatype,
-                                      size_t compChunkCount, ncclDataType_t compDatatype,
-                                      size_t numChunks, void* config,
-                                      cudaStream_t stream) 
-{
-    if (decompChunkCount == 0 || numChunks == 0) return cudaSuccess;
+struct TacoCompressor {
+    using Config = TacoConfig;
 
-    fp8Config cfg = config ? *reinterpret_cast<fp8Config*>(config) : fp8Config();
-    if (!config) { cfg.group_size = 128; cfg.fp8_format = 0; }
-
-    __nv_fp8_interpretation_t fp8_type = (cfg.fp8_format == 0) ? __NV_E4M3 : __NV_E5M2;
-    int groups_per_chunk = DIVUP((int)decompChunkCount, cfg.group_size);
-    size_t quant_scale_bytes = groups_per_chunk * sizeof(float);
-
-    dim3 grid(groups_per_chunk, (int)numChunks, 1);
-    size_t smem = (cfg.group_size > 32) ? cfg.group_size * sizeof(float) : 0;
-
-    size_t in_stride = compChunkCount; // passed from compress output size
-    size_t out_stride = decompChunkCount * getTypeSize(decompDatatype);
-
-    // Dispatch to specific template instance based on group_size
-    switch (cfg.group_size) {
-        case 32:
-            launch_decompress_template<32>(
-                decompDatatype, decompbuff, compbuff, (int)decompChunkCount,
-                in_stride, out_stride, quant_scale_bytes, fp8_type,
-                grid, smem, stream);
-            break;
-        case 64:
-            launch_decompress_template<64>(
-                decompDatatype, decompbuff, compbuff, (int)decompChunkCount,
-                in_stride, out_stride, quant_scale_bytes, fp8_type,
-                grid, smem, stream);
-            break;
-        case 128:
-            launch_decompress_template<128>(
-                decompDatatype, decompbuff, compbuff, (int)decompChunkCount,
-                in_stride, out_stride, quant_scale_bytes, fp8_type,
-                grid, smem, stream);
-            break;
-        case 256:
-            launch_decompress_template<256>(
-                decompDatatype, decompbuff, compbuff, (int)decompChunkCount,
-                in_stride, out_stride, quant_scale_bytes, fp8_type,
-                grid, smem, stream);
-            break;
-        case 512:
-            launch_decompress_template<512>(
-                decompDatatype, decompbuff, compbuff, (int)decompChunkCount,
-                in_stride, out_stride, quant_scale_bytes, fp8_type,
-                grid, smem, stream);
-            break;
-        default:
-            printf("[TACO Error] Unsupported group_size: %d. Supported: 32, 64, 128, 256, 512.\n", cfg.group_size);
-            return cudaErrorInvalidValue;
+    static coccl::Status configure(coccl::ConfigReader& reader,
+                                   Config& config,
+                                   const coccl::ConfigContext&) {
+        coccl::Status result =
+            reader.getEnum("fp8Format", config.fp8Format,
+                           {{"E4M3", 0}, {"E5M2", 1}})
+                .get("saturate", config.saturate)
+                .get("groupSize", config.groupSize, 32, 512)
+                .get("targetRange", config.targetRange, FLT_MIN, FLT_MAX)
+                .get("lambda", config.lambda, 0.0f, FLT_MAX)
+                .get("fp8MaxValue", config.fp8MaxValue, 0.0f, FLT_MAX)
+                .finish();
+        if (result != ncclSuccess) return result;
+        return validGroupSize(config.groupSize) ? ncclSuccess
+                                                : ncclInvalidArgument;
     }
 
-    return cudaGetLastError();
-}
+    static coccl::Status encodedSizeBound(
+        const coccl::Shape& input, size_t* encodedBytes,
+        const coccl::SizeContext& context) {
+        if (context.operation() != cocclCompressorOperationCompress) {
+            return ncclInvalidUsage;
+        }
+        return compressedBytes(input, context.config<Config>(), encodedBytes)
+            ? ncclSuccess : ncclInvalidArgument;
+    }
 
-extern "C" const ncclCompressor_t taco {
-    .name = "taco",
-    .compress = launchCompress,
-    .decompress = launchDecompress,
-    .decompReduce = nullptr,
-    .decompReduceComp = nullptr,
-    .parseConfig = parseFp8Config
+    static coccl::Status compress(const coccl::Input& input,
+                                  coccl::Output& output,
+                                  coccl::Context& context) {
+        if ((input.datatype() != ncclFloat32 &&
+             input.datatype() != ncclBfloat16) ||
+            input.elementsPerChunk() == 0 ||
+            input.elementsPerChunk() > INT_MAX || input.chunks() > INT_MAX) {
+            return ncclInvalidArgument;
+        }
+
+        const Config& config = context.config<Config>();
+        const size_t groups =
+            DIVUP(input.elementsPerChunk(), (size_t)config.groupSize);
+        size_t scaleBytes = 0;
+        size_t metadataBytes = 0;
+        size_t outputChunkBytes = 0;
+        size_t outputBytes = 0;
+        if (!compressedBytes(input, config, &outputBytes) ||
+            !coccl::checkedMultiply(groups, sizeof(float), &scaleBytes) ||
+            !coccl::checkedMultiply(scaleBytes, 2, &metadataBytes) ||
+            !coccl::checkedAdd(input.elementsPerChunk(), metadataBytes,
+                               &outputChunkBytes)) {
+            return ncclInvalidArgument;
+        }
+        if (coccl::shouldPassthrough(input, outputBytes)) {
+            return output.passthrough(input, context.stream());
+        }
+        if (outputBytes > output.capacityBytes()) return ncclInvalidArgument;
+
+        const dim3 grid((unsigned)groups, (unsigned)input.chunks(), 1);
+        const size_t sharedBytes = config.groupSize > 32
+            ? (size_t)config.groupSize * sizeof(float)
+            : 0;
+        const size_t inputStride = input.bytes() / input.chunks();
+        switch (config.groupSize) {
+            case 32:
+                launchCompressKernel<32>(
+                    input.datatype(), input.data(), output.data(),
+                    (int)input.elementsPerChunk(), inputStride,
+                    outputChunkBytes, scaleBytes, config, grid, sharedBytes,
+                    context.stream());
+                break;
+            case 64:
+                launchCompressKernel<64>(
+                    input.datatype(), input.data(), output.data(),
+                    (int)input.elementsPerChunk(), inputStride,
+                    outputChunkBytes, scaleBytes, config, grid, sharedBytes,
+                    context.stream());
+                break;
+            case 128:
+                launchCompressKernel<128>(
+                    input.datatype(), input.data(), output.data(),
+                    (int)input.elementsPerChunk(), inputStride,
+                    outputChunkBytes, scaleBytes, config, grid, sharedBytes,
+                    context.stream());
+                break;
+            case 256:
+                launchCompressKernel<256>(
+                    input.datatype(), input.data(), output.data(),
+                    (int)input.elementsPerChunk(), inputStride,
+                    outputChunkBytes, scaleBytes, config, grid, sharedBytes,
+                    context.stream());
+                break;
+            case 512:
+                launchCompressKernel<512>(
+                    input.datatype(), input.data(), output.data(),
+                    (int)input.elementsPerChunk(), inputStride,
+                    outputChunkBytes, scaleBytes, config, grid, sharedBytes,
+                    context.stream());
+                break;
+            default: return ncclInvalidArgument;
+        }
+
+        cudaError_t cudaResult = cudaGetLastError();
+        if (cudaResult != cudaSuccess) return coccl::fromCuda(cudaResult);
+        return output.commitBytes(outputBytes, input.chunks());
+    }
+
+    static coccl::Status decompress(const coccl::Input& input,
+                                    coccl::Output& output,
+                                    coccl::Context& context) {
+        if ((output.datatype() != ncclFloat32 &&
+             output.datatype() != ncclBfloat16) ||
+            output.elements() == 0 || output.chunks() == 0 ||
+            output.elements() / output.chunks() > INT_MAX ||
+            input.chunks() != output.chunks() || input.chunks() > INT_MAX) {
+            return ncclInvalidArgument;
+        }
+
+        const Config& config = context.config<Config>();
+        const size_t elementsPerChunk = output.elements() / output.chunks();
+        const size_t groups = DIVUP(elementsPerChunk,
+                                    (size_t)config.groupSize);
+        size_t scaleBytes = 0;
+        size_t metadataBytes = 0;
+        size_t inputChunkBytes = 0;
+        size_t expectedInputBytes = 0;
+        size_t outputStride = 0;
+        if (!coccl::checkedMultiply(groups, sizeof(float), &scaleBytes) ||
+            !coccl::checkedMultiply(scaleBytes, 2, &metadataBytes) ||
+            !coccl::checkedAdd(elementsPerChunk, metadataBytes,
+                               &inputChunkBytes) ||
+            !coccl::checkedMultiply(inputChunkBytes, input.chunks(),
+                                    &expectedInputBytes) ||
+            expectedInputBytes != input.bytes() ||
+            !coccl::checkedMultiply(elementsPerChunk,
+                                    coccl::dataTypeSize(output.datatype()),
+                                    &outputStride)) {
+            return ncclInvalidArgument;
+        }
+
+        const dim3 grid((unsigned)groups, (unsigned)input.chunks(), 1);
+        const size_t sharedBytes = config.groupSize > 32
+            ? (size_t)config.groupSize * sizeof(float)
+            : 0;
+        switch (config.groupSize) {
+            case 32:
+                launchDecompressKernel<32>(
+                    output.datatype(), output.data(), input.data(),
+                    (int)elementsPerChunk, inputChunkBytes, outputStride,
+                    scaleBytes, config, grid, sharedBytes, context.stream());
+                break;
+            case 64:
+                launchDecompressKernel<64>(
+                    output.datatype(), output.data(), input.data(),
+                    (int)elementsPerChunk, inputChunkBytes, outputStride,
+                    scaleBytes, config, grid, sharedBytes, context.stream());
+                break;
+            case 128:
+                launchDecompressKernel<128>(
+                    output.datatype(), output.data(), input.data(),
+                    (int)elementsPerChunk, inputChunkBytes, outputStride,
+                    scaleBytes, config, grid, sharedBytes, context.stream());
+                break;
+            case 256:
+                launchDecompressKernel<256>(
+                    output.datatype(), output.data(), input.data(),
+                    (int)elementsPerChunk, inputChunkBytes, outputStride,
+                    scaleBytes, config, grid, sharedBytes, context.stream());
+                break;
+            case 512:
+                launchDecompressKernel<512>(
+                    output.datatype(), output.data(), input.data(),
+                    (int)elementsPerChunk, inputChunkBytes, outputStride,
+                    scaleBytes, config, grid, sharedBytes, context.stream());
+                break;
+            default: return ncclInvalidArgument;
+        }
+        return coccl::fromCuda(cudaGetLastError());
+    }
 };
+
+}  // namespace
+
+COCCL_REGISTER_COMPRESSOR("taco", TacoCompressor);
