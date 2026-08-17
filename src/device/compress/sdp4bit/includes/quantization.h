@@ -205,16 +205,14 @@ void launch_swizzled_quant_ht(int8_t* q_data,
                            int devices_per_node,
                            cudaStream_t stream);
 
-void launch_dequant_reduce(float* reduced_data,
+template <typename T>
+void launch_dequant_reduce(T* reduced_data,
                            const int8_t* input_data,
                            const float* input_scales,
                            int num_gpus,
                            int num_bits,
                            quantize::Type quant_type,
-                          //  int out_groups,
-                          //  int elems_per_out_group,
                            int64_t elems_per_in_tensor,
-                          //  int groups_per_in_tensor,
                            int elems_per_in_group,
                            cudaStream_t stream);
 
@@ -231,25 +229,25 @@ void launch_dequant_reduce_quant(int8_t* reduced_data,
                            int groups_per_in_tensor,
                            int elems_per_in_group,
                            int64_t elems_per_in_tensor,
+                           int parameter_bytes,
                            cudaStream_t stream);
 
-void launch_dequant_reduce_ht(float* reduced_data,
-                            const int8_t* input_data,
-                            const float* input_scales,
-                            int num_gpus,
-                            int num_bits,
-                            quantize::Type quant_type,
-                            // int out_groups,
-                            // int elems_per_out_group,
-                            int64_t elems_per_in_tensor,
-                            // int groups_per_in_tensor,
-                            int elems_per_in_group,
-                            cudaStream_t stream);
+template <typename T>
+void launch_dequant_reduce_ht(T* reduced_data,
+                              const int8_t* input_data,
+                              const float* input_scales,
+                              int num_gpus,
+                              int num_bits,
+                              quantize::Type quant_type,
+                              int64_t elems_per_in_tensor,
+                              int elems_per_in_group,
+                              cudaStream_t stream);
 
+template <typename T>
 void launch_fused_sub_quant_cuda(
     int8_t* output_data,
-    const __nv_bfloat16* param_list,
-    const __nv_bfloat16* shard_params_buffer,
+    const T* param_list,
+    const T* shard_params_buffer,
     const int num_bits,
     const quantize::Type quant_type,
     // const int groups,

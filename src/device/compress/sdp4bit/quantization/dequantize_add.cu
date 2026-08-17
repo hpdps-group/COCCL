@@ -67,13 +67,16 @@ __device__ __inline__ void load_to_local(
                 if (idx + vec_size - 1 < end_idx) {
                     // IF [idx+j, idx+vec_size) is contiguous, load once is enough
                     // model_params+ param_offset [idx + j - start_idx: idx + vec_size] -> local_buffer[j: vec_size]
-                    if (vec_size - j >= 8) {
-                        mem_access::load_global<8*sizeof(scalar_t)>(
-                            local_buffer + j,
-                            model_params + param_offset +idx + j - start_idx);
-                        j += 8;
-                        break;
-                    } else if (vec_size - j >= 4) {
+                    if constexpr (vec_size >= 8) {
+                        if (vec_size - j >= 8) {
+                            mem_access::load_global<8*sizeof(scalar_t)>(
+                                local_buffer + j,
+                                model_params + param_offset +idx + j - start_idx);
+                            j += 8;
+                            break;
+                        }
+                    }
+                    if (vec_size - j >= 4) {
                         mem_access::load_global<4*sizeof(scalar_t)>(
                             local_buffer + j,
                             model_params+ param_offset +idx + j - start_idx);
@@ -96,13 +99,16 @@ __device__ __inline__ void load_to_local(
                     }
                 } else {
                     // IF [idx+j, idx+vec_size) is not contiguous, only load [idx+j, end_idx)
-                    if (end_idx - idx - j >= 8) {
-                        mem_access::load_global<8*sizeof(scalar_t)>(
-                            local_buffer + j,
-                            model_params+ param_offset +idx + j - start_idx);
-                        j += 8;
-                        break;
-                    } else if (end_idx - idx - j >= 4) {
+                    if constexpr (vec_size >= 8) {
+                        if (end_idx - idx - j >= 8) {
+                            mem_access::load_global<8*sizeof(scalar_t)>(
+                                local_buffer + j,
+                                model_params+ param_offset +idx + j - start_idx);
+                            j += 8;
+                            break;
+                        }
+                    }
+                    if (end_idx - idx - j >= 4) {
                         mem_access::load_global<4*sizeof(scalar_t)>(
                             local_buffer + j,
                             model_params+ param_offset +idx + j - start_idx);
@@ -245,7 +251,8 @@ __global__ void dequantize_kernel(
                     elem_id_iter_true);
 
                 for (int k = 0; k < T_per_chunk; k++) {
-                    data_cast[k] = __hadd(data_cast[k], temp_param_model[k]);
+                    data_cast[k] = reduce::element<reduce::ROpType::Add>(
+                        data_cast[k], temp_param_model[k]);
                 }
                 mem_access::store_global<dequantize::granularity>(dequant_data + elem_id_iter_true,
                     local_dequant_buffer + i * T_per_chunk);
@@ -307,6 +314,28 @@ void launch_fused_dequant_add_cuda(
     }
 
 }
+
+template void launch_fused_dequant_add_cuda(
+    float* dequant_data,
+    const float* model_params,
+    const int8_t* quant_data,
+    const int num_bits,
+    const quantize::Type quant_type,
+    const int elems_per_group,
+    const int64_t elems_per_chunk,
+    const int num_params,
+    cudaStream_t stream);
+
+template void launch_fused_dequant_add_cuda(
+    __half* dequant_data,
+    const __half* model_params,
+    const int8_t* quant_data,
+    const int num_bits,
+    const quantize::Type quant_type,
+    const int elems_per_group,
+    const int64_t elems_per_chunk,
+    const int num_params,
+    cudaStream_t stream);
 
 #ifdef BF16_AVAILABLE
 

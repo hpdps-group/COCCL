@@ -71,7 +71,7 @@ template <typename T, int numBits, Type qType>
 DS_D_INLINE void chunk(T* local_output, const int8_t* data, Params<qType, numBits> q_params)
 {
     constexpr int32_t num_elems_packed = 8 / numBits;
-    constexpr int32_t iters = h_per_chunk / num_elems_packed;
+    constexpr int32_t iters = granularity / sizeof(T) / num_elems_packed;
 
 #pragma unroll
     for (int i = 0; i < iters; i++) {

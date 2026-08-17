@@ -12,13 +12,18 @@
 
 using rop = reduce::ROpType;
 
+namespace {
+constexpr int kMinBlockThreads = 128;
+}
+
 /*
 TODO(cmikeh2): Add implementation that better handles larger nodes. It would like make sense
 to leverage some parallel reductions here to improve performance.
 */
 
-template <int numBits, int numTensors, int totalChunks, quantize::Type quantType>
-__global__ void __launch_bounds__(1024) dequant_reduce(float* reduced_data,
+template <typename T, int numBits, int numTensors, int totalChunks,
+          quantize::Type quantType>
+__global__ void __launch_bounds__(1024) dequant_reduce(T* reduced_data,
                                                        const int8_t* input_data,
                                                        const float* input_scales,
                                                     //    int elems_per_out_group,
@@ -34,33 +39,33 @@ __global__ void __launch_bounds__(1024) dequant_reduce(float* reduced_data,
     // NOTE(cmikeh2): This probably could be hardcoded to a larger number,
     // but that means even stronger restrictions on the number of elements per group
     // A performance analysis here might be beneficial
-    constexpr int mem_granularity = (numBits == 8) ? 4 : 2; // mem_granularity = 16 / sizeof(float) / (8 / numBits)
+    constexpr int storage_values = 16 / sizeof(T);
+    constexpr int mem_granularity = storage_values / (8 / numBits);
     constexpr int elems_per_load = mem_granularity / sizeof(int8_t);  // div by 1
-    constexpr int storage_values = 16 / sizeof(float); //for each thread, each chunk operate on 16bytes, 4 float32 elements. 
-                                                        //If you want to change 16, you should also change totalChunks
 
-    const int64_t block_offset = tb.group_index().x * elems_per_in_group;
+    const int group_id = blockIdx.x * blockDim.y + threadIdx.y;
+    const bool valid_group = group_id < groups_per_in_tensor;
+    const int64_t block_offset = static_cast<int64_t>(group_id) * elems_per_in_group;
     const int elem_offset = tb.thread_index().x * elems_per_load;
 
     const int64_t base_offset = block_offset + elem_offset;
     const int stride = tb.group_dim().x * elems_per_load;
 
-    float local_buffer[totalChunks * storage_values];
-
-    quantize::GroupStats<quantType, float> stats;
+    T local_buffer[totalChunks * storage_values];
 
 #pragma unroll
     for (int i = 0; i < totalChunks; i++) {
-        float* iteration_buffer = local_buffer + i * storage_values;
+        T* iteration_buffer = local_buffer + i * storage_values;
 
 #pragma unroll
         for (int j = 0; j < storage_values; j++) {
-            iteration_buffer[j] = reduce::init<rop::Add, float>();
+            iteration_buffer[j] = reduce::init<rop::Add, T>();
         }
 
         const int64_t iter_offset = i * stride + base_offset;
-        const int iter_scale_idx = iter_offset / elems_per_in_group;
-        bool do_loads = i * stride + elem_offset < elems_per_in_group;
+        const int64_t iter_scale_idx = iter_offset / elems_per_in_group;
+        const bool do_loads =
+            valid_group && i * stride + elem_offset < elems_per_in_group;
 
         if (numTensors > 0) {
 #pragma unroll
@@ -68,7 +73,10 @@ __global__ void __launch_bounds__(1024) dequant_reduce(float* reduced_data,
                 if (do_loads) {
                     int8_t load_buffer[elems_per_load];
 
-                    const int64_t params_size = (quantType == quantize::Type::Asymmetric ? 2 : 1) * sizeof(float);
+                    constexpr int64_t params_size = sizeof(T) < sizeof(float)
+                        ? 2 * sizeof(float)
+                        : (quantType == quantize::Type::Asymmetric ? 2 : 1) *
+                              sizeof(float);
                     const int64_t quant_offset = (j * elems_per_in_tensor_padding + iter_offset) / elems_per_in_group * params_size + params_size; 
         
                     mem_access::load_global<mem_granularity>(
@@ -86,8 +94,9 @@ __global__ void __launch_bounds__(1024) dequant_reduce(float* reduced_data,
                     //        mem_granularity, j * elems_per_in_tensor + iter_offset ,
                     //        params_offset, j * elems_per_in_tensor + iter_offset + quant_offset);
 
-                    float dequant_buffer[storage_values];
-                    dequantize::chunk<numBits, quantType>(dequant_buffer, load_buffer, params);
+                    T dequant_buffer[storage_values];
+                    dequantize::chunk<T, numBits, quantType>(
+                        dequant_buffer, load_buffer, params);
 
 #pragma unroll
                     for (int k = 0; k < storage_values; k++) {
@@ -102,7 +111,10 @@ __global__ void __launch_bounds__(1024) dequant_reduce(float* reduced_data,
                 if (do_loads) {
                     int8_t load_buffer[elems_per_load];
 
-                    const int64_t params_size = (quantType == quantize::Type::Asymmetric ? 2 : 1) * sizeof(float);
+                    constexpr int64_t params_size = sizeof(T) < sizeof(float)
+                        ? 2 * sizeof(float)
+                        : (quantType == quantize::Type::Asymmetric ? 2 : 1) *
+                              sizeof(float);
                     const int64_t quant_offset = (j * elems_per_in_tensor_padding + iter_offset) / elems_per_in_group * params_size + params_size; 
 
                     // mem_access::load_global<mem_granularity>(
@@ -119,8 +131,9 @@ __global__ void __launch_bounds__(1024) dequant_reduce(float* reduced_data,
                     quantize::Params<quantType, numBits> params(
                             (float*)(input_data + params_offset), 0);
 
-                    float dequant_buffer[storage_values];
-                    dequantize::chunk<numBits, quantType>(dequant_buffer, load_buffer, params);
+                    T dequant_buffer[storage_values];
+                    dequantize::chunk<T, numBits, quantType>(
+                        dequant_buffer, load_buffer, params);
 
 #pragma unroll
                     for (int k = 0; k < storage_values; k++) {
@@ -137,9 +150,11 @@ __global__ void __launch_bounds__(1024) dequant_reduce(float* reduced_data,
     for (int i = 0; i < totalChunks; i++) {
         const int64_t iter_offset = (i * stride + base_offset) * (8 / numBits);
         // const int64_t 
-        if ((i * stride + elem_offset < elems_per_in_group) && (iter_offset < elems_per_in_tensor  * (8 / numBits))) {
-            mem_access::store_global<16>(reduced_data + iter_offset, local_buffer + i * storage_values); //for each thread, each chunk operate on 16bytes, 4 float32 elements. 
-                                                                                                        //If you want to change 16, you should also change totalChunks
+        if (valid_group && (i * stride + elem_offset < elems_per_in_group) &&
+            (iter_offset < elems_per_in_tensor * (8 / numBits))) {
+            mem_access::store_global<16>(
+                reduced_data + iter_offset,
+                local_buffer + i * storage_values);
         }
     }
 }
@@ -151,7 +166,7 @@ int32_t pow2_round(int32_t raw_value)
 }
 
 #define LAUNCH_DEQUANT_REDUCE(num_chunks)                      \
-    dequant_reduce<numBits, numTensors, num_chunks, quantType> \
+    dequant_reduce<T, numBits, numTensors, num_chunks, quantType> \
         <<<grid, block, 0, stream>>>(reduced_data,             \
                                      input_data,               \
                                      input_scales,             \
@@ -161,8 +176,9 @@ int32_t pow2_round(int32_t raw_value)
                                      elems_per_in_group,       \
                                      num_tensors);
 
-template <int numBits, int numTensors, quantize::Type quantType>
-void launch_dequant_reduce_impl(float* reduced_data,
+template <typename T, int numBits, int numTensors,
+          quantize::Type quantType>
+void launch_dequant_reduce_impl(T* reduced_data,
                                 const int8_t* input_data,
                                 const float* input_scales,
                                 // int out_groups,
@@ -173,22 +189,23 @@ void launch_dequant_reduce_impl(float* reduced_data,
                                 int num_tensors,
                                 cudaStream_t stream)
 {
-    // This is a coincidence. This is derived by 8 halves per 16 bytes with 2-way packing for int4
-    // Note, this should be changed for float
-    constexpr int elems_per_thread = numBits / 2; // elems_per_thread = 16 / sizeof(float) / (8 / numBits)
+    constexpr int elems_per_thread =
+        (16 / sizeof(T)) / (8 / numBits);
     const int one_step_threads =
         next_pow2((elems_per_in_group + elems_per_thread - 1) / (elems_per_thread));
     // TODO(cmikeh2): Tune this
-    const int threads = (one_step_threads < 1024) ? one_step_threads : 1024;
+    const int threads_per_group = (one_step_threads < 1024) ? one_step_threads : 1024;
     int groups_per_in_tensor = (elems_per_in_tensor * (8 / numBits) + elems_per_in_group * (8 / numBits) - 1) 
                                 / (elems_per_in_group * (8 / numBits));
     int64_t elems_per_in_tensor_padding = (int64_t) groups_per_in_tensor * elems_per_in_group;
     int out_groups = groups_per_in_tensor;
 
-    dim3 block(threads);
-    dim3 grid(out_groups);
+    const int groups_per_block =
+        (kMinBlockThreads + threads_per_group - 1) / threads_per_group;
+    dim3 block(threads_per_group, groups_per_block);
+    dim3 grid((out_groups + groups_per_block - 1) / groups_per_block);
 
-    const int elems_per_step = threads * elems_per_thread;
+    const int elems_per_step = threads_per_group * elems_per_thread;
     const int unroll_raw = (elems_per_in_group + elems_per_step - 1) / elems_per_step;
 
     const int unroll = (unroll_raw >= 4) ? pow2_round<1>(unroll_raw) : unroll_raw;
@@ -218,7 +235,7 @@ void launch_dequant_reduce_impl(float* reduced_data,
 }
 
 #define LAUNCH_DEQUANT_REDUCE_IMPL(NUM_BITS, NUM_GPUS, QUANT_TYPE)                   \
-    launch_dequant_reduce_impl<NUM_BITS, NUM_GPUS, QUANT_TYPE>(reduced_data,         \
+    launch_dequant_reduce_impl<T, NUM_BITS, NUM_GPUS, QUANT_TYPE>(reduced_data,      \
                                                                input_data,           \
                                                                input_scales,         \
                                                                elems_per_in_tensor,  \
@@ -226,7 +243,8 @@ void launch_dequant_reduce_impl(float* reduced_data,
                                                                num_gpus,             \
                                                                stream);
 
-void launch_dequant_reduce(float* reduced_data,
+template <typename T>
+void launch_dequant_reduce(T* reduced_data,
                            const int8_t* input_data,
                            const float* input_scales,
                            int num_gpus,
@@ -289,3 +307,15 @@ void launch_dequant_reduce(float* reduced_data,
         }
     }
 }
+
+template void launch_dequant_reduce<float>(
+    float*, const int8_t*, const float*, int, int, quantize::Type, int64_t,
+    int, cudaStream_t);
+template void launch_dequant_reduce<__half>(
+    __half*, const int8_t*, const float*, int, int, quantize::Type, int64_t,
+    int, cudaStream_t);
+#ifdef BF16_AVAILABLE
+template void launch_dequant_reduce<__nv_bfloat16>(
+    __nv_bfloat16*, const int8_t*, const float*, int, int, quantize::Type,
+    int64_t, int, cudaStream_t);
+#endif
