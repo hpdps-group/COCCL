@@ -1,0 +1,18 @@
+schema_version = 2
+
+[runtime]
+mode = "normal"
+compression_threshold_bytes = 0
+
+[compressor_plugins]
+compressors = ["sdp4bit"]
+library_path = "../../../build/obj/device/compress/libcompress"
+
+[normal.all_gather]
+compressor = "sdp4bit"
+
+[normal.all_gather.config.default]
+groupCount = 128
+quantBits = 4
+quantType = "Symmetric"
+subAdd = true

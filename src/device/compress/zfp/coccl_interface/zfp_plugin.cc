@@ -8,6 +8,8 @@
 
 namespace {
 
+constexpr size_t kZfpBlockElements = 4;
+
 struct ZfpConfig {
   int rate = 4;
 };
@@ -105,16 +107,26 @@ struct ZfpCompressor {
     cudaStream_t cudaStream = context.stream();
     stream->exec.params = &cudaStream;
 
-    size_t maxChunkBytes = 0;
+    const size_t elementsPerChunk = input.elementsPerChunk();
+    const size_t chunksPerBatch =
+        elementsPerChunk % kZfpBlockElements == 0 ? input.chunks() : 1;
+    const size_t batches = input.chunks() / chunksPerBatch;
+    size_t batchElements = 0;
+    if (!checkedMultiply(
+            elementsPerChunk, chunksPerBatch, &batchElements)) {
+      zfp_field_free(field);
+      zfp_stream_close(stream);
+      return ncclInvalidArgument;
+    }
+    size_t maxBatchBytes = 0;
     if (!maximumCompressedBytes(
-            stream, field, type, input.elementsPerChunk(),
-            &maxChunkBytes)) {
+            stream, field, type, batchElements, &maxBatchBytes)) {
       zfp_field_free(field);
       zfp_stream_close(stream);
       return ncclInvalidArgument;
     }
     size_t maxBytes = 0;
-    if (!checkedMultiply(maxChunkBytes, input.chunks(), &maxBytes)) {
+    if (!checkedMultiply(maxBatchBytes, batches, &maxBytes)) {
       zfp_field_free(field);
       zfp_stream_close(stream);
       return ncclInvalidArgument;
@@ -130,13 +142,13 @@ struct ZfpCompressor {
       return ncclInvalidArgument;
     }
 
-    const size_t inputChunkBytes = input.bytes() / input.chunks();
-    size_t compressedChunkBytes = 0;
-    for (size_t chunk = 0; chunk < input.chunks(); ++chunk) {
+    const size_t inputBatchBytes = input.bytes() / batches;
+    size_t compressedBatchBytes = 0;
+    for (size_t batch = 0; batch < batches; ++batch) {
       char* encoded = static_cast<char*>(output.data()) +
-          chunk * compressedChunkBytes;
-      if (chunk == 0) encoded = static_cast<char*>(output.data());
-      bitstream* bits = stream_open(encoded, maxChunkBytes);
+          batch * compressedBatchBytes;
+      if (batch == 0) encoded = static_cast<char*>(output.data());
+      bitstream* bits = stream_open(encoded, maxBatchBytes);
       if (bits == nullptr) {
         zfp_field_free(field);
         zfp_stream_close(stream);
@@ -146,23 +158,23 @@ struct ZfpCompressor {
       zfp_stream_rewind(stream);
       zfp_field_set_pointer(
           field, static_cast<char*>(const_cast<void*>(input.data())) +
-              chunk * inputChunkBytes);
+              batch * inputBatchBytes);
       const size_t bytes = zfp_compress(stream, field);
       stream_close(bits);
       if (bytes == 0 ||
-          (chunk != 0 && bytes != compressedChunkBytes)) {
+          (batch != 0 && bytes != compressedBatchBytes)) {
         zfp_field_free(field);
         zfp_stream_close(stream);
         return ncclInternalError;
       }
-      if (chunk == 0) compressedChunkBytes = bytes;
+      if (batch == 0) compressedBatchBytes = bytes;
     }
 
     zfp_field_free(field);
     zfp_stream_close(stream);
     size_t compressedBytes = 0;
     if (!checkedMultiply(
-            compressedChunkBytes, input.chunks(), &compressedBytes)) {
+            compressedBatchBytes, batches, &compressedBytes)) {
       return ncclInvalidArgument;
     }
     return output.commitBytes(compressedBytes, input.chunks());
@@ -204,15 +216,21 @@ struct ZfpCompressor {
     const size_t inputChunkBytes = input.bytes() / input.chunks();
     const size_t outputChunkElements =
         output.elements() / output.chunks();
-    const size_t outputChunkBytes =
-        outputChunkElements * coccl::dataTypeSize(output.datatype());
+    const size_t chunksPerBatch =
+        outputChunkElements % kZfpBlockElements == 0 ? output.chunks() : 1;
+    const size_t batches = output.chunks() / chunksPerBatch;
+    const size_t inputBatchBytes = inputChunkBytes * chunksPerBatch;
+    const size_t outputBatchElements =
+        outputChunkElements * chunksPerBatch;
+    const size_t outputBatchBytes = outputBatchElements *
+        coccl::dataTypeSize(output.datatype());
     zfp_field_set_type(field, type);
-    zfp_field_set_size_1d(field, outputChunkElements);
-    for (size_t chunk = 0; chunk < input.chunks(); ++chunk) {
+    zfp_field_set_size_1d(field, outputBatchElements);
+    for (size_t batch = 0; batch < batches; ++batch) {
       bitstream* bits = stream_open(
           static_cast<char*>(const_cast<void*>(input.data())) +
-              chunk * inputChunkBytes,
-          inputChunkBytes);
+              batch * inputBatchBytes,
+          inputBatchBytes);
       if (bits == nullptr) {
         zfp_field_free(field);
         zfp_stream_close(stream);
@@ -222,7 +240,7 @@ struct ZfpCompressor {
       zfp_stream_rewind(stream);
       zfp_field_set_pointer(
           field, static_cast<char*>(output.data()) +
-              chunk * outputChunkBytes);
+              batch * outputBatchBytes);
       const size_t decompressedBytes = zfp_decompress(stream, field);
       stream_close(bits);
       if (decompressedBytes == 0) {

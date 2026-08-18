@@ -37,6 +37,7 @@ ncclResult_t ncclDecompReduceComp(const void* compbuff, void** recompbuff, const
     ncclComm_t ownerComm);
 
 ncclResult_t ncclCompressInit(const ncclComm_t comm);
+ncclResult_t ncclCompressDestroy(const ncclComm_t comm);
 
 
 #endif

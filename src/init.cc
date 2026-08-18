@@ -1992,6 +1992,7 @@ static ncclResult_t commCleanup(ncclComm_t comm) {
 
   NCCLCHECK(cocclPipelineCommDestroy(comm));
   NCCLCHECK(cocclBufferCommDestroy(comm));
+  NCCLCHECK(ncclCompressDestroy(comm));
   NCCLCHECK(commFree(comm));
 
   if (savedDevice != commDevice) {

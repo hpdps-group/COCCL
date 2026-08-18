@@ -43,6 +43,7 @@ struct StateEntry {
 struct DeviceResources {
   std::map<size_t, PersistentBuffer> persistent;
   std::map<const void*, StateEntry> states;
+  size_t scratchPeakBytes = 0;
 };
 
 struct CompressorPolicy {
@@ -63,6 +64,7 @@ struct ExecutionResources {
   int cudaDev = 0;
   cudaStream_t stream = nullptr;
   std::vector<void*> scratch;
+  size_t scratchBytes = 0;
 };
 
 constexpr size_t kOperationCount =
@@ -75,6 +77,7 @@ int runtimeRanks = 1;
 int runtimeNodes = 1;
 int runtimeDevicesPerNode = 1;
 std::map<int, int> rankByDevice;
+std::map<int, size_t> communicatorsByDevice;
 std::map<std::string, LoadedPlugin> loadedPlugins;
 std::vector<std::unique_ptr<CompressorPolicy>> ownedPolicies;
 std::array<CompressorPolicy*, kOperationCount> defaultPolicies = {};
@@ -108,6 +111,7 @@ ncclResult_t allocateScratch(void* opaque, size_t bytes,
   cudaError_t result = cudaMallocAsync(&data, bytes, execution->stream);
   if (result != cudaSuccess) return ncclUnhandledCudaError;
   execution->scratch.push_back(data);
+  execution->scratchBytes += bytes;
   *buffer = {data, bytes};
   return ncclSuccess;
 }
@@ -127,6 +131,9 @@ ncclResult_t acquirePersistent(void* opaque, size_t slot, size_t bytes,
     cudaError_t result = cudaMalloc(&persistent.data, bytes);
     if (result != cudaSuccess) return ncclUnhandledCudaError;
     persistent.bytes = bytes;
+    INFO(NCCL_INIT,
+         "COCCL compressor %s persistent device %d slot %zu bytes %zu",
+         policy->plugin->name, execution->cudaDev, slot, bytes);
   }
   *buffer = {persistent.data, persistent.bytes};
   return ncclSuccess;
@@ -320,6 +327,15 @@ ncclResult_t execute(CompressorPolicy* policy, cocclCompressorCall* call,
   call->config = policy->config;
   call->execution = &execution;
   ncclResult_t result = policy->plugin->execute(call);
+  if (resources.scratchBytes != 0) {
+    std::lock_guard<std::mutex> guard(policy->resourceLock);
+    DeviceResources& device = policy->resources[cudaDev];
+    if (resources.scratchBytes > device.scratchPeakBytes) {
+      device.scratchPeakBytes = resources.scratchBytes;
+      INFO(NCCL_INIT, "COCCL compressor %s scratch device %d peak %zu",
+           policy->plugin->name, cudaDev, device.scratchPeakBytes);
+    }
+  }
   for (void* scratch : resources.scratch) {
     const cudaError_t freeResult = cudaFreeAsync(scratch, stream);
     if (result == ncclSuccess && freeResult != cudaSuccess) {
@@ -474,13 +490,56 @@ ncclResult_t cocclResolveCompressorPolicy(
 ncclResult_t ncclCompressInit(const ncclComm_t comm) {
   const bool configReady = cocclConfigInitialize();
   pthread_mutex_lock(&compressorLock);
-  rankByDevice[comm->cudaDev] = comm->rank;
   if (!runtimeInitialized) {
     runtimeInitialized = true;
     runtimeInitResult = configReady
         ? initializeRuntime(comm, cocclGetConfig()) : ncclSuccess;
   }
   const ncclResult_t result = runtimeInitResult;
+  if (result == ncclSuccess) {
+    rankByDevice[comm->cudaDev] = comm->rank;
+    ++communicatorsByDevice[comm->cudaDev];
+  }
+  pthread_mutex_unlock(&compressorLock);
+  return result;
+}
+
+ncclResult_t ncclCompressDestroy(const ncclComm_t comm) {
+  pthread_mutex_lock(&compressorLock);
+  auto count = communicatorsByDevice.find(comm->cudaDev);
+  if (count == communicatorsByDevice.end()) {
+    pthread_mutex_unlock(&compressorLock);
+    return ncclSuccess;
+  }
+  if (--count->second != 0) {
+    pthread_mutex_unlock(&compressorLock);
+    return ncclSuccess;
+  }
+
+  communicatorsByDevice.erase(count);
+  rankByDevice.erase(comm->cudaDev);
+  ncclResult_t result = ncclSuccess;
+  for (const std::unique_ptr<CompressorPolicy>& policy : ownedPolicies) {
+    std::lock_guard<std::mutex> guard(policy->resourceLock);
+    auto resources = policy->resources.find(comm->cudaDev);
+    if (resources == policy->resources.end()) continue;
+    size_t persistentBytes = 0;
+    for (const auto& state : resources->second.states) {
+      state.second.destroy(state.second.data);
+    }
+    for (const auto& persistent : resources->second.persistent) {
+      persistentBytes += persistent.second.bytes;
+      if (cudaFree(persistent.second.data) != cudaSuccess &&
+          result == ncclSuccess) {
+        result = ncclUnhandledCudaError;
+      }
+    }
+    INFO(NCCL_INIT,
+         "COCCL compressor %s release device %d persistent %zu scratch_peak %zu states %zu",
+         policy->plugin->name, comm->cudaDev, persistentBytes,
+         resources->second.scratchPeakBytes, resources->second.states.size());
+    policy->resources.erase(resources);
+  }
   pthread_mutex_unlock(&compressorLock);
   return result;
 }

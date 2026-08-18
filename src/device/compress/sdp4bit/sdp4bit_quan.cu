@@ -374,9 +374,7 @@ struct Sdp4BitCompressor {
       cudaResult = cudaGetLastError();
     }
     if (cudaResult != cudaSuccess) return coccl::fromCuda(cudaResult);
-    return passthrough
-        ? output.commit(input.elements(), input.datatype(), input.chunks())
-        : output.commitBytes(requiredBytes, input.chunks());
+    return output.commitBytes(requiredBytes, input.chunks());
   }
 
   static coccl::Status decompress(const coccl::Input& input,
