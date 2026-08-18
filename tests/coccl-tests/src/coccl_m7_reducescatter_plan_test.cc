@@ -43,6 +43,7 @@ cocclPipelineSpec oneShotSpec(ncclComm_t comm, size_t outputBytes,
       nullptr,
       stages,
       3,
+      cocclPipelineInPlaceOutputRankChunk,
   };
 }
 
@@ -95,6 +96,7 @@ void checkTwoShot(ncclComm_t owner, ncclComm_t intra, ncclComm_t inter,
       nullptr,
       stages,
       5,
+      cocclPipelineInPlaceOutputRankChunk,
   };
   cocclPipelineContext context = {};
   EXPECT(cocclPreparePipeline(&spec, 4, &context) == ncclSuccess);

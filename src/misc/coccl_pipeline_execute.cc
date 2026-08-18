@@ -281,10 +281,10 @@ ncclResult_t runOverlap(const cocclPipelineContext& context,
 
 }  // namespace
 
-ncclResult_t cocclRunPipeline(const cocclPipelineSpec* spec) {
+static ncclResult_t cocclRunPipelineWithDepth(
+    const cocclPipelineSpec* spec, int requestedDepth) {
   cocclPipelineContext context = {};
-  NCCLCHECK(cocclPreparePipeline(spec, cocclGetConfig().pipeline.depth,
-                                 &context));
+  NCCLCHECK(cocclPreparePipeline(spec, requestedDepth, &context));
   CUDACHECK(cudaSetDevice(spec->ownerComm->cudaDev));
 
   cocclBufferHandle registeredWorkspace = {};
@@ -322,6 +322,14 @@ ncclResult_t cocclRunPipeline(const cocclPipelineSpec* spec) {
       cocclReleaseBuffer(&registeredWorkspace, spec->stream);
   if (result == ncclSuccess) result = rawRelease;
   return result == ncclSuccess ? registeredRelease : result;
+}
+
+ncclResult_t cocclRunPipeline(const cocclPipelineSpec* spec) {
+  return cocclRunPipelineWithDepth(spec, cocclGetConfig().pipeline.depth);
+}
+
+ncclResult_t cocclRunPipelineSerial(const cocclPipelineSpec* spec) {
+  return cocclRunPipelineWithDepth(spec, 1);
 }
 
 ncclResult_t cocclPipelineCommDestroy(ncclComm_t comm) {

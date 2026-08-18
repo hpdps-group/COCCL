@@ -31,6 +31,7 @@ cocclPipelineSpec makeSpec(const char* name, ncclComm_t comm,
       nullptr,
       stages,
       stageCount,
+      cocclPipelineInPlaceSameBuffer,
   };
 }
 

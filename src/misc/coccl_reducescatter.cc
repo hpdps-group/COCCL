@@ -21,7 +21,8 @@ ncclResult_t runOneShot(const cocclPreparedCall* prepared) {
       "reducescatter-oneshot", info.sendbuff, info.recvbuff, info.count,
       (size_t)info.comm->nRanks, info.datatype, prepared->policy,
       info.comm, info.stream, stages,
-      (int)(sizeof(stages) / sizeof(stages[0]))};
+      (int)(sizeof(stages) / sizeof(stages[0])),
+      cocclPipelineInPlaceOutputRankChunk};
   return cocclRunPipeline(&spec);
 }
 
@@ -48,7 +49,8 @@ ncclResult_t runTwoShot(const cocclPreparedCall* prepared) {
       "reducescatter-twoshot", info.sendbuff, info.recvbuff, info.count,
       (size_t)comm->nRanks, info.datatype, prepared->policy,
       comm, info.stream, stages,
-      (int)(sizeof(stages) / sizeof(stages[0]))};
+      (int)(sizeof(stages) / sizeof(stages[0])),
+      cocclPipelineInPlaceOutputRankChunk};
   return cocclRunPipeline(&spec);
 }
 

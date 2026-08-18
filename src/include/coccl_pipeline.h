@@ -19,6 +19,15 @@ enum cocclPipelineStageKind {
   cocclPipelineStageUnpack = 7,
 };
 
+// The planner preserves overlap only when user buffers match the primitive's
+// declared NCCL in-place layout exactly.
+enum cocclPipelineInPlaceLayout {
+  cocclPipelineInPlaceNone = 0,
+  cocclPipelineInPlaceSameBuffer = 1,
+  cocclPipelineInPlaceInputRankChunk = 2,
+  cocclPipelineInPlaceOutputRankChunk = 3,
+};
+
 struct cocclPipelineStage {
   cocclPipelineStageKind kind;
   ncclComm_t comm;
@@ -73,9 +82,11 @@ struct cocclPipelineSpec {
   cudaStream_t stream;
   const cocclPipelineStage* stages;
   int stageCount;
+  cocclPipelineInPlaceLayout inPlaceLayout;
 };
 
 ncclResult_t cocclRunPipeline(const cocclPipelineSpec* spec);
+ncclResult_t cocclRunPipelineSerial(const cocclPipelineSpec* spec);
 ncclResult_t cocclPipelineCommDestroy(ncclComm_t comm);
 
 #endif

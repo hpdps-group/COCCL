@@ -14,14 +14,6 @@ struct cocclPipelinePlannedEdge {
   size_t logicalChunks;
 };
 
-bool buffersOverlap(const void* first, size_t firstBytes,
-                    const void* second, size_t secondBytes) {
-  const uintptr_t firstBegin = reinterpret_cast<uintptr_t>(first);
-  const uintptr_t secondBegin = reinterpret_cast<uintptr_t>(second);
-  return firstBegin < secondBegin + secondBytes &&
-      secondBegin < firstBegin + firstBytes;
-}
-
 bool boundaryTemp(const cocclPipelinePlan& plan, int temp) {
   return temp == plan.inputStagingTemp || temp == plan.outputStagingTemp;
 }
@@ -257,6 +249,69 @@ ncclResult_t cocclPlanPipelineWorkspace(cocclPipelinePlan* plan, int depth) {
   return ncclSuccess;
 }
 
+ncclResult_t cocclPipelineUserBuffersRequireSerial(
+    const void* input, size_t inputChunks, void* output, size_t outputChunks,
+    size_t rawChunkBytes, int rank,
+    cocclPipelineInPlaceLayout inPlaceLayout, bool* requireSerial) {
+  size_t inputBytes = 0;
+  size_t outputBytes = 0;
+  if (!cocclPipelineCheckedMultiply(rawChunkBytes, inputChunks, &inputBytes) ||
+      !cocclPipelineCheckedMultiply(rawChunkBytes, outputChunks,
+                                    &outputBytes)) {
+    return ncclInvalidArgument;
+  }
+
+  const uintptr_t inputBegin = reinterpret_cast<uintptr_t>(input);
+  const uintptr_t outputBegin = reinterpret_cast<uintptr_t>(output);
+  if (inputBytes > UINTPTR_MAX - inputBegin ||
+      outputBytes > UINTPTR_MAX - outputBegin) {
+    return ncclInvalidArgument;
+  }
+  const uintptr_t inputEnd = inputBegin + inputBytes;
+  const uintptr_t outputEnd = outputBegin + outputBytes;
+  if (inputBegin >= outputEnd || outputBegin >= inputEnd) {
+    *requireSerial = false;
+    return ncclSuccess;
+  }
+
+  bool matches = false;
+  switch (inPlaceLayout) {
+    case cocclPipelineInPlaceNone:
+      break;
+    case cocclPipelineInPlaceSameBuffer:
+      matches = inputChunks == outputChunks && inputBegin == outputBegin;
+      break;
+    case cocclPipelineInPlaceInputRankChunk:
+    case cocclPipelineInPlaceOutputRankChunk: {
+      const size_t availableChunks =
+          inPlaceLayout == cocclPipelineInPlaceInputRankChunk
+          ? outputChunks : inputChunks;
+      size_t rankOffset = 0;
+      if (rank < 0 || (size_t)rank >= availableChunks ||
+          !cocclPipelineCheckedMultiply(rawChunkBytes, (size_t)rank,
+                                        &rankOffset)) {
+        return ncclInvalidArgument;
+      }
+      if (inPlaceLayout == cocclPipelineInPlaceInputRankChunk) {
+        if (rankOffset > UINTPTR_MAX - outputBegin) {
+          return ncclInvalidArgument;
+        }
+        matches = inputChunks == 1 &&
+            inputBegin == outputBegin + rankOffset;
+      } else {
+        if (rankOffset > UINTPTR_MAX - inputBegin) {
+          return ncclInvalidArgument;
+        }
+        matches = outputChunks == 1 &&
+            outputBegin == inputBegin + rankOffset;
+      }
+      break;
+    }
+  }
+  *requireSerial = !matches;
+  return ncclSuccess;
+}
+
 ncclResult_t cocclPipelineStageOutputChunks(
     const cocclPipelineStage& stage, size_t inputChunks,
     size_t* outputChunks) {
@@ -321,18 +376,12 @@ ncclResult_t cocclPreparePipeline(const cocclPipelineSpec* spec,
         spec->stages[stage], chunks, &stageChunks[stage]));
     chunks = stageChunks[stage];
   }
-  size_t inputBytes = 0;
-  size_t outputBytes = 0;
-  if (!cocclPipelineCheckedMultiply(
-          context->stageContext.rawChunkBytes, spec->inputChunks,
-          &inputBytes) ||
-      !cocclPipelineCheckedMultiply(
-          context->stageContext.rawChunkBytes, chunks, &outputBytes)) {
-    return ncclInvalidArgument;
-  }
-  if (buffersOverlap(spec->input, inputBytes, spec->output, outputBytes)) {
-    context->depth = 1;
-  }
+  bool requireSerial = false;
+  NCCLCHECK(cocclPipelineUserBuffersRequireSerial(
+      spec->input, spec->inputChunks, spec->output, chunks,
+      context->stageContext.rawChunkBytes, spec->ownerComm->rank,
+      spec->inPlaceLayout, &requireSerial));
+  if (requireSerial) context->depth = 1;
 
   context->stageContext.rawSliceCount =
       spec->rawChunkCount / (size_t)context->depth;

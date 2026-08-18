@@ -14,6 +14,7 @@ ncclResult_t cocclExecuteAllGather(const cocclPreparedCall* prepared) {
       "allgather", info.sendbuff, info.recvbuff, info.count, 1,
       info.datatype, prepared->policy,
       info.comm, info.stream, stages,
-      (int)(sizeof(stages) / sizeof(stages[0]))};
+      (int)(sizeof(stages) / sizeof(stages[0])),
+      cocclPipelineInPlaceInputRankChunk};
   return cocclRunPipeline(&spec);
 }

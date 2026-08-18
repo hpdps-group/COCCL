@@ -43,6 +43,7 @@ cocclPipelineSpec makeSpec(ncclComm_t comm, size_t gatheredBytes,
       nullptr,
       stages,
       3,
+      cocclPipelineInPlaceInputRankChunk,
   };
 }
 
@@ -166,7 +167,7 @@ int main(int argc, char** argv) {
       (size_t)comm.rank * rankBytes;
   cocclPipelineContext context = {};
   EXPECT(cocclPreparePipeline(&inPlace, 8, &context) == ncclSuccess);
-  EXPECT(context.depth == 1);
+  EXPECT(context.depth == 8);
   std::printf("coccl M6 allgather plan: PASS\n");
   return 0;
 }

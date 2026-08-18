@@ -50,6 +50,7 @@ cocclPipelineSpec makeSpec(ncclComm_t comm, size_t totalBytes,
       nullptr,
       stages,
       3,
+      cocclPipelineInPlaceNone,
   };
 }
 

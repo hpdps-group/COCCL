@@ -12,6 +12,7 @@
 namespace {
 
 int pipelineCalls = 0;
+int serialPipelineCalls = 0;
 cocclAlgorithmKind expectedAlgorithm = cocclAlgorithmNone;
 
 void fail(const char* expression, int line) {
@@ -57,6 +58,7 @@ void ncclDebugLog(ncclDebugLogLevel, unsigned long, const char*, int,
 ncclResult_t cocclRunPipeline(const cocclPipelineSpec* spec) {
   ++pipelineCalls;
   EXPECT(spec->rawChunkCount == 256 && spec->inputChunks == 4);
+  EXPECT(spec->inPlaceLayout == cocclPipelineInPlaceSameBuffer);
   if (expectedAlgorithm == cocclAlgorithmAllReduceOneShot) {
     EXPECT(std::strcmp(spec->name, "allreduce-oneshot") == 0);
     EXPECT(spec->stageCount == 3);
@@ -83,6 +85,12 @@ ncclResult_t cocclRunPipeline(const cocclPipelineSpec* spec) {
     expectStage(spec, 6, cocclPipelineStageDecompress);
   }
   return ncclSuccess;
+}
+
+ncclResult_t cocclRunPipelineSerial(const cocclPipelineSpec* spec) {
+  ++serialPipelineCalls;
+  EXPECT(expectedAlgorithm == cocclAlgorithmAllReduceOneShot);
+  return cocclRunPipeline(spec);
 }
 
 ncclResult_t ncclCommSplit(ncclComm_t, int, int, ncclComm_t*,
@@ -127,6 +135,7 @@ int main() {
   EXPECT(cocclExecuteAllReduce(&triple) == ncclInvalidArgument);
   EXPECT(pipelineCalls == callsBeforeInvalid);
   EXPECT(pipelineCalls == 3);
+  EXPECT(serialPipelineCalls == 1);
   std::printf("coccl M8 allreduce recipe: PASS\n");
   return 0;
 }
