@@ -16,6 +16,12 @@ void fail(const char* expression, int line) {
 #define EXPECT(expression) \
   do { if (!(expression)) fail(#expression, __LINE__); } while (0)
 
+bool rangesOverlap(size_t firstOffset, size_t firstBytes,
+                   size_t secondOffset, size_t secondBytes) {
+  return firstOffset < secondOffset + secondBytes &&
+      secondOffset < firstOffset + firstBytes;
+}
+
 const char* roleName(cocclPipelineTempRole role) {
   switch (role) {
     case cocclPipelineTempInputStaging: return "input-staging";
@@ -63,8 +69,9 @@ void checkDepth(ncclComm_t comm, int depth) {
   EXPECT(cocclAlignPipelineBytes(sliceBytes, &aligned));
   const int expectedTemps = depth == 1 ? 2 : 4;
   EXPECT(context.plan.tempCount == expectedTemps);
+  EXPECT(context.plan.sliceWorkspaceBytes == 2 * aligned);
   EXPECT(context.plan.workspaceBytes ==
-         (size_t)depth * expectedTemps * aligned);
+         (size_t)depth * 2 * aligned);
   EXPECT(context.plan.stageOutputTemp[0] >= 0);
   EXPECT(context.plan.stageOutputTemp[1] >= 0);
   EXPECT((context.plan.stageOutputTemp[2] >= 0) == (depth > 1));
@@ -75,10 +82,15 @@ void checkDepth(ncclComm_t comm, int depth) {
     const cocclPipelineTempPlan& temp = context.plan.temps[i];
     EXPECT(temp.logicalBytes == sliceBytes);
     EXPECT(temp.alignedBytes == aligned);
+    EXPECT(temp.offset % kCocclPipelineAlignment == 0);
+    EXPECT(temp.offset + temp.alignedBytes <=
+           context.plan.sliceWorkspaceBytes);
     if (i > 0) {
       const cocclPipelineTempPlan& previous = context.plan.temps[i - 1];
-      EXPECT(previous.offset + previous.alignedBytes <= temp.offset);
+      EXPECT(!rangesOverlap(previous.offset, previous.alignedBytes,
+                            temp.offset, temp.alignedBytes));
     }
+    if (i > 1) EXPECT(temp.offset == context.plan.temps[i - 2].offset);
   }
 }
 

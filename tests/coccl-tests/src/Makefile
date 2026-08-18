@@ -70,7 +70,7 @@ endif
 
 .PHONY: build clean m1-host-tests m1-plugin-load-test m2-host-tests \
 	m3-host-tests m4-host-tests m5-host-tests m5-layout-test m6-host-tests \
-	m7-host-tests m8-host-tests m9-host-tests
+	m7-host-tests m8-host-tests m9-host-tests m10-host-tests
 
 BUILDDIR ?= ../build
 ifneq ($(NCCL_HOME), "")
@@ -126,6 +126,10 @@ M7_REDUCESCATTER_STAGE_TEST := $(DST_DIR)/coccl_m7_reducescatter_stage_test
 M8_ALLREDUCE_PLAN_TEST := $(DST_DIR)/coccl_m8_allreduce_plan_test
 M8_ALLREDUCE_RECIPE_TEST := $(DST_DIR)/coccl_m8_allreduce_recipe_test
 M9_FIXED_COMPRESSOR_TEST := $(DST_DIR)/coccl_m9_fixed_compressor_test
+M10_UNIFIED_ARENA_TEST := $(DST_DIR)/coccl_m10_unified_arena_test
+
+m10-host-tests: $(M10_UNIFIED_ARENA_TEST)
+	$(M10_UNIFIED_ARENA_TEST)
 
 m9-host-tests: $(M9_FIXED_COMPRESSOR_TEST)
 	$(M9_FIXED_COMPRESSOR_TEST) $(M1_PLUGIN_DIR)
@@ -194,6 +198,12 @@ $(M9_FIXED_COMPRESSOR_TEST): coccl_m9_fixed_compressor_test.cc
 	@printf "Linking  %-35s > %s\n" $< $@
 	@mkdir -p $(DST_DIR)
 	$(CXX) $(M1_CXXFLAGS) $(COCCL_INC) -o $@ $< -ldl
+
+$(M10_UNIFIED_ARENA_TEST): coccl_m10_unified_arena_test.cc \
+		$(COCCL_SRC)/misc/coccl_pipeline_plan.cc
+	@printf "Linking  %-35s > %s\n" $< $@
+	@mkdir -p $(DST_DIR)
+	$(CXX) $(M1_CXXFLAGS) $(COCCL_INC) -I$(COCCL_SRC) -o $@ $^
 
 $(M2_RUNTIME_TEST): coccl_m2_runtime_test.cc \
 		$(COCCL_SRC)/misc/coccl_runtime.cc

@@ -97,6 +97,7 @@ inline bool cocclAlignPipelineBytes(size_t bytes, size_t* aligned) {
 ncclResult_t cocclPreparePipeline(const cocclPipelineSpec* spec,
                                   int requestedDepth,
                                   cocclPipelineContext* context);
+ncclResult_t cocclPlanUnifiedWorkspace(cocclPipelinePlan* plan, int depth);
 ncclResult_t cocclPipelineStageOutputChunks(
     const cocclPipelineStage& stage, size_t inputChunks,
     size_t* outputChunks);

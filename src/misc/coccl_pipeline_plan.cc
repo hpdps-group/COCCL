@@ -38,11 +38,9 @@ ncclResult_t addTemp(cocclPipelinePlan* plan, cocclPipelineTempRole role,
                      size_t logicalBytes, int* tempIndex) {
   cocclPipelineTempPlan& temp = plan->temps[plan->tempCount];
   temp.role = role;
-  temp.offset = plan->sliceWorkspaceBytes;
+  temp.offset = 0;
   temp.logicalBytes = logicalBytes;
-  if (!cocclAlignPipelineBytes(logicalBytes, &temp.alignedBytes) ||
-      !cocclPipelineCheckedAdd(plan->sliceWorkspaceBytes, temp.alignedBytes,
-                               &plan->sliceWorkspaceBytes)) {
+  if (!cocclAlignPipelineBytes(logicalBytes, &temp.alignedBytes)) {
     return ncclInvalidArgument;
   }
   *tempIndex = plan->tempCount++;
@@ -50,6 +48,30 @@ ncclResult_t addTemp(cocclPipelinePlan* plan, cocclPipelineTempRole role,
 }
 
 }  // namespace
+
+ncclResult_t cocclPlanUnifiedWorkspace(cocclPipelinePlan* plan, int depth) {
+  size_t sliceBytes = plan->temps[0].alignedBytes;
+  for (int temp = 1; temp < plan->tempCount; ++temp) {
+    size_t adjacentBytes = 0;
+    if (!cocclPipelineCheckedAdd(plan->temps[temp - 1].alignedBytes,
+                                 plan->temps[temp].alignedBytes,
+                                 &adjacentBytes)) {
+      return ncclInvalidArgument;
+    }
+    if (adjacentBytes > sliceBytes) sliceBytes = adjacentBytes;
+  }
+
+  for (int temp = 0; temp < plan->tempCount; ++temp) {
+    cocclPipelineTempPlan& item = plan->temps[temp];
+    item.offset = temp % 2 == 0 ? 0 : sliceBytes - item.alignedBytes;
+  }
+  plan->sliceWorkspaceBytes = sliceBytes;
+  if (!cocclPipelineCheckedMultiply(sliceBytes, (size_t)depth,
+                                    &plan->workspaceBytes)) {
+    return ncclInvalidArgument;
+  }
+  return ncclSuccess;
+}
 
 ncclResult_t cocclPipelineStageOutputChunks(
     const cocclPipelineStage& stage, size_t inputChunks,
@@ -179,10 +201,5 @@ ncclResult_t cocclPreparePipeline(const cocclPipelineSpec* spec,
     plan.stageOutputTemp[finalStage] = plan.outputStagingTemp;
   }
 
-  if (!cocclPipelineCheckedMultiply(plan.sliceWorkspaceBytes,
-                                    (size_t)context->depth,
-                                    &plan.workspaceBytes)) {
-    return ncclInvalidArgument;
-  }
-  return ncclSuccess;
+  return cocclPlanUnifiedWorkspace(&plan, context->depth);
 }

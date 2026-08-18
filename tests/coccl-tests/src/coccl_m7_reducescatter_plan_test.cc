@@ -61,8 +61,9 @@ void checkOneShot(ncclComm_t comm, int depth) {
   size_t aligned = 0;
   EXPECT(cocclAlignPipelineBytes(inputSliceBytes, &aligned));
   EXPECT(context.plan.tempCount == (depth == 1 ? 2 : 3));
+  EXPECT(context.plan.sliceWorkspaceBytes == 2 * aligned);
   EXPECT(context.plan.workspaceBytes ==
-         (size_t)(depth == 1 ? 2 : 3) * aligned * (size_t)depth);
+         2 * aligned * (size_t)depth);
   EXPECT(context.plan.outputStagingTemp == -1);
   EXPECT(context.plan.stageOutputCapacityBytes[0] == inputSliceBytes);
   EXPECT(context.plan.stageOutputCapacityBytes[1] == inputSliceBytes);

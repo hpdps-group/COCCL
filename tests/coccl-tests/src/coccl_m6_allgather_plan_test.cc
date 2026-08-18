@@ -65,10 +65,11 @@ void checkDepth(ncclComm_t comm, int depth) {
   EXPECT(cocclAlignPipelineBytes(sendSliceBytes, &alignedSend));
   EXPECT(cocclAlignPipelineBytes(gatheredSliceBytes, &alignedGathered));
   EXPECT(context.plan.tempCount == (depth == 1 ? 2 : 3));
+  const size_t expectedSliceBytes = depth == 1
+      ? alignedSend + alignedGathered : 2 * alignedGathered;
+  EXPECT(context.plan.sliceWorkspaceBytes == expectedSliceBytes);
   EXPECT(context.plan.workspaceBytes ==
-         (size_t)depth *
-             (alignedSend + alignedGathered +
-              (depth == 1 ? 0 : alignedGathered)));
+         (size_t)depth * expectedSliceBytes);
   EXPECT(context.plan.inputStagingTemp == -1);
   EXPECT(context.plan.stageOutputCapacityBytes[0] == sendSliceBytes);
   EXPECT(context.plan.stageOutputCapacityBytes[1] == gatheredSliceBytes);
