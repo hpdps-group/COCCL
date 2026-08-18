@@ -75,6 +75,16 @@ bool checkBound(const LoadedPlugin& plugin, void* config,
   return true;
 }
 
+bool checkUnsupportedBound(const LoadedPlugin& plugin, void* config,
+                           cocclCompressorOperation operation) {
+  const cocclCompressorSizeQuery query = {
+      sizeof(cocclCompressorSizeQuery), operation, 1024, 4,
+      ncclFloat32, config};
+  size_t encodedBytes = 0;
+  return plugin.descriptor->getEncodedSizeBound(
+             &query, &encodedBytes) == ncclInvalidUsage;
+}
+
 bool checkSdp4Bit(const LoadedPlugin& plugin) {
   const uint64_t fused = cocclCompressorCapabilityDecompressReduce |
       cocclCompressorCapabilityDecompressReduceCompress;
@@ -95,6 +105,22 @@ bool checkSdp4Bit(const LoadedPlugin& plugin) {
                  1024, 4, ncclBfloat16, 576);
   plugin.descriptor->destroyConfig(config);
   if (!sizes) return false;
+  void* separate = parseConfig(plugin,
+      {{"groupCount", "128"}, {"quantBits", "4"},
+       {"inQuantBits", "8"}, {"outQuantBits", "4"},
+       {"inGroupCount", "128"}, {"outGroupCount", "256"},
+       {"quantType", "Symmetric"}}, true);
+  if (separate == nullptr || separate == reinterpret_cast<void*>(1)) {
+    return false;
+  }
+  const bool separateSizes =
+      checkBound(plugin, separate, cocclCompressorOperationCompress,
+                 1024, 4, ncclFloat32, 1056) &&
+      checkBound(plugin, separate,
+                 cocclCompressorOperationDecompressReduceCompress,
+                 1024, 4, ncclFloat32, 528);
+  plugin.descriptor->destroyConfig(separate);
+  if (!separateSizes) return false;
   return parseConfig(plugin,
       {{"groupCount", "128"}, {"quantBits", "2"}}, false) == nullptr &&
       parseConfig(plugin,
@@ -109,8 +135,12 @@ bool checkTahQuant(const LoadedPlugin& plugin) {
       {{"groupCount", "128"}, {"quantBits", "4"},
        {"quantType", "Symmetric"}}, true);
   if (config == nullptr || config == reinterpret_cast<void*>(1)) return false;
-  const bool size = checkBound(plugin, config,
-      cocclCompressorOperationCompress, 1024, 4, ncclFloat32, 544);
+  const bool size =
+      checkBound(plugin, config, cocclCompressorOperationCompress,
+                 1024, 4, ncclFloat32, 544) &&
+      checkBound(plugin, config,
+                 cocclCompressorOperationDecompressReduceCompress,
+                 1024, 4, ncclFloat32, 544);
   plugin.descriptor->destroyConfig(config);
   if (!size) return false;
 
@@ -136,8 +166,12 @@ bool checkTaco(const LoadedPlugin& plugin) {
   void* config = parseConfig(plugin,
       {{"groupSize", "128"}, {"fp8Format", "E4M3"}}, true);
   if (config == nullptr || config == reinterpret_cast<void*>(1)) return false;
-  const bool size = checkBound(plugin, config,
-      cocclCompressorOperationCompress, 1024, 4, ncclFloat32, 1088);
+  const bool size =
+      checkBound(plugin, config, cocclCompressorOperationCompress,
+                 1024, 4, ncclFloat32, 1088) &&
+      checkUnsupportedBound(
+          plugin, config,
+          cocclCompressorOperationDecompressReduceCompress);
   plugin.descriptor->destroyConfig(config);
   return size && parseConfig(plugin,
       {{"groupSize", "96"}}, false) == nullptr;
@@ -154,7 +188,10 @@ bool checkZfp(const LoadedPlugin& plugin) {
   size_t encodedBytes = 0;
   const bool valid = plugin.descriptor->getEncodedSizeBound(
       &query, &encodedBytes) == ncclSuccess &&
-      encodedBytes != 0 && encodedBytes <= 1024 * sizeof(float);
+      encodedBytes != 0 && encodedBytes <= 1024 * sizeof(float) &&
+      checkUnsupportedBound(
+          plugin, config,
+          cocclCompressorOperationDecompressReduceCompress);
   plugin.descriptor->destroyConfig(config);
   return valid && parseConfig(plugin, {{"rate", "65"}}, false) == nullptr;
 }

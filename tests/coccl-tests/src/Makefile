@@ -70,7 +70,7 @@ endif
 
 .PHONY: build clean m1-host-tests m1-plugin-load-test m2-host-tests \
 	m3-host-tests m4-host-tests m5-host-tests m5-layout-test m6-host-tests \
-	m7-host-tests m8-host-tests m9-host-tests m10-host-tests
+	m7-host-tests m8-host-tests m9-host-tests m10-host-tests m11-host-tests
 
 BUILDDIR ?= ../build
 ifneq ($(NCCL_HOME), "")
@@ -127,6 +127,13 @@ M8_ALLREDUCE_PLAN_TEST := $(DST_DIR)/coccl_m8_allreduce_plan_test
 M8_ALLREDUCE_RECIPE_TEST := $(DST_DIR)/coccl_m8_allreduce_recipe_test
 M9_FIXED_COMPRESSOR_TEST := $(DST_DIR)/coccl_m9_fixed_compressor_test
 M10_UNIFIED_ARENA_TEST := $(DST_DIR)/coccl_m10_unified_arena_test
+M11_SIZE_QUERY_TEST := $(DST_DIR)/coccl_m11_size_query_test
+M11_WORKSPACE_TEST := $(DST_DIR)/coccl_m11_workspace_test
+M11_SIZE_QUERY_STUB := coccl_m11_size_query_stub.cc
+
+m11-host-tests: $(M11_SIZE_QUERY_TEST) $(M11_WORKSPACE_TEST)
+	$(M11_SIZE_QUERY_TEST)
+	$(M11_WORKSPACE_TEST)
 
 m10-host-tests: $(M10_UNIFIED_ARENA_TEST)
 	$(M10_UNIFIED_ARENA_TEST)
@@ -200,7 +207,19 @@ $(M9_FIXED_COMPRESSOR_TEST): coccl_m9_fixed_compressor_test.cc
 	$(CXX) $(M1_CXXFLAGS) $(COCCL_INC) -o $@ $< -ldl
 
 $(M10_UNIFIED_ARENA_TEST): coccl_m10_unified_arena_test.cc \
-		$(COCCL_SRC)/misc/coccl_pipeline_plan.cc
+		$(COCCL_SRC)/misc/coccl_pipeline_plan.cc $(M11_SIZE_QUERY_STUB)
+	@printf "Linking  %-35s > %s\n" $< $@
+	@mkdir -p $(DST_DIR)
+	$(CXX) $(M1_CXXFLAGS) $(COCCL_INC) -I$(COCCL_SRC) -o $@ $^
+
+$(M11_SIZE_QUERY_TEST): coccl_m11_size_query_test.cc \
+		$(COCCL_SRC)/misc/coccl_compressor_size.cc
+	@printf "Linking  %-35s > %s\n" $< $@
+	@mkdir -p $(DST_DIR)
+	$(CXX) $(M1_CXXFLAGS) $(COCCL_INC) -I$(COCCL_SRC) -o $@ $^
+
+$(M11_WORKSPACE_TEST): coccl_m11_workspace_test.cc \
+		$(COCCL_SRC)/misc/coccl_pipeline_plan.cc $(M11_SIZE_QUERY_STUB)
 	@printf "Linking  %-35s > %s\n" $< $@
 	@mkdir -p $(DST_DIR)
 	$(CXX) $(M1_CXXFLAGS) $(COCCL_INC) -I$(COCCL_SRC) -o $@ $^
@@ -233,7 +252,7 @@ $(M4_VMM_TEST): coccl_m4_vmm_test.cc \
 	$(CXX) $(M1_CXXFLAGS) $(COCCL_INC) -I$(COCCL_SRC) -o $@ $^
 
 $(M5_PIPELINE_PLAN_TEST): coccl_m5_pipeline_plan_test.cc \
-		$(COCCL_SRC)/misc/coccl_pipeline_plan.cc
+		$(COCCL_SRC)/misc/coccl_pipeline_plan.cc $(M11_SIZE_QUERY_STUB)
 	@printf "Linking  %-35s > %s\n" $< $@
 	@mkdir -p $(DST_DIR)
 	$(CXX) $(M1_CXXFLAGS) $(COCCL_INC) -I$(COCCL_SRC) -o $@ $^
@@ -252,7 +271,7 @@ $(M5_PIPELINE_LAYOUT_TEST): coccl_m5_pipeline_layout_test.cu \
 		$(filter-out Makefile,$^) $(LDFLAGS)
 
 $(M6_ALLGATHER_PLAN_TEST): coccl_m6_allgather_plan_test.cc \
-		$(COCCL_SRC)/misc/coccl_pipeline_plan.cc
+		$(COCCL_SRC)/misc/coccl_pipeline_plan.cc $(M11_SIZE_QUERY_STUB)
 	@printf "Linking  %-35s > %s\n" $< $@
 	@mkdir -p $(DST_DIR)
 	$(CXX) $(M1_CXXFLAGS) $(COCCL_INC) -I$(COCCL_SRC) -o $@ $^
@@ -264,7 +283,7 @@ $(M6_ALLGATHER_STAGE_TEST): coccl_m6_allgather_stage_test.cc \
 	$(CXX) $(M1_CXXFLAGS) $(COCCL_INC) -I$(COCCL_SRC) -o $@ $^
 
 $(M7_REDUCESCATTER_PLAN_TEST): coccl_m7_reducescatter_plan_test.cc \
-		$(COCCL_SRC)/misc/coccl_pipeline_plan.cc
+		$(COCCL_SRC)/misc/coccl_pipeline_plan.cc $(M11_SIZE_QUERY_STUB)
 	@printf "Linking  %-35s > %s\n" $< $@
 	@mkdir -p $(DST_DIR)
 	$(CXX) $(M1_CXXFLAGS) $(COCCL_INC) -I$(COCCL_SRC) -o $@ $^
@@ -276,7 +295,7 @@ $(M7_REDUCESCATTER_STAGE_TEST): coccl_m7_reducescatter_stage_test.cc \
 	$(CXX) $(M1_CXXFLAGS) $(COCCL_INC) -I$(COCCL_SRC) -o $@ $^
 
 $(M8_ALLREDUCE_PLAN_TEST): coccl_m8_allreduce_plan_test.cc \
-		$(COCCL_SRC)/misc/coccl_pipeline_plan.cc
+		$(COCCL_SRC)/misc/coccl_pipeline_plan.cc $(M11_SIZE_QUERY_STUB)
 	@printf "Linking  %-35s > %s\n" $< $@
 	@mkdir -p $(DST_DIR)
 	$(CXX) $(M1_CXXFLAGS) $(COCCL_INC) -I$(COCCL_SRC) -o $@ $^

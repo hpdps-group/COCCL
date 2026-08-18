@@ -116,11 +116,17 @@ void dumpPlan(const char* algorithm, ncclComm_t comm,
   EXPECT(cocclPreparePipeline(&spec, depth, &context) == ncclSuccess);
   for (int temp = 0; temp < context.plan.tempCount; ++temp) {
     const cocclPipelineTempPlan& item = context.plan.temps[temp];
-    std::printf("%s,%zu,%d,%d,%d,%s,%zu,%zu,%zu,%zu,%zu\n",
+    std::printf("%s,%zu,%d,%d,%d,%s,%zu,%zu,%zu,%s,%s,%zu,%zu,%zu,%zu\n",
                 algorithm, bytes, depth, context.depth, temp,
                 roleName(item.role), item.logicalBytes, item.alignedBytes,
-                item.offset, context.plan.sliceWorkspaceBytes,
-                context.plan.workspaceBytes);
+                item.offset,
+                context.plan.workspaceKind == cocclPipelineWorkspaceUnified
+                    ? "unified" : "split",
+                item.storage == cocclPipelineRegisteredArena
+                    ? "registered" : "raw-ring",
+                context.plan.registeredSliceBytes,
+                context.plan.registeredBytes, context.plan.rawBytes,
+                context.plan.totalBytes);
   }
 }
 
@@ -136,7 +142,8 @@ void dumpPlans(ncclComm_t comm) {
   const int depths[] = {1, 2, 4, 8};
   std::printf("algorithm,bytes,requested_depth,effective_depth,temp_index,"
               "temp_role,logical_bytes,aligned_bytes,offset,"
-              "slice_workspace_bytes,workspace_bytes\n");
+              "workspace_kind,storage,registered_slice_bytes,"
+              "registered_bytes,raw_bytes,total_bytes\n");
   dumpPlan("oneshot", comm, oneShot, 3, 32ULL << 20, 1);
   for (size_t bytes : sizes) {
     for (int depth : depths) {

@@ -373,17 +373,20 @@ ncclResult_t executeCompress(CompressorPolicy* policy, const void* input,
                              ncclDataType_t datatype, size_t chunks, int rank,
                              size_t* encodedChunkElements,
                              ncclDataType_t* encodedDatatype,
-                             cudaStream_t stream) {
+                             cudaStream_t stream,
+                             size_t outputCapacityBytes) {
   const size_t elements = chunkElements * chunks;
   const size_t bytes = elements * ncclTypeSize(datatype);
+  const size_t capacity =
+      outputCapacityBytes == 0 ? bytes : outputCapacityBytes;
   bool allocated = false;
-  NCCLCHECK(allocateEncodedOutput(output, bytes, stream, &allocated));
+  NCCLCHECK(allocateEncodedOutput(output, capacity, stream, &allocated));
 
   const cocclCompressorView inputView = {
       const_cast<void*>(input), bytes, bytes, elements, chunks, datatype,
       nullptr, 0};
   cocclCompressorView outputView = {
-      *output, bytes, 0, 0, chunks, ncclInt8, nullptr, 0};
+      *output, capacity, 0, 0, chunks, ncclInt8, nullptr, 0};
   cocclCompressorCall call = {
       sizeof(cocclCompressorCall), cocclCompressorOperationCompress,
       inputView, &outputView, rank, 0, datatype, elements, nullptr, nullptr};
@@ -487,6 +490,30 @@ ncclResult_t cocclResolveCompressorPolicy(
   return ncclSuccess;
 }
 
+ncclResult_t cocclGetCompressorEncodedSizeBound(
+    cocclPolicyKey key, cocclCompressorOperation operation,
+    size_t elements, size_t chunks, ncclDataType_t datatype,
+    size_t* encodedBytes) {
+  cocclResolvedCompressorPolicy resolved = {};
+  NCCLCHECK(cocclResolveCompressorPolicy(key, &resolved));
+  CompressorPolicy* policy =
+      static_cast<CompressorPolicy*>(resolved.compressor);
+  return cocclQueryCompressorEncodedSizeBound(
+      policy->plugin, policy->config, operation, elements, chunks,
+      datatype, encodedBytes);
+}
+
+bool cocclCompressorPolicySupports(
+    cocclPolicyKey key, cocclCompressorCapability capability) {
+  cocclResolvedCompressorPolicy resolved = {};
+  if (cocclResolveCompressorPolicy(key, &resolved) != ncclSuccess) {
+    return false;
+  }
+  const CompressorPolicy* policy =
+      static_cast<const CompressorPolicy*>(resolved.compressor);
+  return (policy->plugin->capabilities & (uint64_t)capability) != 0;
+}
+
 ncclResult_t ncclCompressInit(const ncclComm_t comm) {
   const bool configReady = cocclConfigInitialize();
   pthread_mutex_lock(&compressorLock);
@@ -548,12 +575,13 @@ ncclResult_t ncclCompress(
     const void* orgbuff, void** compbuff, const size_t orgChunkCount,
     ncclDataType_t orgDatatype, size_t* compChunkCount,
     ncclDataType_t* compDatatype, const size_t numChunks, const int rank,
-    ncclCommOp_t commOp, cudaStream_t stream) {
+    ncclCommOp_t commOp, cudaStream_t stream,
+    size_t outputCapacityBytes) {
   CompressorPolicy* policy = policyFor(commOp);
   if (policy == nullptr) return ncclInvalidUsage;
   return executeCompress(policy, orgbuff, compbuff, orgChunkCount,
                          orgDatatype, numChunks, rank, compChunkCount,
-                         compDatatype, stream);
+                         compDatatype, stream, outputCapacityBytes);
 }
 
 ncclResult_t ncclDecompress(
@@ -622,7 +650,8 @@ ncclResult_t ncclDecompReduceComp(
     ncclDataType_t compDatatype, size_t* reCompChunkCount,
     ncclDataType_t* reCompDatatype, const size_t inputChunks,
     const size_t reduceChunks,
-    ncclCommOp_t commOp, cudaStream_t stream, ncclComm_t ownerComm) {
+    ncclCommOp_t commOp, cudaStream_t stream, ncclComm_t ownerComm,
+    size_t outputCapacityBytes) {
   CompressorPolicy* policy = policyFor(commOp);
   if (policy == nullptr) return ncclInvalidUsage;
   if (reduceChunks == 0 || inputChunks % reduceChunks != 0) {
@@ -631,10 +660,28 @@ ncclResult_t ncclDecompReduceComp(
   const size_t outputChunks = inputChunks / reduceChunks;
   if (originalElements % outputChunks != 0) return ncclInvalidArgument;
   const size_t rawChunkElements = originalElements / outputChunks;
-  if (outputChunks != 1 ||
-      compDatatype == COCCL_COMPRESSOR_RAW_PASSTHROUGH ||
+  const size_t rawOutputBytes = originalElements * ncclTypeSize(orgDatatype);
+  const size_t capacity = outputCapacityBytes == 0
+      ? rawOutputBytes : outputCapacityBytes;
+
+  bool useFused = outputChunks == 1 &&
+      compDatatype != COCCL_COMPRESSOR_RAW_PASSTHROUGH &&
       (policy->plugin->capabilities &
-       cocclCompressorCapabilityDecompressReduceCompress) == 0) {
+       cocclCompressorCapabilityDecompressReduceCompress) != 0;
+  if (useFused) {
+    size_t fusedBound = 0;
+    NCCLCHECK(cocclQueryCompressorEncodedSizeBound(
+        policy->plugin, policy->config,
+        cocclCompressorOperationDecompressReduceCompress,
+        originalElements, outputChunks, orgDatatype, &fusedBound));
+    if (fusedBound > rawOutputBytes) {
+      useFused = false;
+    } else if (fusedBound > capacity) {
+      return ncclInvalidUsage;
+    }
+  }
+
+  if (!useFused) {
     const size_t bytes = rawChunkElements * inputChunks *
         ncclTypeSize(orgDatatype);
     cocclBufferHandle temporary;
@@ -652,7 +699,8 @@ ncclResult_t ncclDecompReduceComp(
     if (ret == ncclSuccess) {
       ret = executeCompress(policy, temporary.ptr, recompbuff,
                             rawChunkElements, orgDatatype, outputChunks, 0,
-                            reCompChunkCount, reCompDatatype, stream);
+                            reCompChunkCount, reCompDatatype, stream,
+                            capacity);
     }
     ncclResult_t releaseRet = cocclReleaseBuffer(&temporary, stream);
     return ret == ncclSuccess ? releaseRet : ret;
@@ -660,15 +708,14 @@ ncclResult_t ncclDecompReduceComp(
 
   const size_t inputElements = compChunkCount * inputChunks;
   const size_t inputBytes = inputElements * ncclTypeSize(compDatatype);
-  const size_t rawOutputBytes = originalElements * ncclTypeSize(orgDatatype);
   bool allocated = false;
-  NCCLCHECK(allocateEncodedOutput(recompbuff, rawOutputBytes, stream,
+  NCCLCHECK(allocateEncodedOutput(recompbuff, capacity, stream,
                                  &allocated));
   const cocclCompressorView input = {
       const_cast<void*>(compbuff), inputBytes, inputBytes, inputElements,
       inputChunks, compDatatype, nullptr, 0};
   cocclCompressorView output = {
-      *recompbuff, rawOutputBytes, 0, 0, outputChunks, ncclInt8, nullptr, 0};
+      *recompbuff, capacity, 0, 0, outputChunks, ncclInt8, nullptr, 0};
   int cudaDev = 0;
   CUDACHECK(cudaGetDevice(&cudaDev));
   const int rank = rankForDevice(cudaDev);

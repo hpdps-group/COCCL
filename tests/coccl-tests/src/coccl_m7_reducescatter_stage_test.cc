@@ -30,7 +30,7 @@ void ncclDebugLog(ncclDebugLogLevel, unsigned long, const char*, int,
 ncclResult_t ncclCompress(
     const void*, void**, size_t rawChunkCount, ncclDataType_t,
     size_t* encodedChunkCount, ncclDataType_t* encodedDatatype,
-    size_t chunks, int, ncclCommOp_t operation, cudaStream_t) {
+    size_t chunks, int, ncclCommOp_t operation, cudaStream_t, size_t) {
   ++compressCalls;
   EXPECT(rawChunkCount == 64 && chunks == 4 &&
          operation == ReduceScatter_Inter);
@@ -55,7 +55,7 @@ ncclResult_t ncclDecompReduceComp(
     ncclDataType_t encodedDatatype, size_t* recompressedChunkCount,
     ncclDataType_t* recompressedDatatype, size_t inputChunks,
     size_t reduceChunks, ncclCommOp_t operation, cudaStream_t,
-    ncclComm_t) {
+    ncclComm_t, size_t) {
   ++drcCalls;
   EXPECT(originalElements == 128 && originalDatatype == ncclFloat32);
   EXPECT(encodedChunkCount == 32 && encodedDatatype == ncclInt8);

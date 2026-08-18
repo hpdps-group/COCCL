@@ -10,6 +10,7 @@ constexpr int kCocclPipelinePhysicalStages = 9;
 constexpr int kCocclPipelineStageKindCount = 8;
 constexpr int kCocclPipelineMaxTemps = 8;
 constexpr int kCocclPipelineMaxDepth = 16;
+constexpr int kCocclPipelineRawRingSlots = 2;
 constexpr size_t kCocclPipelineAlignment = 256;
 
 struct cocclPipelineEdge {
@@ -44,14 +45,26 @@ enum cocclPipelineTempRole {
   cocclPipelineTempOutputStaging,
 };
 
+enum cocclPipelineWorkspaceKind {
+  cocclPipelineWorkspaceUnified,
+  cocclPipelineWorkspaceSplit,
+};
+
+enum cocclPipelineTempStorage {
+  cocclPipelineRegisteredArena,
+  cocclPipelineRawRing,
+};
+
 struct cocclPipelineTempPlan {
   cocclPipelineTempRole role;
   size_t offset;
   size_t logicalBytes;
   size_t alignedBytes;
+  cocclPipelineTempStorage storage;
 };
 
 struct cocclPipelinePlan {
+  cocclPipelineWorkspaceKind workspaceKind;
   int tempCount;
   int inputStagingTemp;
   int outputStagingTemp;
@@ -59,8 +72,10 @@ struct cocclPipelinePlan {
   size_t stageOutputCapacityBytes[kCocclPipelineExplicitStages];
   cocclPipelineTempPlan temps[kCocclPipelineMaxTemps];
   size_t finalChunks;
-  size_t sliceWorkspaceBytes;
-  size_t workspaceBytes;
+  size_t registeredSliceBytes;
+  size_t registeredBytes;
+  size_t rawBytes;
+  size_t totalBytes;
 };
 
 struct cocclPipelineContext {
@@ -97,7 +112,7 @@ inline bool cocclAlignPipelineBytes(size_t bytes, size_t* aligned) {
 ncclResult_t cocclPreparePipeline(const cocclPipelineSpec* spec,
                                   int requestedDepth,
                                   cocclPipelineContext* context);
-ncclResult_t cocclPlanUnifiedWorkspace(cocclPipelinePlan* plan, int depth);
+ncclResult_t cocclPlanPipelineWorkspace(cocclPipelinePlan* plan, int depth);
 ncclResult_t cocclPipelineStageOutputChunks(
     const cocclPipelineStage& stage, size_t inputChunks,
     size_t* outputChunks);

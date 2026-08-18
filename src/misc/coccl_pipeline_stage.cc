@@ -48,7 +48,8 @@ ncclResult_t runCompress(const cocclPipelineStageContext* context,
       edge->ptr, &encoded, context->rawSliceCount, context->rawDatatype,
       &encodedChunkCount, &encodedDatatype, edge->logicalChunks,
       context->ownerComm->rank,
-      compressorOperation(context->compressorPolicy), stream));
+      compressorOperation(context->compressorPolicy), stream,
+      output->capacityBytes));
 
   size_t encodedElements = 0;
   size_t encodedBytes = 0;
@@ -135,7 +136,7 @@ ncclResult_t runDecompReduceComp(
       encodedChunkCount, edge->datatype, &recompressedChunkCount,
       &recompressedDatatype, edge->logicalChunks, stage->reduceChunks,
       compressorOperation(context->compressorPolicy), stream,
-      context->ownerComm));
+      context->ownerComm, output->capacityBytes));
 
   size_t encodedElements = 0;
   size_t encodedBytes = 0;

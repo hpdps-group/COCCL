@@ -29,7 +29,7 @@ void ncclDebugLog(ncclDebugLogLevel, unsigned long, const char*, int,
 ncclResult_t ncclCompress(
     const void*, void**, size_t rawChunkCount, ncclDataType_t,
     size_t* encodedChunkCount, ncclDataType_t* encodedDatatype,
-    size_t chunks, int, ncclCommOp_t operation, cudaStream_t) {
+    size_t chunks, int, ncclCommOp_t operation, cudaStream_t, size_t) {
   ++compressCalls;
   EXPECT(rawChunkCount == 64 && chunks == 1 && operation == AllGather);
   *encodedChunkCount = 32;
@@ -64,7 +64,7 @@ ncclResult_t ncclAllToAll(const void*, void*, size_t, ncclDataType_t,
 ncclResult_t ncclDecompReduceComp(
     const void*, void**, size_t, ncclDataType_t, size_t, ncclDataType_t,
     size_t*, ncclDataType_t*, size_t, size_t, ncclCommOp_t, cudaStream_t,
-    ncclComm_t) {
+    ncclComm_t, size_t) {
   return ncclInternalError;
 }
 

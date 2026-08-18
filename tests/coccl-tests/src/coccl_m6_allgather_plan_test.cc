@@ -65,11 +65,24 @@ void checkDepth(ncclComm_t comm, int depth) {
   EXPECT(cocclAlignPipelineBytes(sendSliceBytes, &alignedSend));
   EXPECT(cocclAlignPipelineBytes(gatheredSliceBytes, &alignedGathered));
   EXPECT(context.plan.tempCount == (depth == 1 ? 2 : 3));
-  const size_t expectedSliceBytes = depth == 1
-      ? alignedSend + alignedGathered : 2 * alignedGathered;
-  EXPECT(context.plan.sliceWorkspaceBytes == expectedSliceBytes);
-  EXPECT(context.plan.workspaceBytes ==
-         (size_t)depth * expectedSliceBytes);
+  if (depth <= 2) {
+    const size_t expectedSliceBytes = depth == 1
+        ? alignedSend + alignedGathered : 2 * alignedGathered;
+    EXPECT(context.plan.workspaceKind == cocclPipelineWorkspaceUnified);
+    EXPECT(context.plan.registeredSliceBytes == expectedSliceBytes);
+    EXPECT(context.plan.registeredBytes ==
+           (size_t)depth * expectedSliceBytes);
+    EXPECT(context.plan.rawBytes == 0);
+  } else {
+    EXPECT(context.plan.workspaceKind == cocclPipelineWorkspaceSplit);
+    EXPECT(context.plan.registeredSliceBytes ==
+           alignedSend + alignedGathered);
+    EXPECT(context.plan.registeredBytes ==
+           (size_t)depth * (alignedSend + alignedGathered));
+    EXPECT(context.plan.rawBytes == 2 * alignedGathered);
+  }
+  EXPECT(context.plan.totalBytes ==
+         context.plan.registeredBytes + context.plan.rawBytes);
   EXPECT(context.plan.inputStagingTemp == -1);
   EXPECT(context.plan.stageOutputCapacityBytes[0] == sendSliceBytes);
   EXPECT(context.plan.stageOutputCapacityBytes[1] == gatheredSliceBytes);
@@ -89,8 +102,9 @@ void dumpPlans(ncclComm_t comm) {
   const size_t sizes[] = {64ULL << 20, 1ULL << 30, 8ULL << 30};
   const int depths[] = {1, 2, 4, 8};
   std::printf("bytes,requested_depth,effective_depth,temp_index,temp_role,"
-              "logical_bytes,aligned_bytes,offset,slice_workspace_bytes,"
-              "workspace_bytes\n");
+              "logical_bytes,aligned_bytes,offset,workspace_kind,storage,"
+              "registered_slice_bytes,registered_bytes,raw_bytes,"
+              "total_bytes\n");
   for (size_t bytes : sizes) {
     for (int depth : depths) {
       cocclPipelineSpec spec = makeSpec(comm, bytes, stages);
@@ -98,11 +112,17 @@ void dumpPlans(ncclComm_t comm) {
       EXPECT(cocclPreparePipeline(&spec, depth, &context) == ncclSuccess);
       for (int temp = 0; temp < context.plan.tempCount; ++temp) {
         const cocclPipelineTempPlan& item = context.plan.temps[temp];
-        std::printf("%zu,%d,%d,%d,%s,%zu,%zu,%zu,%zu,%zu\n", bytes,
+        std::printf("%zu,%d,%d,%d,%s,%zu,%zu,%zu,%s,%s,%zu,%zu,%zu,%zu\n",
+                    bytes,
                     depth, context.depth, temp, roleName(item.role),
                     item.logicalBytes, item.alignedBytes, item.offset,
-                    context.plan.sliceWorkspaceBytes,
-                    context.plan.workspaceBytes);
+                    context.plan.workspaceKind == cocclPipelineWorkspaceUnified
+                        ? "unified" : "split",
+                    item.storage == cocclPipelineRegisteredArena
+                        ? "registered" : "raw-ring",
+                    context.plan.registeredSliceBytes,
+                    context.plan.registeredBytes, context.plan.rawBytes,
+                    context.plan.totalBytes);
       }
     }
   }

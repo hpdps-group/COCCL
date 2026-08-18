@@ -23,6 +23,13 @@ struct cocclPipelineResources {
   cudaEvent_t events[kCocclPipelinePhysicalStages]
                     [kCocclPipelineMaxDepth];
   cudaEvent_t inputReady;
+  cudaEvent_t inputRawConsumed[kCocclPipelineRawRingSlots];
+  cudaEvent_t outputRawConsumed[kCocclPipelineRawRingSlots];
+};
+
+struct cocclPipelineWorkspace {
+  void* registeredBase;
+  void* rawBase;
 };
 
 thread_local std::map<ncclComm_t, cocclPipelineResources*> resourcesByComm;
@@ -40,6 +47,14 @@ void destroyResources(cocclPipelineResources* resources) {
   }
   if (resources->inputReady != nullptr) {
     (void)cudaEventDestroy(resources->inputReady);
+  }
+  for (int slot = 0; slot < kCocclPipelineRawRingSlots; ++slot) {
+    if (resources->inputRawConsumed[slot] != nullptr) {
+      (void)cudaEventDestroy(resources->inputRawConsumed[slot]);
+    }
+    if (resources->outputRawConsumed[slot] != nullptr) {
+      (void)cudaEventDestroy(resources->outputRawConsumed[slot]);
+    }
   }
   delete resources;
 }
@@ -81,6 +96,15 @@ ncclResult_t createResources(int depth, cocclPipelineResources** output) {
     destroyResources(resources);
     return ncclUnhandledCudaError;
   }
+  for (int slot = 0; slot < kCocclPipelineRawRingSlots; ++slot) {
+    if (cudaEventCreateWithFlags(resources->inputRawConsumed + slot,
+                                 cudaEventDisableTiming) != cudaSuccess ||
+        cudaEventCreateWithFlags(resources->outputRawConsumed + slot,
+                                 cudaEventDisableTiming) != cudaSuccess) {
+      destroyResources(resources);
+      return ncclUnhandledCudaError;
+    }
+  }
   *output = resources;
   return ncclSuccess;
 }
@@ -102,11 +126,16 @@ ncclResult_t findOrCreateResources(ncclComm_t comm, int depth,
   return result;
 }
 
-void* tempPtr(const cocclPipelineContext& context, void* workspace,
+void* tempPtr(const cocclPipelineContext& context,
+              const cocclPipelineWorkspace& workspace,
               int slice, int tempIndex) {
-  return static_cast<char*>(workspace) +
-      (size_t)slice * context.plan.sliceWorkspaceBytes +
-      context.plan.temps[tempIndex].offset;
+  const cocclPipelineTempPlan& temp = context.plan.temps[tempIndex];
+  if (temp.storage == cocclPipelineRawRing) {
+    return static_cast<char*>(workspace.rawBase) + temp.offset +
+        (size_t)(slice % kCocclPipelineRawRingSlots) * temp.alignedBytes;
+  }
+  return static_cast<char*>(workspace.registeredBase) +
+      (size_t)slice * context.plan.registeredSliceBytes + temp.offset;
 }
 
 cocclPipelineEdge inputEdge(const cocclPipelineContext& context,
@@ -122,7 +151,8 @@ cocclPipelineEdge inputEdge(const cocclPipelineContext& context,
 }
 
 cocclPipelineStageOutput stageOutput(const cocclPipelineContext& context,
-                                     void* workspace, int stage, int slice) {
+                                     const cocclPipelineWorkspace& workspace,
+                                     int stage, int slice) {
   const int tempIndex = context.plan.stageOutputTemp[stage];
   if (tempIndex >= 0) {
     return {tempPtr(context, workspace, slice, tempIndex),
@@ -134,7 +164,7 @@ cocclPipelineStageOutput stageOutput(const cocclPipelineContext& context,
 }
 
 ncclResult_t runSerial(const cocclPipelineContext& context,
-                       void* workspace) {
+                       const cocclPipelineWorkspace& workspace) {
   cocclPipelineEdge edge = inputEdge(context, 0);
   for (int stage = 0; stage < context.spec->stageCount; ++stage) {
     const cocclPipelineStageOutput output =
@@ -160,18 +190,31 @@ ncclResult_t recordPhase(cocclPipelineResources* resources, int phase,
   return ncclSuccess;
 }
 
-ncclResult_t runOverlap(const cocclPipelineContext& context, void* workspace,
+ncclResult_t runOverlap(const cocclPipelineContext& context,
+                        const cocclPipelineWorkspace& workspace,
                         cocclPipelineResources* resources) {
   const int finalStagePhase =
       cocclPipelinePhaseFirstStage + context.spec->stageCount - 1;
   CUDACHECK(cudaEventRecord(resources->inputReady, context.spec->stream));
   CUDACHECK(cudaStreamWaitEvent(
       resources->streams[cocclPipelinePhasePack], resources->inputReady, 0));
+  const bool reusesInputRaw =
+      context.plan.workspaceKind == cocclPipelineWorkspaceSplit &&
+      context.plan.inputStagingTemp >= 0;
+  const bool reusesOutputRaw =
+      context.plan.workspaceKind == cocclPipelineWorkspaceSplit &&
+      context.plan.outputStagingTemp >= 0;
 
   for (int slice = 0; slice < context.depth; ++slice) {
+    const int rawSlot = slice % kCocclPipelineRawRingSlots;
     cocclPipelineEdge edge = inputEdge(context, slice);
 
     if (context.plan.inputStagingTemp >= 0) {
+      if (reusesInputRaw && slice >= kCocclPipelineRawRingSlots) {
+        CUDACHECK(cudaStreamWaitEvent(
+            resources->streams[cocclPipelinePhasePack],
+            resources->inputRawConsumed[rawSlot], 0));
+      }
       const cocclPipelineStage pack = cocclPipelinePack();
       const cocclPipelineStageOutput packOutput = {
           tempPtr(context, workspace, slice,
@@ -186,11 +229,23 @@ ncclResult_t runOverlap(const cocclPipelineContext& context, void* workspace,
     for (int stage = 0; stage < context.spec->stageCount; ++stage) {
       const int phase = cocclPipelinePhaseFirstStage + stage;
       NCCLCHECK(waitForPhase(resources, phase, phase - 1, slice));
+      const bool finalStage = stage + 1 == context.spec->stageCount;
+      if (reusesOutputRaw && finalStage &&
+          slice >= kCocclPipelineRawRingSlots) {
+        CUDACHECK(cudaStreamWaitEvent(
+            resources->streams[phase],
+            resources->outputRawConsumed[rawSlot], 0));
+      }
       const cocclPipelineStageOutput output =
           stageOutput(context, workspace, stage, slice);
       NCCLCHECK(cocclExecutePipelineStage(
           &context.stageContext, context.spec->stages + stage, &edge,
           &output, resources->streams[phase]));
+      if (reusesInputRaw && stage == 0) {
+        CUDACHECK(cudaEventRecord(
+            resources->inputRawConsumed[rawSlot],
+            resources->streams[phase]));
+      }
       NCCLCHECK(recordPhase(resources, phase, slice));
     }
 
@@ -205,6 +260,11 @@ ncclResult_t runOverlap(const cocclPipelineContext& context, void* workspace,
       NCCLCHECK(cocclExecutePipelineStage(
           &context.stageContext, &unpack, &edge, &unpackOutput,
           resources->streams[cocclPipelinePhaseUnpack]));
+      if (reusesOutputRaw) {
+        CUDACHECK(cudaEventRecord(
+            resources->outputRawConsumed[rawSlot],
+            resources->streams[cocclPipelinePhaseUnpack]));
+      }
       if (slice == context.depth - 1) {
         NCCLCHECK(recordPhase(resources, cocclPipelinePhaseUnpack, slice));
       }
@@ -227,26 +287,41 @@ ncclResult_t cocclRunPipeline(const cocclPipelineSpec* spec) {
                                  &context));
   CUDACHECK(cudaSetDevice(spec->ownerComm->cudaDev));
 
-  cocclBufferHandle workspace = {};
-  NCCLCHECK(cocclGetBuffer(spec->ownerComm, context.plan.workspaceBytes,
-                           spec->stream, &workspace));
+  cocclBufferHandle registeredWorkspace = {};
+  NCCLCHECK(cocclGetBuffer(spec->ownerComm, context.plan.registeredBytes,
+                           spec->stream, &registeredWorkspace));
+  cocclBufferHandle rawWorkspace = {};
+  if (context.plan.rawBytes != 0) {
+    const ncclResult_t rawResult = cocclGetUnregisteredBuffer(
+        spec->ownerComm, context.plan.rawBytes, spec->stream,
+        &rawWorkspace);
+    if (rawResult != ncclSuccess) {
+      (void)cocclReleaseBuffer(&registeredWorkspace, spec->stream);
+      return rawResult;
+    }
+  }
+  const cocclPipelineWorkspace workspace = {
+      registeredWorkspace.ptr, rawWorkspace.ptr};
 
   ncclResult_t result = ncclSuccess;
   if (context.depth == 1) {
-    result = runSerial(context, workspace.ptr);
+    result = runSerial(context, workspace);
   } else {
     cocclPipelineResources* resources = nullptr;
     result = findOrCreateResources(spec->ownerComm, context.depth,
                                    &resources);
     if (result == ncclSuccess) {
-      result = runOverlap(context, workspace.ptr, resources);
+      result = runOverlap(context, workspace, resources);
     }
   }
 
   if (result != ncclSuccess) (void)cudaDeviceSynchronize();
-  const ncclResult_t releaseResult =
-      cocclReleaseBuffer(&workspace, spec->stream);
-  return result == ncclSuccess ? releaseResult : result;
+  const ncclResult_t rawRelease =
+      cocclReleaseBuffer(&rawWorkspace, spec->stream);
+  const ncclResult_t registeredRelease =
+      cocclReleaseBuffer(&registeredWorkspace, spec->stream);
+  if (result == ncclSuccess) result = rawRelease;
+  return result == ncclSuccess ? registeredRelease : result;
 }
 
 ncclResult_t cocclPipelineCommDestroy(ncclComm_t comm) {

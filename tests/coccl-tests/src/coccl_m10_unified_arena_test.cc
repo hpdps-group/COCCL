@@ -22,69 +22,81 @@ bool rangesOverlap(size_t firstOffset, size_t firstBytes,
 }
 
 void checkLayout(const cocclPipelinePlan& plan, int depth) {
-  size_t expectedSliceBytes = plan.temps[0].alignedBytes;
-  for (int temp = 1; temp < plan.tempCount; ++temp) {
-    const size_t adjacentBytes =
-        plan.temps[temp - 1].alignedBytes + plan.temps[temp].alignedBytes;
-    if (adjacentBytes > expectedSliceBytes) {
-      expectedSliceBytes = adjacentBytes;
-    }
-  }
-  EXPECT(plan.sliceWorkspaceBytes == expectedSliceBytes);
-  EXPECT(plan.workspaceBytes == (size_t)depth * expectedSliceBytes);
+  EXPECT(plan.registeredBytes ==
+         (size_t)depth * plan.registeredSliceBytes);
+  EXPECT(plan.totalBytes == plan.registeredBytes + plan.rawBytes);
 
   for (int temp = 0; temp < plan.tempCount; ++temp) {
     const cocclPipelineTempPlan& item = plan.temps[temp];
     EXPECT(item.alignedBytes % kCocclPipelineAlignment == 0);
     EXPECT(item.offset % kCocclPipelineAlignment == 0);
     EXPECT(item.logicalBytes <= item.alignedBytes);
-    EXPECT(item.offset + item.alignedBytes <= expectedSliceBytes);
+    if (item.storage == cocclPipelineRawRing) {
+      EXPECT(item.offset + 2 * item.alignedBytes <= plan.rawBytes);
+    } else {
+      EXPECT(item.offset + item.alignedBytes <=
+             plan.registeredSliceBytes);
+    }
     if (temp == 0) continue;
     const cocclPipelineTempPlan& previous = plan.temps[temp - 1];
-    EXPECT(!rangesOverlap(previous.offset, previous.alignedBytes,
-                          item.offset, item.alignedBytes));
+    if (previous.storage == item.storage) {
+      EXPECT(!rangesOverlap(previous.offset, previous.alignedBytes,
+                            item.offset, item.alignedBytes));
+    }
   }
 }
 
 void checkSyntheticLayouts() {
   cocclPipelinePlan single = {};
   single.tempCount = 1;
+  single.inputStagingTemp = -1;
+  single.outputStagingTemp = -1;
   single.temps[0].logicalBytes = 1024;
   single.temps[0].alignedBytes = 1024;
-  EXPECT(cocclPlanUnifiedWorkspace(&single, 4) == ncclSuccess);
+  EXPECT(cocclPlanPipelineWorkspace(&single, 4) == ncclSuccess);
   checkLayout(single, 4);
-  EXPECT(single.sliceWorkspaceBytes == 1024);
+  EXPECT(single.workspaceKind == cocclPipelineWorkspaceUnified);
+  EXPECT(single.registeredSliceBytes == 1024);
+  EXPECT(single.totalBytes == 4096);
 
   const size_t sizes[] = {1024, 256, 2048, 512};
   cocclPipelinePlan varying = {};
   varying.tempCount = 4;
+  varying.inputStagingTemp = -1;
+  varying.outputStagingTemp = -1;
   for (int temp = 0; temp < varying.tempCount; ++temp) {
     varying.temps[temp].logicalBytes = sizes[temp];
     varying.temps[temp].alignedBytes = sizes[temp];
   }
-  EXPECT(cocclPlanUnifiedWorkspace(&varying, 3) == ncclSuccess);
+  EXPECT(cocclPlanPipelineWorkspace(&varying, 3) == ncclSuccess);
   checkLayout(varying, 3);
-  EXPECT(varying.sliceWorkspaceBytes == 2560);
+  EXPECT(varying.workspaceKind == cocclPipelineWorkspaceUnified);
+  EXPECT(varying.registeredSliceBytes == 2560);
   EXPECT(varying.temps[0].offset == varying.temps[2].offset);
 
   cocclPipelinePlan allGather = {};
   allGather.tempCount = 3;
+  allGather.inputStagingTemp = -1;
+  allGather.outputStagingTemp = -1;
   const size_t gatheredSizes[] = {256, 1024, 1024};
   for (int temp = 0; temp < allGather.tempCount; ++temp) {
     allGather.temps[temp].logicalBytes = gatheredSizes[temp];
     allGather.temps[temp].alignedBytes = gatheredSizes[temp];
   }
-  EXPECT(cocclPlanUnifiedWorkspace(&allGather, 4) == ncclSuccess);
+  EXPECT(cocclPlanPipelineWorkspace(&allGather, 4) == ncclSuccess);
   checkLayout(allGather, 4);
-  EXPECT(allGather.sliceWorkspaceBytes == 2048);
+  EXPECT(allGather.workspaceKind == cocclPipelineWorkspaceUnified);
+  EXPECT(allGather.registeredSliceBytes == 2048);
   EXPECT(allGather.temps[0].offset == allGather.temps[2].offset);
 
   cocclPipelinePlan overflow = {};
   overflow.tempCount = 2;
+  overflow.inputStagingTemp = -1;
+  overflow.outputStagingTemp = -1;
   overflow.temps[0].alignedBytes =
       SIZE_MAX - (kCocclPipelineAlignment - 1);
   overflow.temps[1].alignedBytes = kCocclPipelineAlignment;
-  EXPECT(cocclPlanUnifiedWorkspace(&overflow, 1) == ncclInvalidArgument);
+  EXPECT(cocclPlanPipelineWorkspace(&overflow, 1) == ncclInvalidArgument);
 }
 
 cocclPipelineSpec makeSpec(const char* name, ncclComm_t comm,
@@ -107,15 +119,15 @@ cocclPipelineSpec makeSpec(const char* name, ncclComm_t comm,
 }
 
 void checkRecipe(cocclPipelineSpec* spec, int depth, int expectedTemps,
+                 cocclPipelineWorkspaceKind expectedKind,
                  size_t expectedWorkspaceBytes) {
   cocclPipelineContext context = {};
   EXPECT(cocclPreparePipeline(spec, depth, &context) == ncclSuccess);
   EXPECT(context.depth == depth);
   EXPECT(context.plan.tempCount == expectedTemps);
   checkLayout(context.plan, depth);
-  if (expectedWorkspaceBytes != 0) {
-    EXPECT(context.plan.workspaceBytes == expectedWorkspaceBytes);
-  }
+  EXPECT(context.plan.workspaceKind == expectedKind);
+  EXPECT(context.plan.totalBytes == expectedWorkspaceBytes);
 }
 
 void checkRecipes() {
@@ -134,7 +146,8 @@ void checkRecipes() {
   cocclPipelineSpec allToAll = makeSpec(
       "alltoall", &owner, allToAllStages, 3, rawBytes, 4,
       cocclOperation::AllToAll);
-  checkRecipe(&allToAll, 4, 4, 2 * rawBytes);
+  checkRecipe(&allToAll, 4, 4, cocclPipelineWorkspaceUnified,
+              2 * rawBytes);
 
   const cocclPipelineStage allGatherStages[] = {
       cocclPipelineCompress(), cocclPipelineAllGather(&owner),
@@ -142,7 +155,8 @@ void checkRecipes() {
   cocclPipelineSpec allGather = makeSpec(
       "allgather", &owner, allGatherStages, 3, rawBytes / 4, 1,
       cocclOperation::AllGather);
-  checkRecipe(&allGather, 4, 3, 2 * rawBytes);
+  checkRecipe(&allGather, 4, 3, cocclPipelineWorkspaceSplit,
+              7 * rawBytes / 4);
 
   const cocclPipelineStage reduceScatterOneShotStages[] = {
       cocclPipelineCompress(), cocclPipelineAllToAll(&owner),
@@ -150,7 +164,8 @@ void checkRecipes() {
   cocclPipelineSpec reduceScatterOneShot = makeSpec(
       "reducescatter-oneshot", &owner, reduceScatterOneShotStages, 3,
       rawBytes, 4, cocclOperation::ReduceScatter);
-  checkRecipe(&reduceScatterOneShot, 4, 3, 2 * rawBytes);
+  checkRecipe(&reduceScatterOneShot, 4, 3,
+              cocclPipelineWorkspaceUnified, 2 * rawBytes);
 
   const cocclPipelineStage reduceScatterTwoShotStages[] = {
       cocclPipelineCompress(), cocclPipelineAllToAll(&intra),
@@ -159,7 +174,8 @@ void checkRecipes() {
   cocclPipelineSpec reduceScatterTwoShot = makeSpec(
       "reducescatter-twoshot", &owner, reduceScatterTwoShotStages, 5,
       rawBytes, 4, cocclOperation::ReduceScatter);
-  checkRecipe(&reduceScatterTwoShot, 4, 5, 2 * rawBytes);
+  checkRecipe(&reduceScatterTwoShot, 4, 5,
+              cocclPipelineWorkspaceUnified, 2 * rawBytes);
 
   const cocclPipelineStage allReduceOneShotStages[] = {
       cocclPipelineCompress(), cocclPipelineAllGather(&owner),
@@ -167,7 +183,8 @@ void checkRecipes() {
   cocclPipelineSpec allReduceOneShot = makeSpec(
       "allreduce-oneshot", &owner, allReduceOneShotStages, 3,
       oneShotBytes, 4, cocclOperation::AllReduce);
-  checkRecipe(&allReduceOneShot, 1, 2, 0);
+  checkRecipe(&allReduceOneShot, 1, 2,
+              cocclPipelineWorkspaceUnified, 5 * oneShotBytes);
 
   const cocclPipelineStage allReduceTwoShotStages[] = {
       cocclPipelineCompress(), cocclPipelineAllToAll(&owner),
@@ -176,7 +193,8 @@ void checkRecipes() {
   cocclPipelineSpec allReduceTwoShot = makeSpec(
       "allreduce-twoshot", &owner, allReduceTwoShotStages, 5,
       rawBytes, 4, cocclOperation::AllReduce);
-  checkRecipe(&allReduceTwoShot, 4, 6, 2 * rawBytes);
+  checkRecipe(&allReduceTwoShot, 4, 6,
+              cocclPipelineWorkspaceUnified, 2 * rawBytes);
 
   const cocclPipelineStage allReduceTripleShotStages[] = {
       cocclPipelineCompress(), cocclPipelineAllToAll(&intra),
@@ -186,7 +204,8 @@ void checkRecipes() {
   cocclPipelineSpec allReduceTripleShot = makeSpec(
       "allreduce-tripleshot", &owner, allReduceTripleShotStages, 7,
       rawBytes, 4, cocclOperation::AllReduce);
-  checkRecipe(&allReduceTripleShot, 4, 8, 2 * rawBytes);
+  checkRecipe(&allReduceTripleShot, 4, 8,
+              cocclPipelineWorkspaceUnified, 2 * rawBytes);
 }
 
 }  // namespace
