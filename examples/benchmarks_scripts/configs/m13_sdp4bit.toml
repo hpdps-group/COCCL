@@ -1,0 +1,17 @@
+schema_version = 2
+
+[runtime]
+mode = "normal"
+compression_threshold_bytes = 0
+
+[compressor_plugins]
+compressors = ["sdp4bit"]
+library_path = "../../../build/obj/device/compress/libcompress"
+
+[normal.sendrecv]
+compressor = "sdp4bit"
+
+[normal.sendrecv.config.default]
+groupCount = 128
+quantBits = 4
+quantType = "Symmetric"

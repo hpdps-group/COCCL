@@ -82,6 +82,8 @@ std::map<std::string, LoadedPlugin> loadedPlugins;
 std::vector<std::unique_ptr<CompressorPolicy>> ownedPolicies;
 std::array<CompressorPolicy*, kOperationCount> defaultPolicies = {};
 std::array<CompressorPolicy*, kOperationCount> hierarchicalPolicies = {};
+std::array<CompressorPolicy*, kOperationCount> forwardPolicies = {};
+std::array<CompressorPolicy*, kOperationCount> backwardPolicies = {};
 
 class ConfigViewStorage {
  public:
@@ -226,13 +228,30 @@ ncclResult_t createPolicy(const cocclCompressorPolicyEntry& configured,
 
 ncclResult_t installPolicy(cocclOperation operation,
                            const cocclPrimitivePolicy& configured,
+                           cocclPolicyVariant variant,
                            bool hierarchical) {
   if (configured.compressor.name.empty()) return ncclSuccess;
   const size_t index = static_cast<size_t>(operation);
+  CompressorPolicy** policy = nullptr;
+  switch (variant) {
+    case cocclPolicyVariant::Default:
+      policy = &defaultPolicies[index];
+      break;
+    case cocclPolicyVariant::Forward:
+      policy = &forwardPolicies[index];
+      break;
+    case cocclPolicyVariant::Backward:
+      policy = &backwardPolicies[index];
+      break;
+    case cocclPolicyVariant::Hierarchical:
+      return ncclInvalidUsage;
+  }
   NCCLCHECK(createPolicy(configured.compressor, cocclCompressorConfigDefault,
-                         &defaultPolicies[index]));
-  defaultPolicies[index]->thresholdBytes = configured.thresholdBytes;
-  hierarchicalPolicies[index] = defaultPolicies[index];
+                         policy));
+  (*policy)->thresholdBytes = configured.thresholdBytes;
+  if (variant != cocclPolicyVariant::Default) return ncclSuccess;
+
+  hierarchicalPolicies[index] = *policy;
   if (hierarchical && configured.compressor.hasHierarchicalConfig) {
     NCCLCHECK(createPolicy(configured.compressor,
                            cocclCompressorConfigHierarchical,
@@ -248,18 +267,32 @@ ncclResult_t initializeRuntime(const ncclComm_t comm,
   runtimeNodes = comm->nNodes;
   runtimeDevicesPerNode = comm->localRanks;
   NCCLCHECK(loadPlugins(config));
-  if (config.runtime.mode != cocclRuntimeMode::Normal) return ncclSuccess;
-
-  NCCLCHECK(installPolicy(cocclOperation::AllToAll,
-                          config.normal.allToAll, false));
-  NCCLCHECK(installPolicy(cocclOperation::AllGather,
-                          config.normal.allGather, false));
-  NCCLCHECK(installPolicy(cocclOperation::AllReduce,
-                          config.normal.allReduce, true));
-  NCCLCHECK(installPolicy(cocclOperation::ReduceScatter,
-                          config.normal.reduceScatter, true));
-  NCCLCHECK(installPolicy(cocclOperation::SendRecv,
-                          config.normal.sendRecv, false));
+  if (config.runtime.mode == cocclRuntimeMode::Normal) {
+    NCCLCHECK(installPolicy(cocclOperation::AllToAll,
+                            config.normal.allToAll,
+                            cocclPolicyVariant::Default, false));
+    NCCLCHECK(installPolicy(cocclOperation::AllGather,
+                            config.normal.allGather,
+                            cocclPolicyVariant::Default, false));
+    NCCLCHECK(installPolicy(cocclOperation::AllReduce,
+                            config.normal.allReduce,
+                            cocclPolicyVariant::Default, true));
+    NCCLCHECK(installPolicy(cocclOperation::ReduceScatter,
+                            config.normal.reduceScatter,
+                            cocclPolicyVariant::Default, true));
+    NCCLCHECK(installPolicy(cocclOperation::SendRecv,
+                            config.normal.sendRecv,
+                            cocclPolicyVariant::Default, false));
+  } else {
+    NCCLCHECK(installPolicy(
+        cocclOperation::SendRecv,
+        config.trainingPolicies.pipelineSendRecvForward,
+        cocclPolicyVariant::Forward, false));
+    NCCLCHECK(installPolicy(
+        cocclOperation::SendRecv,
+        config.trainingPolicies.pipelineSendRecvBackward,
+        cocclPolicyVariant::Backward, false));
+  }
 
   CompEnableThreshold = config.runtime.compressionThresholdBytes;
   enableAllToAllComp = defaultPolicies[static_cast<size_t>(
@@ -270,8 +303,10 @@ ncclResult_t initializeRuntime(const ncclComm_t comm,
       cocclOperation::AllReduce)] != nullptr;
   enableReduceScatterComp = defaultPolicies[static_cast<size_t>(
       cocclOperation::ReduceScatter)] != nullptr;
-  enableSendRecvComp = defaultPolicies[static_cast<size_t>(
-      cocclOperation::SendRecv)] != nullptr;
+  const size_t sendRecv = static_cast<size_t>(cocclOperation::SendRecv);
+  enableSendRecvComp = defaultPolicies[sendRecv] != nullptr ||
+      forwardPolicies[sendRecv] != nullptr ||
+      backwardPolicies[sendRecv] != nullptr;
   return ncclSuccess;
 }
 
@@ -483,6 +518,10 @@ ncclResult_t cocclResolveCompressorPolicy(
     policy = defaultPolicies[index];
   } else if (key.variant == cocclPolicyVariant::Hierarchical) {
     policy = hierarchicalPolicies[index];
+  } else if (key.variant == cocclPolicyVariant::Forward) {
+    policy = forwardPolicies[index];
+  } else if (key.variant == cocclPolicyVariant::Backward) {
+    policy = backwardPolicies[index];
   }
   if (policy == nullptr) return ncclInvalidUsage;
   resolved->compressor = policy;
@@ -512,6 +551,49 @@ bool cocclCompressorPolicySupports(
   const CompressorPolicy* policy =
       static_cast<const CompressorPolicy*>(resolved.compressor);
   return (policy->plugin->capabilities & (uint64_t)capability) != 0;
+}
+
+bool cocclCompressorSupports(
+    void* compressor, cocclCompressorCapability capability) {
+  const CompressorPolicy* policy = static_cast<CompressorPolicy*>(compressor);
+  return policy != nullptr &&
+      (policy->plugin->capabilities & (uint64_t)capability) != 0;
+}
+
+ncclResult_t ncclCompress(
+    void* compressor, const cocclCompressorView& input,
+    cocclCompressorView* output, int rank, cudaStream_t stream) {
+  CompressorPolicy* policy = static_cast<CompressorPolicy*>(compressor);
+  if (policy == nullptr || output == nullptr) return ncclInvalidArgument;
+  cocclCompressorCall call = {
+      sizeof(cocclCompressorCall), cocclCompressorOperationCompress,
+      input, output, rank, 0, input.datatype, input.elements,
+      nullptr, nullptr};
+  NCCLCHECK(execute(policy, &call, rank, stream));
+  return validateEncodedOutput(*output, input.chunks);
+}
+
+ncclResult_t ncclDecompress(
+    void* compressor, const cocclCompressorView& input,
+    cocclCompressorView* output, cudaStream_t stream) {
+  if (output == nullptr) return ncclInvalidArgument;
+  if (input.datatype == COCCL_COMPRESSOR_RAW_PASSTHROUGH) {
+    if (input.bytes != output->capacityBytes) return ncclInvalidUsage;
+    CUDACHECK(cudaMemcpyAsync(output->data, input.data, input.bytes,
+                              cudaMemcpyDeviceToDevice, stream));
+    output->bytes = input.bytes;
+    return ncclSuccess;
+  }
+  CompressorPolicy* policy = static_cast<CompressorPolicy*>(compressor);
+  if (policy == nullptr) return ncclInvalidArgument;
+  int cudaDev = 0;
+  CUDACHECK(cudaGetDevice(&cudaDev));
+  const int rank = rankForDevice(cudaDev);
+  cocclCompressorCall call = {
+      sizeof(cocclCompressorCall), cocclCompressorOperationDecompress,
+      input, output, rank, 0, output->datatype, output->elements,
+      nullptr, nullptr};
+  return execute(policy, &call, rank, stream);
 }
 
 ncclResult_t ncclCompressInit(const ncclComm_t comm) {

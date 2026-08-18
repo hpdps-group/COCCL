@@ -1,0 +1,15 @@
+schema_version = 2
+
+[runtime]
+mode = "normal"
+compression_threshold_bytes = 0
+
+[compressor_plugins]
+compressors = ["zfp"]
+library_path = "../../../build/obj/device/compress/libcompress"
+
+[normal.sendrecv]
+compressor = "zfp"
+
+[normal.sendrecv.config.default]
+rate = 8

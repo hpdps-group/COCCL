@@ -130,6 +130,13 @@ ncclResult_t cocclGroupEnqueue(const cocclPreparedCall* prepared) {
   return ncclSuccess;
 }
 
+ncclResult_t cocclGroupEnqueueNative(const cocclInfo* info) {
+  cocclPreparedCall pending;
+  pending.info = *info;
+  grouped.push_back(pending);
+  return ncclSuccess;
+}
+
 ncclResult_t cocclExecuteAllGather(const cocclPreparedCall*) {
   ++compressedCalls;
   return ncclSuccess;
@@ -149,6 +156,11 @@ ncclResult_t cocclExecuteReduceScatter(const cocclPreparedCall* prepared) {
 ncclResult_t cocclExecuteAllReduce(const cocclPreparedCall* prepared) {
   ++compressedCalls;
   executedAlgorithm = prepared->algorithm;
+  return ncclSuccess;
+}
+
+ncclResult_t cocclExecuteSendRecv(const cocclPreparedCall*) {
+  ++compressedCalls;
   return ncclSuccess;
 }
 
@@ -187,6 +199,20 @@ ncclResult_t ncclAllToAll(
   bool enqueued = true;
   EXPECT(cocclEnqueueCheck(&nested, &enqueued) == ncclSuccess);
   EXPECT(!enqueued);
+  return ncclSuccess;
+}
+
+ncclResult_t ncclSend(
+    const void*, size_t, ncclDataType_t, int, ncclComm_t,
+    cudaStream_t) {
+  ++nativeCalls;
+  return ncclSuccess;
+}
+
+ncclResult_t ncclRecv(
+    void*, size_t, ncclDataType_t, int, ncclComm_t,
+    cudaStream_t) {
+  ++nativeCalls;
   return ncclSuccess;
 }
 
@@ -244,6 +270,21 @@ int main() {
   EXPECT(cocclEnqueueCheck(&info, &enqueued) == ncclSuccess);
   ncclGroupDepth = 0;
   EXPECT(enqueued && grouped.size() == 1 && compressedCalls == 0);
+
+  reset();
+  cocclInfo send;
+  send.sendbuff = reinterpret_cast<void*>(0x3000);
+  send.count = 1024;
+  send.datatype = ncclFloat32;
+  send.peer = 1;
+  send.func = ncclFuncSend;
+  send.operation = cocclOperation::SendRecv;
+  send.comm = &comm;
+  thresholdBytes = std::numeric_limits<size_t>::max();
+  ncclGroupDepth = 1;
+  EXPECT(cocclEnqueueCheck(&send, &enqueued) == ncclSuccess);
+  ncclGroupDepth = 0;
+  EXPECT(enqueued && grouped.size() == 1 && grouped[0].compressor == nullptr);
 
   reset();
   cocclInfo reduction = allToAllInfo(&comm);

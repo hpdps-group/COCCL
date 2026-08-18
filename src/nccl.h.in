@@ -458,14 +458,9 @@ ncclResult_t  ncclSend(const void* sendbuff, size_t count, ncclDataType_t dataty
 ncclResult_t pncclSend(const void* sendbuff, size_t count, ncclDataType_t datatype, int peer,
     ncclComm_t comm, cudaStream_t stream);
 
-ncclResult_t ncclSendComp(const void* sendbuff, size_t count, ncclDataType_t datatype, int peer,
+ncclResult_t cocclSendComp(const void* sendbuff, size_t count, ncclDataType_t datatype, int peer,
   ncclComm_t comm, cudaStream_t stream);
-ncclResult_t pncclSendComp(const void* sendbuff, size_t count, ncclDataType_t datatype, int peer,
-    ncclComm_t comm, cudaStream_t stream);
-
-ncclResult_t ncclSendNaive(const void* sendbuff, size_t count, ncclDataType_t datatype, int peer,
-  ncclComm_t comm, cudaStream_t stream);
-ncclResult_t pncclSendNaive(const void* sendbuff, size_t count, ncclDataType_t datatype, int peer,
+ncclResult_t pcocclSendComp(const void* sendbuff, size_t count, ncclDataType_t datatype, int peer,
     ncclComm_t comm, cudaStream_t stream);
 
 /*
@@ -487,14 +482,9 @@ ncclResult_t  ncclRecv(void* recvbuff, size_t count, ncclDataType_t datatype, in
 
 
 
-ncclResult_t pncclRecvDecomp(void* recvbuff, size_t count, ncclDataType_t datatype, int peer,
+ncclResult_t pcocclRecvDecomp(void* recvbuff, size_t count, ncclDataType_t datatype, int peer,
     ncclComm_t comm, cudaStream_t stream);
-ncclResult_t  ncclRecvDecomp(void* recvbuff, size_t count, ncclDataType_t datatype, int peer,
-    ncclComm_t comm, cudaStream_t stream);
-
-ncclResult_t pncclRecvNaive(void* recvbuff, size_t count, ncclDataType_t datatype, int peer,
-    ncclComm_t comm, cudaStream_t stream);
-ncclResult_t  ncclRecvNaive(void* recvbuff, size_t count, ncclDataType_t datatype, int peer,
+ncclResult_t  cocclRecvDecomp(void* recvbuff, size_t count, ncclDataType_t datatype, int peer,
     ncclComm_t comm, cudaStream_t stream);
 
 

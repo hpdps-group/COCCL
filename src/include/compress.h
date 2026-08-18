@@ -29,6 +29,15 @@ ncclResult_t cocclGetCompressorEncodedSizeBound(
     size_t* encodedBytes);
 bool cocclCompressorPolicySupports(
     cocclPolicyKey key, cocclCompressorCapability capability);
+bool cocclCompressorSupports(
+    void* compressor, cocclCompressorCapability capability);
+
+ncclResult_t ncclCompress(
+    void* compressor, const cocclCompressorView& input,
+    cocclCompressorView* output, int rank, cudaStream_t stream);
+ncclResult_t ncclDecompress(
+    void* compressor, const cocclCompressorView& input,
+    cocclCompressorView* output, cudaStream_t stream);
 
 
 ncclResult_t ncclCompress(const void* orgbuff, void** compbuff, const size_t orgChunkCount, ncclDataType_t orgDayatype,

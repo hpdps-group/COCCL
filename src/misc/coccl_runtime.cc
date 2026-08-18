@@ -7,6 +7,7 @@
 #include "coccl_group_internal.h"
 #include "coccl_prepared_call.h"
 #include "coccl_reducescatter.h"
+#include "coccl_sendrecv.h"
 #include "collectives.h"
 #include "comm.h"
 #include "compress.h"
@@ -29,9 +30,15 @@ bool datatypeSupported(ncclDataType_t datatype) {
 
 bool shapeSupported(const cocclInfo& info,
                     const cocclOperationDescriptor& descriptor) {
-  if (info.count == 0 || info.sendbuff == nullptr || info.recvbuff == nullptr) {
+  if (info.count == 0) {
     return false;
   }
+  if (info.operation == cocclOperation::SendRecv) {
+    return info.func == ncclFuncSend
+        ? info.sendbuff != nullptr
+        : info.func == ncclFuncRecv && info.recvbuff != nullptr;
+  }
+  if (info.sendbuff == nullptr || info.recvbuff == nullptr) return false;
   return !cocclOperationHasTrait(
              &descriptor, cocclOperationTraitCountDivisibleByRanks) ||
       info.count % (size_t)info.comm->nRanks == 0;
@@ -104,11 +111,26 @@ bool hierarchicalAlgorithm(cocclAlgorithmKind algorithm) {
       algorithm == cocclAlgorithmAllReduceTripleShot;
 }
 
+bool sendRecvForward(const cocclInfo& info) {
+  return info.func == ncclFuncSend
+      ? info.comm->rank < info.peer
+      : info.comm->rank > info.peer;
+}
+
+cocclPolicyKey preparedPolicy(const cocclPreparedCall& prepared) {
+  if (prepared.info.operation == cocclOperation::SendRecv &&
+      cocclGetConfig().runtime.mode == cocclRuntimeMode::Training) {
+    return cocclDirectionalPolicy(cocclOperation::SendRecv,
+                                  sendRecvForward(prepared.info));
+  }
+  return hierarchicalAlgorithm(prepared.algorithm)
+      ? cocclHierarchicalPolicy(prepared.info.operation)
+      : cocclDefaultPolicy(prepared.info.operation);
+}
+
 ncclResult_t resolvePreparedCompressor(
     cocclPreparedCall* prepared, cocclResolvedCompressorPolicy* resolved) {
-  prepared->policy = hierarchicalAlgorithm(prepared->algorithm)
-      ? cocclHierarchicalPolicy(prepared->info.operation)
-      : cocclDefaultPolicy(prepared->info.operation);
+  prepared->policy = preparedPolicy(*prepared);
   NCCLCHECK(cocclResolveCompressorPolicy(prepared->policy, resolved));
   prepared->compressor = resolved->compressor;
   return ncclSuccess;
@@ -126,6 +148,16 @@ bool callSupported(const cocclInfo& info,
   return shapeSupported(info, descriptor);
 }
 
+ncclResult_t routeNativeGroupedSendRecv(
+    const cocclInfo& info, bool* isEnqueued) {
+  if (ncclGroupDepth == 0 || info.operation != cocclOperation::SendRecv) {
+    return ncclSuccess;
+  }
+  NCCLCHECK(cocclGroupEnqueueNative(&info));
+  *isEnqueued = true;
+  return ncclSuccess;
+}
+
 }  // namespace
 
 ncclResult_t cocclEnqueueCheck(const cocclInfo* info, bool* isEnqueued) {
@@ -140,11 +172,13 @@ ncclResult_t cocclEnqueueCheck(const cocclInfo* info, bool* isEnqueued) {
   const cocclOperationDescriptor* descriptor =
       cocclGetOperationDescriptor(info->operation);
   if (descriptor == nullptr || !callSupported(*info, *descriptor)) {
-    return ncclSuccess;
+    return routeNativeGroupedSendRecv(*info, isEnqueued);
   }
 
   size_t bytes = 0;
-  if (!totalBytes(*info, *descriptor, &bytes)) return ncclSuccess;
+  if (!totalBytes(*info, *descriptor, &bytes)) {
+    return routeNativeGroupedSendRecv(*info, isEnqueued);
+  }
 
   cocclPreparedCall prepared;
   prepared.info = *info;
@@ -152,9 +186,11 @@ ncclResult_t cocclEnqueueCheck(const cocclInfo* info, bool* isEnqueued) {
   prepared.algorithm = selectAlgorithm(*info);
   cocclResolvedCompressorPolicy resolved;
   if (resolvePreparedCompressor(&prepared, &resolved) != ncclSuccess) {
-    return ncclSuccess;
+    return routeNativeGroupedSendRecv(*info, isEnqueued);
   }
-  if (bytes <= resolved.thresholdBytes) return ncclSuccess;
+  if (bytes <= resolved.thresholdBytes) {
+    return routeNativeGroupedSendRecv(*info, isEnqueued);
+  }
 
   NCCLCHECK(cocclEnqueuePreparedCall(&prepared));
   *isEnqueued = true;
@@ -211,6 +247,13 @@ ncclResult_t cocclReplayNativeCall(const cocclInfo& info) {
       result = ncclAllToAll(info.sendbuff, info.recvbuff, info.count,
                             info.datatype, info.comm, info.stream);
       break;
+    case cocclOperation::SendRecv:
+      result = info.func == ncclFuncSend
+          ? ncclSend(info.sendbuff, info.count, info.datatype, info.peer,
+                     info.comm, info.stream)
+          : ncclRecv(info.recvbuff, info.count, info.datatype, info.peer,
+                     info.comm, info.stream);
+      break;
     default:
       break;
   }
@@ -242,6 +285,9 @@ ncclResult_t cocclExecutePreparedCall(const cocclPreparedCall* prepared) {
       break;
     case cocclOperation::AllReduce:
       result = cocclExecuteAllReduce(prepared);
+      break;
+    case cocclOperation::SendRecv:
+      result = cocclExecuteSendRecv(prepared);
       break;
     default:
       break;

@@ -71,7 +71,7 @@ endif
 .PHONY: build clean m1-host-tests m1-plugin-load-test m2-host-tests \
 	m3-host-tests m4-host-tests m5-host-tests m5-layout-test m6-host-tests \
 	m7-host-tests m8-host-tests m9-host-tests m10-host-tests m11-host-tests \
-	m12-host-tests
+	m12-host-tests m13-host-tests
 
 BUILDDIR ?= ../build
 ifneq ($(NCCL_HOME), "")
@@ -132,6 +132,12 @@ M11_SIZE_QUERY_TEST := $(DST_DIR)/coccl_m11_size_query_test
 M11_WORKSPACE_TEST := $(DST_DIR)/coccl_m11_workspace_test
 M11_SIZE_QUERY_STUB := coccl_m11_size_query_stub.cc
 M12_INPLACE_PLAN_TEST := $(DST_DIR)/coccl_m12_inplace_plan_test
+M13_FRAME_EXCHANGE_TEST := $(DST_DIR)/coccl_m13_frame_exchange_test
+M13_GROUP_BATCH_TEST := $(DST_DIR)/coccl_m13_group_batch_test
+
+m13-host-tests: $(M13_FRAME_EXCHANGE_TEST) $(M13_GROUP_BATCH_TEST)
+	$(M13_FRAME_EXCHANGE_TEST)
+	$(M13_GROUP_BATCH_TEST)
 
 m12-host-tests: $(M12_INPLACE_PLAN_TEST)
 	$(M12_INPLACE_PLAN_TEST)
@@ -231,6 +237,18 @@ $(M11_WORKSPACE_TEST): coccl_m11_workspace_test.cc \
 
 $(M12_INPLACE_PLAN_TEST): coccl_m12_inplace_plan_test.cc \
 		$(COCCL_SRC)/misc/coccl_pipeline_plan.cc $(M11_SIZE_QUERY_STUB)
+	@printf "Linking  %-35s > %s\n" $< $@
+	@mkdir -p $(DST_DIR)
+	$(CXX) $(M1_CXXFLAGS) $(COCCL_INC) -I$(COCCL_SRC) -o $@ $^
+
+$(M13_FRAME_EXCHANGE_TEST): coccl_m13_frame_exchange_test.cc \
+		$(COCCL_SRC)/misc/coccl_frame_exchange.cc
+	@printf "Linking  %-35s > %s\n" $< $@
+	@mkdir -p $(DST_DIR)
+	$(CXX) $(M1_CXXFLAGS) $(COCCL_INC) -I$(COCCL_SRC) -o $@ $^
+
+$(M13_GROUP_BATCH_TEST): coccl_m13_group_batch_test.cc \
+		$(COCCL_SRC)/misc/coccl_group.cc
 	@printf "Linking  %-35s > %s\n" $< $@
 	@mkdir -p $(DST_DIR)
 	$(CXX) $(M1_CXXFLAGS) $(COCCL_INC) -I$(COCCL_SRC) -o $@ $^

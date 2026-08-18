@@ -38,6 +38,11 @@ ncclResult_t cocclReplayNativeCall(const cocclInfo& info) {
   return ncclSuccess;
 }
 
+ncclResult_t cocclExecuteSendRecvBatch(
+    const cocclPreparedCall*, size_t) {
+  return ncclSuccess;
+}
+
 int main() {
   cocclPreparedCall first = call(cocclOperation::AllGather);
   cocclPreparedCall second = call(cocclOperation::AllToAll);
