@@ -284,7 +284,7 @@ __device__ __forceinline__ __nv_bfloat16 type_cast(__nv_bfloat16 val){
 
 template<typename T, unsigned int blockDimY>
 __device__ void
-block_y_reduce(volatile float sdata[][blockDimY], unsigned int tidx, unsigned int tidy) {
+block_y_reduce(volatile T sdata[][blockDimY], unsigned int tidx, unsigned int tidy) {
     if (blockDimY >= 32) {
         if (tidy < 16) { sdata[tidx][tidy] = sdata[tidx][tidy] + sdata[tidx][tidy + 16]; }
         __syncthreads();
@@ -328,11 +328,67 @@ __global__ void reduceChunk(const void *input, int chunkCount, int numChunks, vo
     sdata[tidx][tidy] = sum;
     __syncthreads();
 
-    block_y_reduce<T, blockDimY>(sdata, tidx, tidy);
+    block_y_reduce<float, blockDimY>(sdata, tidx, tidy);
 
     // write to global memory
     if (tidy == 0 && idx < chunkCount) {
         outputbuff[idx] = type_cast<T>(sdata[tidx][tidy]);
+    }
+}
+
+template<unsigned int blockDimX, unsigned int blockDimY, typename T>
+__global__ void reduceChunkInteger(
+    const void* input, int chunkCount, int numChunks, void* output) {
+    __shared__ T sdata[blockDimX][blockDimY];
+    const T* inputbuff = static_cast<const T*>(input);
+    T* outputbuff = static_cast<T*>(output);
+
+    const unsigned int tidx = threadIdx.x;
+    const unsigned int tidy = threadIdx.y;
+    const unsigned int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    const unsigned int idy = blockIdx.y * blockDim.y + threadIdx.y;
+
+    T sum = 0;
+    for (int i = idy; i < numChunks && idx < chunkCount;
+         i += blockDim.y) {
+        sum += inputbuff[chunkCount * i + idx];
+    }
+    sdata[tidx][tidy] = sum;
+    __syncthreads();
+
+    block_y_reduce<T, blockDimY>(sdata, tidx, tidy);
+    if (tidy == 0 && idx < chunkCount) outputbuff[idx] = sdata[tidx][0];
+}
+
+template<typename T>
+void launchIntegerReduceChunk(
+    const void* input, size_t chunkCount, void* output, int numChunks,
+    cudaStream_t stream) {
+    if (numChunks <= 4) {
+        dim3 grid(DIVUP(chunkCount, 512), 1);
+        dim3 block(512, 2);
+        reduceChunkInteger<512, 2, T><<<grid, block, 0, stream>>>(
+            input, chunkCount, numChunks, output);
+    } else if (numChunks <= 8) {
+        dim3 grid(DIVUP(chunkCount, 256), 1);
+        dim3 block(256, 4);
+        reduceChunkInteger<256, 4, T><<<grid, block, 0, stream>>>(
+            input, chunkCount, numChunks, output);
+    } else if (numChunks <= 16) {
+        dim3 grid(DIVUP(chunkCount, 128), 1);
+        dim3 block(128, 8);
+        reduceChunkInteger<128, 8, T><<<grid, block, 0, stream>>>(
+            input, chunkCount, numChunks, output);
+    } else if (numChunks <= 32) {
+        dim3 grid(DIVUP(chunkCount, 64), 1);
+        dim3 block(64, 16);
+        reduceChunkInteger<64, 16, T><<<grid, block, 0, stream>>>(
+            input, chunkCount, numChunks, output);
+    } else {
+        dim3 grid(DIVUP(chunkCount, 32), 1);
+        dim3 block(32, 32);
+        reduceChunkInteger<32, 32, T><<<grid, block, 0, stream>>>(
+            input, chunkCount, numChunks, output);
     }
 }
 
@@ -373,7 +429,16 @@ ncclResult_t launchReductionColl(const void* input1, const void* input2, void* o
 
 ncclResult_t launchReduceChunk(const void* input, size_t chunkCount, void* output, ncclDataType_t datatype, int numChunks, 
     cudaStream_t stream){
-    if(datatype == ncclDataType_t::ncclFloat32){
+    if (datatype == ncclInt8) {
+        launchIntegerReduceChunk<uint8_t>(
+            input, chunkCount, output, numChunks, stream);
+    } else if (datatype == ncclInt32) {
+        launchIntegerReduceChunk<uint32_t>(
+            input, chunkCount, output, numChunks, stream);
+    } else if (datatype == ncclInt64) {
+        launchIntegerReduceChunk<uint64_t>(
+            input, chunkCount, output, numChunks, stream);
+    } else if(datatype == ncclDataType_t::ncclFloat32){
         if (numChunks <= 4) {
             dim3 grid(DIVUP(chunkCount, 512), 1);
             dim3 block(512, 2);

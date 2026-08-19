@@ -283,9 +283,12 @@ int main(int argc, char** argv) {
       dlsym(library, COCCL_COMPRESSOR_ENTRY_SYMBOL));
   const cocclCompressorPlugin* plugin = entry == nullptr ? nullptr : entry();
   char error[256] = {};
+  constexpr uint64_t requiredCapabilities =
+      cocclCompressorCapabilityFramed |
+      cocclCompressorCapabilityBytewiseLossless;
   if (!cocclValidateCompressorPlugin("dietgpu", plugin,
                                      error, sizeof(error)) ||
-      (plugin->capabilities & cocclCompressorCapabilityFramed) == 0) {
+      (plugin->capabilities & requiredCapabilities) != requiredCapabilities) {
     fprintf(stderr, "invalid dietGPU plugin: %s\n", error);
     dlclose(library);
     return 1;

@@ -72,7 +72,8 @@ endif
 	m3-host-tests m4-host-tests m5-host-tests m5-layout-test m6-host-tests \
 	m7-host-tests m8-host-tests m9-host-tests m10-host-tests m11-host-tests \
 	m12-host-tests m13-host-tests m14-host-tests m14-codec-build \
-	m15-host-tests m15-layout-test m16-correctness-build
+	m15-host-tests m15-layout-test m16-correctness-build \
+	dietgpu-integer-build
 
 BUILDDIR ?= ../build
 ifneq ($(NCCL_HOME), "")
@@ -141,6 +142,9 @@ M14_DIETGPU_CODEC_TEST := $(DST_DIR)/coccl_m14_dietgpu_codec_test
 M15_SWIZZLE_PLAN_TEST := $(DST_DIR)/coccl_m15_swizzle_plan_test
 M15_REDUCESCATTER_RECIPE_TEST := $(DST_DIR)/coccl_m15_reducescatter_recipe_test
 M16_CORRECTNESS_TEST := $(DST_DIR)/coccl_m16_correctness
+DIETGPU_INTEGER_TEST := $(DST_DIR)/coccl_dietgpu_integer_test
+
+dietgpu-integer-build: $(DIETGPU_INTEGER_TEST)
 
 m16-correctness-build: $(M16_CORRECTNESS_TEST)
 
@@ -305,6 +309,11 @@ $(M15_REDUCESCATTER_RECIPE_TEST): coccl_m15_reducescatter_recipe_test.cc \
 	$(CXX) $(M1_CXXFLAGS) $(COCCL_INC) -I$(COCCL_SRC) -o $@ $^
 
 $(M16_CORRECTNESS_TEST): coccl_m16_correctness.cu
+	@printf "Linking  %-35s > %s\n" $< $@
+	@mkdir -p $(DST_DIR)
+	$(NVCC) -o $@ $(NVCUFLAGS) $< $(NVLDFLAGS)
+
+$(DIETGPU_INTEGER_TEST): coccl_dietgpu_integer_test.cu
 	@printf "Linking  %-35s > %s\n" $< $@
 	@mkdir -p $(DST_DIR)
 	$(NVCC) -o $@ $(NVCUFLAGS) $< $(NVLDFLAGS)

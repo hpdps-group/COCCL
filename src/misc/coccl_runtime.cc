@@ -19,13 +19,24 @@ namespace {
 
 __thread bool callerGuardActive = false;
 
-bool datatypeSupported(ncclDataType_t datatype) {
+bool floatingDatatypeSupported(ncclDataType_t datatype) {
   if (datatype == ncclFloat16 || datatype == ncclFloat32) return true;
 #if defined(__CUDA_BF16_TYPES_EXIST__)
   return datatype == ncclBfloat16;
 #else
   return false;
 #endif
+}
+
+bool compressorDatatypeSupported(ncclDataType_t datatype,
+                                 void* compressor) {
+  if (floatingDatatypeSupported(datatype)) return true;
+  if (datatype != ncclInt8 && datatype != ncclInt32 &&
+      datatype != ncclInt64) {
+    return false;
+  }
+  return cocclCompressorSupports(
+      compressor, cocclCompressorCapabilityBytewiseLossless);
 }
 
 bool shapeSupported(const cocclInfo& info,
@@ -138,9 +149,7 @@ ncclResult_t resolvePreparedCompressor(
 
 bool callSupported(const cocclInfo& info,
                    const cocclOperationDescriptor& descriptor) {
-  if (info.comm->nRanks <= 1 || !datatypeSupported(info.datatype)) {
-    return false;
-  }
+  if (info.comm->nRanks <= 1) return false;
   if (cocclOperationHasTrait(&descriptor, cocclOperationTraitReduction) &&
       info.op != ncclSum) {
     return false;
@@ -188,6 +197,9 @@ ncclResult_t cocclEnqueueCheck(const cocclInfo* info, bool* isEnqueued) {
   if (resolvePreparedCompressor(&prepared, &resolved) != ncclSuccess) {
     return routeNativeGroupedSendRecv(*info, isEnqueued);
   }
+  if (!compressorDatatypeSupported(info->datatype, prepared.compressor)) {
+    return routeNativeGroupedSendRecv(*info, isEnqueued);
+  }
   if (bytes <= resolved.thresholdBytes) {
     return routeNativeGroupedSendRecv(*info, isEnqueued);
   }
@@ -216,6 +228,9 @@ ncclResult_t cocclEnqueueExplicitCall(
       ? selectAlgorithm(*info) : algorithm;
   cocclResolvedCompressorPolicy resolved;
   NCCLCHECK(resolvePreparedCompressor(&prepared, &resolved));
+  if (!compressorDatatypeSupported(info->datatype, prepared.compressor)) {
+    return cocclReplayNativeCall(*info);
+  }
   return cocclEnqueuePreparedCall(&prepared);
 }
 

@@ -611,6 +611,17 @@ struct FusedHierarchicalSwizzleTraits<
   static constexpr bool value = Compressor::kFusedHierarchicalSwizzle;
 };
 
+template <typename Compressor, typename = void>
+struct BytewiseLosslessTraits {
+  static constexpr bool value = false;
+};
+
+template <typename Compressor>
+struct BytewiseLosslessTraits<
+    Compressor, VoidT<decltype(Compressor::kBytewiseLossless)>> {
+  static constexpr bool value = Compressor::kBytewiseLossless;
+};
+
 template <typename Compressor>
 struct PluginAdapter {
   using Config = typename ConfigTraits<Compressor>::Type;
@@ -632,7 +643,9 @@ struct PluginAdapter {
         (FramedTraits<Compressor>::value
              ? cocclCompressorCapabilityFramed : 0) |
         (FusedHierarchicalSwizzleTraits<Compressor>::value
-             ? cocclCompressorCapabilityFusedHierarchicalSwizzle : 0);
+             ? cocclCompressorCapabilityFusedHierarchicalSwizzle : 0) |
+        (BytewiseLosslessTraits<Compressor>::value
+             ? cocclCompressorCapabilityBytewiseLossless : 0);
   }
 
   static Status execute(cocclCompressorCall* call) {

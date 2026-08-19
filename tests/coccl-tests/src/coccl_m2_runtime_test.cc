@@ -14,6 +14,7 @@
 namespace {
 
 bool enabled = true;
+bool bytewiseLossless = false;
 size_t thresholdBytes = 0;
 int descriptorQueries = 0;
 int policyQueries = 0;
@@ -52,6 +53,7 @@ void fail(const char* expression, int line) {
 
 void reset() {
   enabled = true;
+  bytewiseLossless = false;
   thresholdBytes = 0;
   descriptorQueries = 0;
   policyQueries = 0;
@@ -96,6 +98,12 @@ void ncclDebugLog(ncclDebugLogLevel, unsigned long, const char*, int,
 
 bool cocclCompressionEnabled() {
   return enabled;
+}
+
+bool cocclCompressorSupports(
+    void*, cocclCompressorCapability capability) {
+  return capability == cocclCompressorCapabilityBytewiseLossless &&
+      bytewiseLossless;
 }
 
 ncclResult_t cocclResolveCompressorPolicy(
@@ -234,7 +242,29 @@ int main() {
   info = allToAllInfo(&comm);
   info.datatype = ncclInt8;
   EXPECT(cocclEnqueueCheck(&info, &enqueued) == ncclSuccess);
-  EXPECT(!enqueued && policyQueries == 0);
+  EXPECT(!enqueued && policyQueries == 1);
+
+  for (ncclDataType_t datatype : {ncclInt8, ncclInt32, ncclInt64}) {
+    reset();
+    bytewiseLossless = true;
+    info = allToAllInfo(&comm);
+    info.datatype = datatype;
+    EXPECT(cocclEnqueueCheck(&info, &enqueued) == ncclSuccess);
+    EXPECT(enqueued && policyQueries == 1 && compressedCalls == 1);
+  }
+
+  reset();
+  info = allToAllInfo(&comm);
+  info.datatype = ncclInt32;
+  EXPECT(cocclEnqueueExplicitCall(&info, cocclAlgorithmNone) == ncclSuccess);
+  EXPECT(policyQueries == 1 && nativeCalls == 1 && compressedCalls == 0);
+
+  reset();
+  bytewiseLossless = true;
+  info = allToAllInfo(&comm);
+  info.datatype = ncclInt64;
+  EXPECT(cocclEnqueueExplicitCall(&info, cocclAlgorithmNone) == ncclSuccess);
+  EXPECT(policyQueries == 1 && compressedCalls == 1);
 
   reset();
   info = allToAllInfo(&comm);

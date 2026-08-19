@@ -182,6 +182,7 @@ __global__ void prepareDecodeFrames(
 struct DietGpuCompressor {
   using Config = DietGpuConfig;
   static constexpr bool kFramed = true;
+  static constexpr bool kBytewiseLossless = true;
 
   static coccl::Status configure(coccl::ConfigReader& reader,
                                  Config& config,
