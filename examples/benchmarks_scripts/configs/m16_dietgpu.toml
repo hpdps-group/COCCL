@@ -1,0 +1,45 @@
+schema_version = 2
+
+[runtime]
+mode = "normal"
+compression_threshold_bytes = 1048576
+
+[compressor_plugins]
+compressors = ["dietgpu"]
+library_path = "../../../build/obj/device/compress/libcompress"
+
+[normal.all_to_all]
+compressor = "dietgpu"
+
+[normal.all_to_all.config.default]
+probBits = 10
+
+[normal.all_gather]
+compressor = "dietgpu"
+
+[normal.all_gather.config.default]
+probBits = 10
+
+[normal.all_reduce]
+compressor = "dietgpu"
+
+[normal.all_reduce.config.default]
+probBits = 10
+
+[normal.all_reduce.config.hierarchical]
+probBits = 10
+
+[normal.reduce_scatter]
+compressor = "dietgpu"
+
+[normal.reduce_scatter.config.default]
+probBits = 10
+
+[normal.reduce_scatter.config.hierarchical]
+probBits = 10
+
+[normal.sendrecv]
+compressor = "dietgpu"
+
+[normal.sendrecv.config.default]
+probBits = 10

@@ -83,8 +83,10 @@ __global__ void cached_quantization_ht(int8_t* __restrict__ output_data,
             const int iteration = i * internal_unroll + j;
             if ((elem_offset_group + iteration * stride < elems_per_group) && 
                 (elem_offset_chunk + iteration * stride < elems_per_chunk)) {
-                hadamard_mult_thread_quant<kLogNElts, kNChunks>(iteration_cast);
-                hadamard_mult_warp_quant<kLogWarpSize, 0, kNChunks, kNElts>(iteration_cast);
+                __half* transform = iteration_cast + j * quantize::h_per_load;
+                hadamard_forward_scale_32(transform, kNElts);
+                hadamard_mult_thread_quant<kLogNElts, kNChunks>(transform);
+                hadamard_mult_warp_quant<kLogWarpSize, 0, kNChunks, kNElts>(transform);
             }
         }
     }

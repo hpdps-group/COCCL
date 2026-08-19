@@ -81,6 +81,7 @@ __global__ void swizzled_quant_kernel_ht(int8_t* quantized_data,
         __half2* iteration_buffer = local_buffer + i * quantize::h2_per_load;
         __half* iteration_cast = reinterpret_cast<__half*>(iteration_buffer);
         if (i * stride + elem_offset_group < elems_per_group) {
+            hadamard_forward_scale_32(iteration_cast, kNElts);
             hadamard_mult_thread_quant<kLogNElts, kNChunks>(iteration_cast);
             hadamard_mult_warp_quant<kLogWarpSize, 0, kNChunks, kNElts>(iteration_cast);
         }

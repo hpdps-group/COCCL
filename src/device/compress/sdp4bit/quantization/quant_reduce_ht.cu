@@ -153,17 +153,13 @@ __global__ void __launch_bounds__(1024) dequant_reduce_ht(T* reduced_data,
         T* iteration_buffer = local_buffer + i * storage_values;
         hadamard_mult_thread_quant<kLogNElts, kNChunks>(iteration_buffer);
         hadamard_mult_warp_quant<kLogWarpSize, 0, kNChunks, kNElts>(iteration_buffer);
+        hadamard_inverse_scale_32(iteration_buffer, storage_values);
     }
 
 #pragma unroll
     for (int i = 0; i < totalChunks; i++) {
         const int64_t iter_offset = (i * stride + base_offset) * (8 / numBits);
         
-        T* data = local_buffer + i * storage_values;
-#pragma unroll
-        for (int j = 0; j < storage_values; j++) {
-            data[j] *= 0.03125; // hadamard transform back scale when order = 32
-        }
         if (valid_group && (i * stride + elem_offset < elems_per_in_group) &&
             (iter_offset < elems_per_in_tensor * (8 / numBits))) {
             mem_access::store_global<16>(

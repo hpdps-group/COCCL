@@ -312,7 +312,7 @@ DS_D_INLINE void _to_global_ht(T* global_output,
             T* iteration_cast = local_dequant_buffer + i * T_per_chunk;
             hadamard_mult_thread_quant<kLogNElts, kNChunks>(iteration_cast);
             hadamard_mult_warp_quant<kLogWarpSize, 0, kNChunks, kNElts>(iteration_cast);
-            for (int j = 0; j < T_per_chunk; j++) iteration_cast[j] *= 0.03125;
+            hadamard_inverse_scale_32(iteration_cast, T_per_chunk);
             mem_access::store_global<granularity>(global_output + elem_id_iter_true,
                                                   local_dequant_buffer + i * T_per_chunk);
         }

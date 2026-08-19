@@ -245,6 +245,24 @@ __device__ __forceinline__ void hadamard_mult_warp_quant(__nv_bfloat16 x[kNChunk
     }
 }
 
+// FP16 cannot safely hold a sum-domain Hadamard coefficient during a
+// multi-rank reduction. Encode FP16 with H/32 and decode it with H; the other
+// datatypes retain the original H encode and H/32 decode convention.
+__device__ __forceinline__ void hadamard_forward_scale_32(__half* values,
+                                                           int count) {
+    #pragma unroll
+    for (int i = 0; i < count; ++i) values[i] *= 0.03125f;
+}
+
+template <typename T>
+__device__ __forceinline__ void hadamard_inverse_scale_32(T* values,
+                                                           int count) {
+    #pragma unroll
+    for (int i = 0; i < count; ++i) values[i] *= 0.03125f;
+}
+
+__device__ __forceinline__ void hadamard_inverse_scale_32(__half*, int) {}
+
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 
 template <int kNChunks, int kNElts, typename input_t>

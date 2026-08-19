@@ -1,0 +1,73 @@
+schema_version = 2
+
+[runtime]
+mode = "normal"
+compression_threshold_bytes = 1048576
+
+[compressor_plugins]
+compressors = ["sdp4bit"]
+library_path = "../../../build/obj/device/compress/libcompress"
+
+[normal.all_to_all]
+compressor = "sdp4bit"
+
+[normal.all_to_all.config.default]
+groupCount = 2048
+quantBits = 4
+quantType = "Symmetric"
+
+[normal.all_gather]
+compressor = "sdp4bit"
+
+[normal.all_gather.config.default]
+groupCount = 2048
+quantBits = 4
+quantType = "Symmetric"
+
+[normal.all_reduce]
+compressor = "sdp4bit"
+
+[normal.all_reduce.config.default]
+groupCount = 128
+quantBits = 4
+quantType = "Symmetric"
+hadamard = false
+
+[normal.all_reduce.config.hierarchical]
+groupCount = 128
+quantBits = 4
+inQuantBits = 4
+outQuantBits = 4
+inGroupCount = 128
+outGroupCount = 128
+quantType = "Symmetric"
+hadamard = false
+pipelineSize = 1
+
+[normal.reduce_scatter]
+compressor = "sdp4bit"
+
+[normal.reduce_scatter.config.default]
+groupCount = 128
+quantBits = 4
+quantType = "Symmetric"
+hadamard = true
+
+[normal.reduce_scatter.config.hierarchical]
+groupCount = 128
+quantBits = 4
+inQuantBits = 4
+outQuantBits = 4
+inGroupCount = 128
+outGroupCount = 128
+quantType = "Symmetric"
+hadamard = false
+pipelineSize = 1
+
+[normal.sendrecv]
+compressor = "sdp4bit"
+
+[normal.sendrecv.config.default]
+groupCount = 128
+quantBits = 4
+quantType = "Symmetric"
