@@ -7,27 +7,9 @@
 #include "coccl_pipeline_layout.h"
 #include "debug.h"
 
-namespace {
+#include <stdlib.h>
 
-ncclCommOp_t compressorOperation(const cocclPolicyKey& policy) {
-  const bool hierarchical =
-      policy.variant == cocclPolicyVariant::Hierarchical;
-  switch (policy.operation) {
-    case cocclOperation::AllToAll:
-      return hierarchical ? AlltoAll_Inter : AlltoAll;
-    case cocclOperation::AllGather:
-      return hierarchical ? AllGather_Inter : AllGather;
-    case cocclOperation::ReduceScatter:
-      return hierarchical ? ReduceScatter_Inter : ReduceScatter;
-    case cocclOperation::AllReduce:
-      return hierarchical ? AllReduce_Inter : AllReduce;
-    case cocclOperation::SendRecv:
-      return SendRecv;
-    case cocclOperation::Count:
-      break;
-  }
-  __builtin_unreachable();
-}
+namespace {
 
 bool buffersOverlap(const void* first, size_t firstBytes,
                     const void* second, size_t secondBytes) {
@@ -37,43 +19,102 @@ bool buffersOverlap(const void* first, size_t firstBytes,
       secondBegin < firstBegin + firstBytes;
 }
 
+ncclResult_t ensureFrameMetadataCapacity(
+    cocclPipelineFrameResources* resources, size_t frames) {
+  if (resources->metadataCapacity >= frames) return ncclSuccess;
+  const size_t bytes =
+      frames * sizeof(cocclCompressorFrameMetadata);
+  cocclCompressorFrameMetadata* sendMetadata = nullptr;
+  cocclCompressorFrameMetadata* recvMetadata = nullptr;
+  CUDACHECK(cudaHostAlloc(
+      reinterpret_cast<void**>(&sendMetadata), bytes,
+      cudaHostAllocPortable));
+  const cudaError_t recvResult = cudaHostAlloc(
+      reinterpret_cast<void**>(&recvMetadata), bytes,
+      cudaHostAllocPortable);
+  if (recvResult != cudaSuccess) {
+    (void)cudaFreeHost(sendMetadata);
+    return ncclUnhandledCudaError;
+  }
+  if (resources->sendMetadata != nullptr) {
+    (void)cudaFreeHost(resources->sendMetadata);
+  }
+  if (resources->recvMetadata != nullptr) {
+    (void)cudaFreeHost(resources->recvMetadata);
+  }
+  resources->sendMetadata = sendMetadata;
+  resources->recvMetadata = recvMetadata;
+  resources->metadataCapacity = frames;
+  return ncclSuccess;
+}
+
+ncclResult_t ensureFrameExchangeCapacity(
+    cocclPipelineFrameResources* resources, size_t count) {
+  if (resources->exchangeCapacity >= count) return ncclSuccess;
+  void* storage =
+      realloc(resources->exchanges, count * sizeof(cocclFrameExchange));
+  if (storage == nullptr) return ncclSystemError;
+  resources->exchanges = static_cast<cocclFrameExchange*>(storage);
+  resources->exchangeCapacity = count;
+  return ncclSuccess;
+}
+
+ncclResult_t readFrameMetadata(
+    const cocclPipelineStageContext* context,
+    const cocclPipelineEdge* edge,
+    const cocclPipelineStageOutput* output, size_t outputFrames,
+    cudaStream_t stream) {
+  const size_t capacity = edge->logicalChunks > outputFrames
+      ? edge->logicalChunks : outputFrames;
+  NCCLCHECK(ensureFrameMetadataCapacity(
+      context->frameResources, capacity));
+  CUDACHECK(cudaMemcpyAsync(
+      context->frameResources->sendMetadata, edge->frameMetadata,
+      edge->logicalChunks * sizeof(cocclCompressorFrameMetadata),
+      cudaMemcpyDeviceToHost, stream));
+  CUDACHECK(cudaMemcpyAsync(
+      context->frameResources->recvMetadata, output->frameMetadata,
+      outputFrames * sizeof(cocclCompressorFrameMetadata),
+      cudaMemcpyDeviceToHost, stream));
+  CUDACHECK(cudaStreamSynchronize(stream));
+  return ncclSuccess;
+}
+
 ncclResult_t runCompress(const cocclPipelineStageContext* context,
                          const cocclPipelineStage*, cocclPipelineEdge* edge,
                          const cocclPipelineStageOutput* output,
                          cudaStream_t stream) {
-  void* encoded = output->ptr;
-  size_t encodedChunkCount = 0;
-  ncclDataType_t encodedDatatype = ncclNumTypes;
+  const cocclCompressorView input = {
+      edge->ptr, edge->bytes, edge->bytes, edge->totalElements,
+      edge->logicalChunks, edge->datatype, edge->frameMetadata,
+      edge->frameStrideBytes};
+  cocclCompressorView encoded = {
+      output->ptr, output->capacityBytes, 0, 0, edge->logicalChunks,
+      ncclInt8, output->frameMetadata, output->frameStrideBytes};
   NCCLCHECK(ncclCompress(
-      edge->ptr, &encoded, context->rawSliceCount, context->rawDatatype,
-      &encodedChunkCount, &encodedDatatype, edge->logicalChunks,
-      context->ownerComm->rank,
-      compressorOperation(context->compressorPolicy), stream,
-      output->capacityBytes));
-
-  size_t encodedElements = 0;
-  size_t encodedBytes = 0;
-  const int typeBytes = ncclTypeSize(encodedDatatype);
-  if (typeBytes <= 0 ||
-      !cocclPipelineCheckedMultiply(encodedChunkCount, edge->logicalChunks,
-                                    &encodedElements) ||
-      !cocclPipelineCheckedMultiply(encodedElements, (size_t)typeBytes,
-                                    &encodedBytes) ||
-      encodedBytes > output->capacityBytes) {
-    return ncclInvalidUsage;
-  }
-  edge->ptr = encoded;
-  edge->bytes = encodedBytes;
-  edge->totalElements = encodedElements;
-  edge->datatype = encodedDatatype;
+      context->compressor, input, &encoded, context->ownerComm->rank,
+      stream));
+  edge->ptr = encoded.data;
+  edge->bytes = encoded.bytes;
+  edge->totalElements = encoded.elements;
+  edge->datatype = encoded.datatype;
+  edge->logicalChunks = encoded.chunks;
+  edge->frameMetadata = encoded.frameMetadata;
+  edge->frameStrideBytes = encoded.frameStrideBytes;
   return ncclSuccess;
 }
 
-ncclResult_t runAllToAll(const cocclPipelineStageContext*,
+ncclResult_t runAllToAll(const cocclPipelineStageContext* context,
                          const cocclPipelineStage* stage,
                          cocclPipelineEdge* edge,
                          const cocclPipelineStageOutput* output,
                          cudaStream_t stream) {
+  if (edge->frameMetadata != nullptr) {
+    NCCLCHECK(cocclPreparePipelineFrameExchange(
+        context, stage, edge, output, stream));
+    return cocclCommitPipelineFrameExchange(
+        context, stage, edge, output, stream);
+  }
   const size_t sendBytes = edge->bytes / (size_t)stage->comm->nRanks;
   NCCLCHECK(ncclAllToAll(edge->ptr, output->ptr, sendBytes, ncclUint8,
                          stage->comm, stream));
@@ -81,11 +122,17 @@ ncclResult_t runAllToAll(const cocclPipelineStageContext*,
   return ncclSuccess;
 }
 
-ncclResult_t runAllGather(const cocclPipelineStageContext*,
+ncclResult_t runAllGather(const cocclPipelineStageContext* context,
                           const cocclPipelineStage* stage,
                           cocclPipelineEdge* edge,
                           const cocclPipelineStageOutput* output,
                           cudaStream_t stream) {
+  if (edge->frameMetadata != nullptr) {
+    NCCLCHECK(cocclPreparePipelineFrameExchange(
+        context, stage, edge, output, stream));
+    return cocclCommitPipelineFrameExchange(
+        context, stage, edge, output, stream);
+  }
   NCCLCHECK(ncclAllGather(edge->ptr, output->ptr, edge->bytes, ncclUint8,
                           stage->comm, stream));
   const size_t ranks = (size_t)stage->comm->nRanks;
@@ -101,17 +148,23 @@ ncclResult_t runDecompress(const cocclPipelineStageContext* context,
                            cocclPipelineEdge* edge,
                            const cocclPipelineStageOutput* output,
                            cudaStream_t stream) {
-  const size_t encodedChunkCount =
-      edge->totalElements / edge->logicalChunks;
+  const cocclCompressorView input = {
+      edge->ptr, edge->bytes, edge->bytes, edge->totalElements,
+      edge->logicalChunks, edge->datatype, edge->frameMetadata,
+      edge->frameStrideBytes};
+  cocclCompressorView decoded = {
+      output->ptr, output->capacityBytes, 0,
+      context->rawSliceCount * edge->logicalChunks,
+      edge->logicalChunks, context->rawDatatype, nullptr, 0};
   NCCLCHECK(ncclDecompress(
-      output->ptr, edge->ptr, context->rawSliceCount,
-      context->rawDatatype, encodedChunkCount, edge->datatype,
-      edge->logicalChunks, compressorOperation(context->compressorPolicy),
-      stream));
-  edge->ptr = output->ptr;
-  edge->bytes = context->rawSliceBytes * edge->logicalChunks;
-  edge->totalElements = context->rawSliceCount * edge->logicalChunks;
-  edge->datatype = context->rawDatatype;
+      context->compressor, input, &decoded, stream));
+  edge->ptr = decoded.data;
+  edge->bytes = decoded.bytes;
+  edge->totalElements = decoded.elements;
+  edge->datatype = decoded.datatype;
+  edge->logicalChunks = decoded.chunks;
+  edge->frameMetadata = nullptr;
+  edge->frameStrideBytes = 0;
   return ncclSuccess;
 }
 
@@ -126,34 +179,24 @@ ncclResult_t runDecompReduceComp(
     return ncclInvalidArgument;
   }
 
-  void* encoded = output->ptr;
-  const size_t encodedChunkCount =
-      edge->totalElements / edge->logicalChunks;
-  size_t recompressedChunkCount = 0;
-  ncclDataType_t recompressedDatatype = ncclNumTypes;
+  const cocclCompressorView input = {
+      edge->ptr, edge->bytes, edge->bytes, edge->totalElements,
+      edge->logicalChunks, edge->datatype, edge->frameMetadata,
+      edge->frameStrideBytes};
+  cocclCompressorView encoded = {
+      output->ptr, output->capacityBytes, 0, 0, outputChunks,
+      ncclInt8, output->frameMetadata, output->frameStrideBytes};
   NCCLCHECK(ncclDecompReduceComp(
-      edge->ptr, &encoded, reductionElements, context->rawDatatype,
-      encodedChunkCount, edge->datatype, &recompressedChunkCount,
-      &recompressedDatatype, edge->logicalChunks, stage->reduceChunks,
-      compressorOperation(context->compressorPolicy), stream,
-      context->ownerComm, output->capacityBytes));
-
-  size_t encodedElements = 0;
-  size_t encodedBytes = 0;
-  const int typeBytes = ncclTypeSize(recompressedDatatype);
-  if (typeBytes <= 0 ||
-      !cocclPipelineCheckedMultiply(recompressedChunkCount, outputChunks,
-                                    &encodedElements) ||
-      !cocclPipelineCheckedMultiply(encodedElements, (size_t)typeBytes,
-                                    &encodedBytes) ||
-      encodedBytes > output->capacityBytes) {
-    return ncclInvalidUsage;
-  }
-  edge->ptr = encoded;
-  edge->bytes = encodedBytes;
-  edge->totalElements = encodedElements;
-  edge->datatype = recompressedDatatype;
-  edge->logicalChunks = outputChunks;
+      context->compressor, context->ownerComm, input, &encoded,
+      stage->reduceChunks, context->rawDatatype, reductionElements,
+      stream));
+  edge->ptr = encoded.data;
+  edge->bytes = encoded.bytes;
+  edge->totalElements = encoded.elements;
+  edge->datatype = encoded.datatype;
+  edge->logicalChunks = encoded.chunks;
+  edge->frameMetadata = encoded.frameMetadata;
+  edge->frameStrideBytes = encoded.frameStrideBytes;
   return ncclSuccess;
 }
 
@@ -167,18 +210,23 @@ ncclResult_t runDecompressReduce(
                                     &reductionElements)) {
     return ncclInvalidArgument;
   }
-  const size_t encodedChunkCount =
-      edge->totalElements / edge->logicalChunks;
+  const cocclCompressorView input = {
+      edge->ptr, edge->bytes, edge->bytes, edge->totalElements,
+      edge->logicalChunks, edge->datatype, edge->frameMetadata,
+      edge->frameStrideBytes};
+  cocclCompressorView reduced = {
+      output->ptr, output->capacityBytes, 0, reductionElements,
+      outputChunks, context->rawDatatype, nullptr, 0};
   NCCLCHECK(ncclDecompressReduce(
-      output->ptr, edge->ptr, encodedChunkCount, edge->datatype,
-      reductionElements, context->rawDatatype, edge->logicalChunks,
-      stage->reduceChunks, compressorOperation(context->compressorPolicy),
-      stream, context->ownerComm));
-  edge->ptr = output->ptr;
-  edge->bytes = context->rawSliceBytes * outputChunks;
-  edge->totalElements = reductionElements;
-  edge->datatype = context->rawDatatype;
-  edge->logicalChunks = outputChunks;
+      context->compressor, context->ownerComm, input, &reduced,
+      stage->reduceChunks, stream));
+  edge->ptr = reduced.data;
+  edge->bytes = reduced.bytes;
+  edge->totalElements = reduced.elements;
+  edge->datatype = reduced.datatype;
+  edge->logicalChunks = reduced.chunks;
+  edge->frameMetadata = nullptr;
+  edge->frameStrideBytes = 0;
   return ncclSuccess;
 }
 
@@ -224,6 +272,82 @@ const StageHandler handlers[kCocclPipelineStageKindCount] = {
     runPack, runUnpack};
 
 }  // namespace
+
+bool cocclPipelineStageUsesFrameExchange(
+    const cocclPipelineStage& stage, const cocclPipelineEdge& edge) {
+  return edge.frameMetadata != nullptr &&
+      (stage.kind == cocclPipelineStageAllToAll ||
+       stage.kind == cocclPipelineStageAllGather);
+}
+
+ncclResult_t cocclPreparePipelineFrameExchange(
+    const cocclPipelineStageContext*,
+    const cocclPipelineStage* stage, const cocclPipelineEdge* edge,
+    const cocclPipelineStageOutput* output, cudaStream_t stream) {
+  if (buffersOverlap(
+          edge->ptr, edge->bytes, output->ptr, output->capacityBytes)) {
+    return ncclInvalidUsage;
+  }
+  if (stage->kind == cocclPipelineStageAllToAll) {
+    const size_t metadataBytes =
+        edge->logicalChunks / (size_t)stage->comm->nRanks *
+        sizeof(cocclCompressorFrameMetadata);
+    return ncclAllToAll(
+        edge->frameMetadata, output->frameMetadata, metadataBytes,
+        ncclUint8, stage->comm, stream);
+  }
+  const size_t metadataBytes =
+      edge->logicalChunks * sizeof(cocclCompressorFrameMetadata);
+  return ncclAllGather(
+      edge->frameMetadata, output->frameMetadata, metadataBytes,
+      ncclUint8, stage->comm, stream);
+}
+
+ncclResult_t cocclCommitPipelineFrameExchange(
+    const cocclPipelineStageContext* context,
+    const cocclPipelineStage* stage, cocclPipelineEdge* edge,
+    const cocclPipelineStageOutput* output, cudaStream_t stream) {
+  size_t outputFrames = edge->logicalChunks;
+  if (stage->kind == cocclPipelineStageAllGather) {
+    outputFrames *= (size_t)stage->comm->nRanks;
+  }
+  NCCLCHECK(readFrameMetadata(
+      context, edge, output, outputFrames, stream));
+  NCCLCHECK(ensureFrameExchangeCapacity(
+      context->frameResources, outputFrames));
+
+  size_t exchangeCount = 0;
+  if (stage->kind == cocclPipelineStageAllToAll) {
+    NCCLCHECK(cocclBuildAllToAllFrameExchanges(
+        edge->ptr, output->ptr, edge->logicalChunks,
+        edge->frameStrideBytes, stage->comm->nRanks,
+        context->frameResources->sendMetadata,
+        context->frameResources->recvMetadata,
+        context->frameResources->exchanges,
+        context->frameResources->exchangeCapacity, &exchangeCount));
+  } else {
+    NCCLCHECK(cocclBuildAllGatherFrameExchanges(
+        edge->ptr, output->ptr, edge->logicalChunks,
+        edge->frameStrideBytes, stage->comm->nRanks,
+        context->frameResources->sendMetadata,
+        context->frameResources->recvMetadata,
+        context->frameResources->exchanges,
+        context->frameResources->exchangeCapacity, &exchangeCount));
+  }
+  NCCLCHECK(cocclCommitFrameExchange(
+      context->frameResources->exchanges, exchangeCount,
+      stage->comm, stream));
+
+  if (stage->kind == cocclPipelineStageAllGather) {
+    edge->bytes *= (size_t)stage->comm->nRanks;
+    edge->totalElements *= (size_t)stage->comm->nRanks;
+    edge->logicalChunks = outputFrames;
+  }
+  edge->ptr = output->ptr;
+  edge->frameMetadata = output->frameMetadata;
+  edge->frameStrideBytes = output->frameStrideBytes;
+  return ncclSuccess;
+}
 
 ncclResult_t cocclExecutePipelineStage(
     const cocclPipelineStageContext* context,

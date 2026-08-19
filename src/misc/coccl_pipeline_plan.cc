@@ -12,6 +12,8 @@ struct cocclPipelinePlannedEdge {
   size_t totalElements;
   ncclDataType_t datatype;
   size_t logicalChunks;
+  bool framed;
+  size_t frameStrideBytes;
 };
 
 bool boundaryTemp(const cocclPipelinePlan& plan, int temp) {
@@ -138,11 +140,26 @@ cocclPipelineTempRole outputRole(cocclPipelineStageKind kind) {
 }
 
 ncclResult_t addTemp(cocclPipelinePlan* plan, cocclPipelineTempRole role,
-                     size_t logicalBytes, int* tempIndex) {
+                     const cocclPipelinePlannedEdge& edge,
+                     int* tempIndex) {
   cocclPipelineTempPlan& temp = plan->temps[plan->tempCount];
   temp.role = role;
-  temp.logicalBytes = logicalBytes;
-  if (!cocclAlignPipelineBytes(logicalBytes, &temp.alignedBytes)) {
+  temp.payloadBytes = edge.bytes;
+  temp.frameStrideBytes = edge.frameStrideBytes;
+  temp.logicalBytes = edge.bytes;
+  if (edge.framed) {
+    if (!cocclAlignPipelineBytes(
+            edge.bytes, &temp.frameMetadataOffset) ||
+        !cocclPipelineCheckedMultiply(
+            edge.logicalChunks, sizeof(cocclCompressorFrameMetadata),
+            &temp.frameMetadataBytes) ||
+        !cocclPipelineCheckedAdd(
+            temp.frameMetadataOffset, temp.frameMetadataBytes,
+            &temp.logicalBytes)) {
+      return ncclInvalidArgument;
+    }
+  }
+  if (!cocclAlignPipelineBytes(temp.logicalBytes, &temp.alignedBytes)) {
     return ncclInvalidArgument;
   }
   *tempIndex = plan->tempCount++;
@@ -160,6 +177,8 @@ ncclResult_t planRawEdge(const cocclPipelineContext* context, size_t chunks,
   }
   output->datatype = context->spec->datatype;
   output->logicalChunks = chunks;
+  output->framed = false;
+  output->frameStrideBytes = 0;
   return ncclSuccess;
 }
 
@@ -178,12 +197,20 @@ ncclResult_t planStageOutput(
     cocclPipelinePlannedEdge* output) {
   switch (stage.kind) {
     case cocclPipelineStageCompress: {
+      const bool framed = cocclCompressorPolicySupports(
+          context->spec->compressorPolicy,
+          cocclCompressorCapabilityFramed);
       size_t encodedBytes = 0;
       NCCLCHECK(queryEncodedBound(
           context, cocclCompressorOperationCompress, input,
           &encodedBytes));
-      if (encodedBytes > input.bytes) encodedBytes = input.bytes;
-      *output = {encodedBytes, encodedBytes, ncclInt8, outputChunks};
+      encodedBytes = framed
+          ? input.bytes
+          : (encodedBytes < input.bytes ? encodedBytes : input.bytes);
+      const size_t frameStrideBytes =
+          framed ? input.bytes / input.logicalChunks : 0;
+      *output = {encodedBytes, encodedBytes, ncclInt8, outputChunks,
+                 framed, frameStrideBytes};
       break;
     }
     case cocclPipelineStageAllToAll:
@@ -202,6 +229,8 @@ ncclResult_t planStageOutput(
       }
       output->datatype = input.datatype;
       output->logicalChunks = outputChunks;
+      output->framed = input.framed;
+      output->frameStrideBytes = input.frameStrideBytes;
       break;
     case cocclPipelineStageDecompReduceComp: {
       cocclPipelinePlannedEdge rawOutput = {};
@@ -225,7 +254,14 @@ ncclResult_t planStageOutput(
           plannedBytes = fusedBytes;
         }
       }
-      *output = {plannedBytes, plannedBytes, ncclInt8, outputChunks};
+      const bool framed = cocclCompressorPolicySupports(
+          context->spec->compressorPolicy,
+          cocclCompressorCapabilityFramed);
+      const size_t frameStrideBytes =
+          framed ? rawOutput.bytes / rawOutput.logicalChunks : 0;
+      if (framed) plannedBytes = rawOutput.bytes;
+      *output = {plannedBytes, plannedBytes, ncclInt8, outputChunks,
+                 framed, frameStrideBytes};
       break;
     }
     case cocclPipelineStageDecompressReduce:
@@ -393,6 +429,11 @@ ncclResult_t cocclPreparePipeline(const cocclPipelineSpec* spec,
   context->stageContext.rawDatatype = spec->datatype;
   context->stageContext.compressorPolicy = spec->compressorPolicy;
   context->stageContext.ownerComm = spec->ownerComm;
+  cocclResolvedCompressorPolicy resolved = {};
+  NCCLCHECK(cocclResolveCompressorPolicy(
+      spec->compressorPolicy, &resolved));
+  context->stageContext.compressor = resolved.compressor;
+  context->stageContext.frameResources = nullptr;
 
   cocclPipelinePlan& plan = context->plan;
   plan.inputStagingTemp = -1;
@@ -404,7 +445,7 @@ ncclResult_t cocclPreparePipeline(const cocclPipelineSpec* spec,
   cocclPipelinePlannedEdge edge = {};
   NCCLCHECK(planRawEdge(context, spec->inputChunks, &edge));
   if (context->depth > 1 && spec->inputChunks > 1) {
-    NCCLCHECK(addTemp(&plan, cocclPipelineTempInputStaging, edge.bytes,
+    NCCLCHECK(addTemp(&plan, cocclPipelineTempInputStaging, edge,
                       &plan.inputStagingTemp));
   }
 
@@ -417,12 +458,12 @@ ncclResult_t cocclPreparePipeline(const cocclPipelineSpec* spec,
     if (finalStage) {
       if (context->depth > 1 && output.logicalChunks > 1) {
         NCCLCHECK(addTemp(&plan, cocclPipelineTempOutputStaging,
-                          output.bytes, &plan.outputStagingTemp));
+                          output, &plan.outputStagingTemp));
         plan.stageOutputTemp[stage] = plan.outputStagingTemp;
       }
     } else {
       NCCLCHECK(addTemp(&plan, outputRole(spec->stages[stage].kind),
-                        output.bytes, &plan.stageOutputTemp[stage]));
+                        output, &plan.stageOutputTemp[stage]));
     }
     edge = output;
   }

@@ -24,6 +24,9 @@ void fail(const char* message) {
   std::exit(1);
 }
 
+#define EXPECT(expression) \
+  do { if (!(expression)) fail(#expression); } while (0)
+
 void testMetadata() {
   cocclCompressorFrameMetadata encoded = {
       17, cocclCompressorFrameEncoded, 0};
@@ -83,6 +86,60 @@ void testCommitOrder() {
   std::free(comm0);
 }
 
+void testAllToAllMapping() {
+  unsigned char send[8 * 64] = {};
+  unsigned char recv[8 * 64] = {};
+  cocclCompressorFrameMetadata sendMetadata[8] = {};
+  cocclCompressorFrameMetadata recvMetadata[8] = {};
+  for (size_t frame = 0; frame < 8; ++frame) {
+    sendMetadata[frame] = {
+        frame + 1, cocclCompressorFrameEncoded, 0};
+    recvMetadata[frame] = {
+        frame + 11, cocclCompressorFrameEncoded, 0};
+  }
+  cocclFrameExchange exchanges[8] = {};
+  size_t count = 0;
+  EXPECT(cocclBuildAllToAllFrameExchanges(
+             send, recv, 8, 64, 4, sendMetadata, recvMetadata,
+             exchanges, 8, &count) == ncclSuccess);
+  EXPECT(count == 8);
+  for (size_t frame = 0; frame < count; ++frame) {
+    EXPECT(exchanges[frame].peer == static_cast<int>(frame / 2));
+    EXPECT(exchanges[frame].sendSlot == send + frame * 64);
+    EXPECT(exchanges[frame].recvSlot == recv + frame * 64);
+    EXPECT(exchanges[frame].sendBytes == sendMetadata[frame].payloadBytes);
+    EXPECT(exchanges[frame].recvBytes == recvMetadata[frame].payloadBytes);
+  }
+}
+
+void testAllGatherMapping() {
+  unsigned char send[2 * 64] = {};
+  unsigned char recv[8 * 64] = {};
+  const cocclCompressorFrameMetadata sendMetadata[2] = {
+      {20, cocclCompressorFrameEncoded, 0},
+      {64, cocclCompressorFrameRaw, 0}};
+  cocclCompressorFrameMetadata recvMetadata[8] = {};
+  for (size_t frame = 0; frame < 8; ++frame) {
+    recvMetadata[frame] = {
+        frame + 1, cocclCompressorFrameEncoded, 0};
+  }
+  cocclFrameExchange exchanges[8] = {};
+  size_t count = 0;
+  EXPECT(cocclBuildAllGatherFrameExchanges(
+             send, recv, 2, 64, 4, sendMetadata, recvMetadata,
+             exchanges, 8, &count) == ncclSuccess);
+  EXPECT(count == 8);
+  for (size_t index = 0; index < count; ++index) {
+    const size_t localFrame = index % 2;
+    EXPECT(exchanges[index].peer == static_cast<int>(index / 2));
+    EXPECT(exchanges[index].sendSlot == send + localFrame * 64);
+    EXPECT(exchanges[index].recvSlot == recv + index * 64);
+    EXPECT(exchanges[index].sendBytes ==
+           sendMetadata[localFrame].payloadBytes);
+    EXPECT(exchanges[index].recvBytes == recvMetadata[index].payloadBytes);
+  }
+}
+
 }  // namespace
 
 ncclResult_t ncclGroupStart() {
@@ -109,6 +166,8 @@ ncclResult_t cocclReplayNativeCall(const cocclInfo& info) {
 int main() {
   testMetadata();
   testCommitOrder();
+  testAllToAllMapping();
+  testAllGatherMapping();
   std::printf("COCCL M13 frame exchange tests passed\n");
   return 0;
 }

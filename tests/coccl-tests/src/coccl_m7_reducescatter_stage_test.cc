@@ -28,14 +28,16 @@ void ncclDebugLog(ncclDebugLogLevel, unsigned long, const char*, int,
                   const char*, ...) {}
 
 ncclResult_t ncclCompress(
-    const void*, void**, size_t rawChunkCount, ncclDataType_t,
-    size_t* encodedChunkCount, ncclDataType_t* encodedDatatype,
-    size_t chunks, int, ncclCommOp_t operation, cudaStream_t, size_t) {
+    void* compressor, const cocclCompressorView& input,
+    cocclCompressorView* output, int, cudaStream_t) {
   ++compressCalls;
-  EXPECT(rawChunkCount == 64 && chunks == 4 &&
-         operation == ReduceScatter_Inter);
-  *encodedChunkCount = 32;
-  *encodedDatatype = ncclInt8;
+  EXPECT(compressor == reinterpret_cast<void*>(0x700000));
+  EXPECT(input.elements == 256 && input.chunks == 4 &&
+         input.datatype == ncclFloat32);
+  output->bytes = 128;
+  output->elements = 128;
+  output->chunks = 4;
+  output->datatype = ncclInt8;
   return ncclSuccess;
 }
 
@@ -50,33 +52,31 @@ ncclResult_t ncclAllToAll(const void*, void*, size_t count,
 }
 
 ncclResult_t ncclDecompReduceComp(
-    const void*, void**, size_t originalElements,
-    ncclDataType_t originalDatatype, size_t encodedChunkCount,
-    ncclDataType_t encodedDatatype, size_t* recompressedChunkCount,
-    ncclDataType_t* recompressedDatatype, size_t inputChunks,
-    size_t reduceChunks, ncclCommOp_t operation, cudaStream_t,
-    ncclComm_t, size_t) {
+    void* compressor, ncclComm_t, const cocclCompressorView& input,
+    cocclCompressorView* output, size_t reduceChunks,
+    ncclDataType_t originalDatatype, size_t originalElements,
+    cudaStream_t) {
   ++drcCalls;
+  EXPECT(compressor == reinterpret_cast<void*>(0x700000));
   EXPECT(originalElements == 128 && originalDatatype == ncclFloat32);
-  EXPECT(encodedChunkCount == 32 && encodedDatatype == ncclInt8);
-  EXPECT(inputChunks == 4 && reduceChunks == 2);
-  EXPECT(operation == ReduceScatter_Inter);
-  *recompressedChunkCount = 16;
-  *recompressedDatatype = ncclInt8;
+  EXPECT(input.elements == 128 && input.datatype == ncclInt8);
+  EXPECT(input.chunks == 4 && reduceChunks == 2);
+  output->bytes = 32;
+  output->elements = 32;
+  output->chunks = 2;
+  output->datatype = ncclInt8;
   return ncclSuccess;
 }
 
 ncclResult_t ncclDecompressReduce(
-    void*, const void*, size_t encodedChunkCount,
-    ncclDataType_t encodedDatatype, size_t outputElements,
-    ncclDataType_t outputDatatype, size_t inputChunks,
-    size_t reduceChunks, ncclCommOp_t operation, cudaStream_t,
-    ncclComm_t) {
+    void* compressor, ncclComm_t, const cocclCompressorView& input,
+    cocclCompressorView* output, size_t reduceChunks, cudaStream_t) {
   ++drCalls;
-  EXPECT(encodedChunkCount == 16 && encodedDatatype == ncclInt8);
-  EXPECT(outputElements == 64 && outputDatatype == ncclFloat32);
-  EXPECT(inputChunks == 2 && reduceChunks == 2);
-  EXPECT(operation == ReduceScatter_Inter);
+  EXPECT(compressor == reinterpret_cast<void*>(0x700000));
+  EXPECT(input.elements == 32 && input.datatype == ncclInt8);
+  EXPECT(output->elements == 64 && output->datatype == ncclFloat32);
+  EXPECT(input.chunks == 2 && reduceChunks == 2);
+  output->bytes = 256;
   return ncclSuccess;
 }
 
@@ -85,9 +85,8 @@ ncclResult_t ncclAllGather(const void*, void*, size_t, ncclDataType_t,
   return ncclInternalError;
 }
 
-ncclResult_t ncclDecompress(void*, const void*, size_t, ncclDataType_t,
-                            size_t, ncclDataType_t, size_t, ncclCommOp_t,
-                            cudaStream_t) {
+ncclResult_t ncclDecompress(
+    void*, const cocclCompressorView&, cocclCompressorView*, cudaStream_t) {
   return ncclInternalError;
 }
 
@@ -111,9 +110,11 @@ int main() {
   inter.nRanks = 2;
   const cocclPipelineStageContext context = {
       64, 256, 1024, ncclFloat32,
-      cocclHierarchicalPolicy(cocclOperation::ReduceScatter), &owner};
+      cocclHierarchicalPolicy(cocclOperation::ReduceScatter), &owner,
+      reinterpret_cast<void*>(0x700000), nullptr};
   cocclPipelineEdge edge = {
-      reinterpret_cast<void*>(0x100000), 1024, 256, ncclFloat32, 4};
+      reinterpret_cast<void*>(0x100000), 1024, 256, ncclFloat32, 4,
+      nullptr, 0};
   cocclPipelineStageOutput output = {
       reinterpret_cast<void*>(0x200000), 1024};
 

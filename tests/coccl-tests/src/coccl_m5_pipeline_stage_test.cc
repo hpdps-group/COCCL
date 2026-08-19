@@ -29,24 +29,29 @@ void ncclDebugLog(ncclDebugLogLevel, unsigned long, const char*, int,
                   const char*, ...) {}
 
 ncclResult_t ncclCompress(
-    const void*, void**, size_t rawChunkCount, ncclDataType_t,
-    size_t* encodedChunkCount, ncclDataType_t* encodedDatatype,
-    size_t chunks, int, ncclCommOp_t operation, cudaStream_t, size_t) {
+    void* compressor, const cocclCompressorView& input,
+    cocclCompressorView* output, int, cudaStream_t) {
   ++compressCalls;
-  EXPECT(rawChunkCount == 64 && chunks == 4 && operation == AlltoAll);
-  *encodedChunkCount = 32;
-  *encodedDatatype = ncclUint8;
+  EXPECT(compressor == reinterpret_cast<void*>(0x700000));
+  EXPECT(input.elements == 256 && input.chunks == 4 &&
+         input.datatype == ncclFloat32);
+  output->bytes = 128;
+  output->elements = 128;
+  output->chunks = 4;
+  output->datatype = ncclUint8;
   return ncclSuccess;
 }
 
 ncclResult_t ncclDecompress(
-    void*, const void*, size_t rawChunkCount, ncclDataType_t rawDatatype,
-    size_t encodedChunkCount, ncclDataType_t encodedDatatype, size_t chunks,
-    ncclCommOp_t operation, cudaStream_t) {
+    void* compressor, const cocclCompressorView& input,
+    cocclCompressorView* output, cudaStream_t) {
   ++decompressCalls;
-  EXPECT(rawChunkCount == 64 && rawDatatype == ncclFloat32);
-  EXPECT(encodedChunkCount == 32 && encodedDatatype == ncclUint8);
-  EXPECT(chunks == 4 && operation == AlltoAll);
+  EXPECT(compressor == reinterpret_cast<void*>(0x700000));
+  EXPECT(input.elements == 128 && input.chunks == 4 &&
+         input.datatype == ncclUint8);
+  EXPECT(output->elements == 256 && output->chunks == 4 &&
+         output->datatype == ncclFloat32);
+  output->bytes = 1024;
   return ncclSuccess;
 }
 
@@ -64,15 +69,14 @@ ncclResult_t ncclAllGather(const void*, void*, size_t, ncclDataType_t,
 }
 
 ncclResult_t ncclDecompReduceComp(
-    const void*, void**, size_t, ncclDataType_t, size_t, ncclDataType_t,
-    size_t*, ncclDataType_t*, size_t, size_t, ncclCommOp_t, cudaStream_t,
-    ncclComm_t, size_t) {
+    void*, ncclComm_t, const cocclCompressorView&, cocclCompressorView*,
+    size_t, ncclDataType_t, size_t, cudaStream_t) {
   return ncclInternalError;
 }
 
 ncclResult_t ncclDecompressReduce(
-    void*, const void*, size_t, ncclDataType_t, size_t, ncclDataType_t,
-    size_t, size_t, ncclCommOp_t, cudaStream_t, ncclComm_t) {
+    void*, ncclComm_t, const cocclCompressorView&, cocclCompressorView*,
+    size_t, cudaStream_t) {
   return ncclInternalError;
 }
 
@@ -98,9 +102,11 @@ int main() {
   comm.rank = 2;
   const cocclPipelineStageContext context = {
       64, 256, 1024, ncclFloat32,
-      cocclDefaultPolicy(cocclOperation::AllToAll), &comm};
+      cocclDefaultPolicy(cocclOperation::AllToAll), &comm,
+      reinterpret_cast<void*>(0x700000), nullptr};
   cocclPipelineEdge edge = {
-      reinterpret_cast<void*>(0x100000), 1024, 256, ncclFloat32, 4};
+      reinterpret_cast<void*>(0x100000), 1024, 256, ncclFloat32, 4,
+      nullptr, 0};
 
   const cocclPipelineStage pack = cocclPipelinePack();
   cocclPipelineStageOutput output = {

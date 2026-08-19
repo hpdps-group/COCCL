@@ -4,11 +4,33 @@
 #include "comm.h"
 #include "coccl_runtime.h"
 
+#include <stdint.h>
+
 namespace {
 
 bool validSlot(const void* slot, size_t bytes, size_t slotBytes) {
   if (bytes == 0) return slot == nullptr || slotBytes != 0;
   return slot != nullptr && bytes <= slotBytes;
+}
+
+bool frameSlot(const void* base, size_t frame, size_t strideBytes,
+               const void** slot) {
+  if (base == nullptr || strideBytes == 0 ||
+      frame > SIZE_MAX / strideBytes) {
+    return false;
+  }
+  *slot = static_cast<const char*>(base) + frame * strideBytes;
+  return true;
+}
+
+bool frameSlot(void* base, size_t frame, size_t strideBytes, void** slot) {
+  const void* result = nullptr;
+  if (!frameSlot(static_cast<const void*>(base), frame, strideBytes,
+                 &result)) {
+    return false;
+  }
+  *slot = const_cast<void*>(result);
+  return true;
 }
 
 }  // namespace
@@ -21,6 +43,78 @@ bool cocclFrameMetadataValid(
       (metadata.encoding == cocclCompressorFrameEncoded ||
        (metadata.encoding == cocclCompressorFrameRaw &&
         metadata.payloadBytes == frameStrideBytes));
+}
+
+ncclResult_t cocclBuildAllToAllFrameExchanges(
+    const void* sendBase, void* recvBase, size_t frames,
+    size_t frameStrideBytes, int nRanks,
+    const cocclCompressorFrameMetadata* sendMetadata,
+    const cocclCompressorFrameMetadata* recvMetadata,
+    cocclFrameExchange* exchanges, size_t exchangeCapacity,
+    size_t* exchangeCount) {
+  if (frames == 0 || nRanks <= 0 ||
+      frames % (size_t)nRanks != 0 || exchangeCapacity < frames) {
+    return ncclInvalidArgument;
+  }
+  *exchangeCount = 0;
+  const size_t framesPerPeer = frames / (size_t)nRanks;
+  for (int peer = 0; peer < nRanks; ++peer) {
+    for (size_t frame = 0; frame < framesPerPeer; ++frame) {
+      const size_t frameIndex = (size_t)peer * framesPerPeer + frame;
+      const cocclCompressorFrameMetadata& send =
+          sendMetadata[frameIndex];
+      const cocclCompressorFrameMetadata& recv =
+          recvMetadata[frameIndex];
+      const void* sendSlot = nullptr;
+      void* recvSlot = nullptr;
+      if (!cocclFrameMetadataValid(send, frameStrideBytes) ||
+          !cocclFrameMetadataValid(recv, frameStrideBytes) ||
+          !frameSlot(sendBase, frameIndex, frameStrideBytes, &sendSlot) ||
+          !frameSlot(recvBase, frameIndex, frameStrideBytes, &recvSlot)) {
+        return ncclInvalidUsage;
+      }
+      exchanges[(*exchangeCount)++] = {
+          peer, sendSlot, recvSlot, (size_t)send.payloadBytes,
+          (size_t)recv.payloadBytes, frameStrideBytes, nullptr, nullptr};
+    }
+  }
+  return ncclSuccess;
+}
+
+ncclResult_t cocclBuildAllGatherFrameExchanges(
+    const void* sendBase, void* recvBase, size_t localFrames,
+    size_t frameStrideBytes, int nRanks,
+    const cocclCompressorFrameMetadata* sendMetadata,
+    const cocclCompressorFrameMetadata* recvMetadata,
+    cocclFrameExchange* exchanges, size_t exchangeCapacity,
+    size_t* exchangeCount) {
+  size_t totalFrames = 0;
+  if (localFrames == 0 || nRanks <= 0 ||
+      localFrames > SIZE_MAX / (size_t)nRanks ||
+      (totalFrames = localFrames * (size_t)nRanks) == 0 ||
+      exchangeCapacity < totalFrames) {
+    return ncclInvalidArgument;
+  }
+  *exchangeCount = 0;
+  for (int peer = 0; peer < nRanks; ++peer) {
+    for (size_t frame = 0; frame < localFrames; ++frame) {
+      const size_t recvIndex = (size_t)peer * localFrames + frame;
+      const cocclCompressorFrameMetadata& send = sendMetadata[frame];
+      const cocclCompressorFrameMetadata& recv = recvMetadata[recvIndex];
+      const void* sendSlot = nullptr;
+      void* recvSlot = nullptr;
+      if (!cocclFrameMetadataValid(send, frameStrideBytes) ||
+          !cocclFrameMetadataValid(recv, frameStrideBytes) ||
+          !frameSlot(sendBase, frame, frameStrideBytes, &sendSlot) ||
+          !frameSlot(recvBase, recvIndex, frameStrideBytes, &recvSlot)) {
+        return ncclInvalidUsage;
+      }
+      exchanges[(*exchangeCount)++] = {
+          peer, sendSlot, recvSlot, (size_t)send.payloadBytes,
+          (size_t)recv.payloadBytes, frameStrideBytes, nullptr, nullptr};
+    }
+  }
+  return ncclSuccess;
 }
 
 ncclResult_t cocclCommitFrameExchange(

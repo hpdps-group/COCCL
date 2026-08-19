@@ -10,6 +10,7 @@ struct SizeQueryState {
   size_t drcNumerator = 1;
   size_t drcDenominator = 1;
   bool supportsDrc = false;
+  bool framed = false;
   cocclM11SizeQueryObservation compress = {};
   cocclM11SizeQueryObservation drc = {};
 };
@@ -52,6 +53,10 @@ void cocclM11ConfigureSizeQueryStub(
   state.drcNumerator = drcNumerator;
   state.drcDenominator = drcDenominator;
   state.supportsDrc = supportsDrc;
+}
+
+void cocclM14ConfigureFramedSizeQueryStub(bool framed) {
+  state.framed = framed;
 }
 
 const cocclM11SizeQueryObservation& cocclM11CompressQueryObservation() {
@@ -98,7 +103,16 @@ ncclResult_t cocclGetCompressorEncodedSizeBound(
 
 bool cocclCompressorPolicySupports(
     cocclPolicyKey, cocclCompressorCapability capability) {
+  if (capability == cocclCompressorCapabilityFramed) return state.framed;
   return capability ==
              cocclCompressorCapabilityDecompressReduceCompress &&
       state.supportsDrc;
+}
+
+ncclResult_t cocclResolveCompressorPolicy(
+    cocclPolicyKey, cocclResolvedCompressorPolicy* resolved) {
+  static int compressor;
+  resolved->compressor = &compressor;
+  resolved->thresholdBytes = 0;
+  return ncclSuccess;
 }

@@ -3,6 +3,7 @@
 
 #include <stdint.h>
 
+#include "coccl_frame_exchange.h"
 #include "coccl_pipeline.h"
 
 constexpr int kCocclPipelineExplicitStages = 7;
@@ -19,11 +20,23 @@ struct cocclPipelineEdge {
   size_t totalElements;
   ncclDataType_t datatype;
   size_t logicalChunks;
+  cocclCompressorFrameMetadata* frameMetadata;
+  size_t frameStrideBytes;
 };
 
 struct cocclPipelineStageOutput {
   void* ptr;
   size_t capacityBytes;
+  cocclCompressorFrameMetadata* frameMetadata;
+  size_t frameStrideBytes;
+};
+
+struct cocclPipelineFrameResources {
+  cocclCompressorFrameMetadata* sendMetadata;
+  cocclCompressorFrameMetadata* recvMetadata;
+  cocclFrameExchange* exchanges;
+  size_t metadataCapacity;
+  size_t exchangeCapacity;
 };
 
 struct cocclPipelineStageContext {
@@ -33,6 +46,8 @@ struct cocclPipelineStageContext {
   ncclDataType_t rawDatatype;
   cocclPolicyKey compressorPolicy;
   ncclComm_t ownerComm;
+  void* compressor;
+  cocclPipelineFrameResources* frameResources;
 };
 
 enum cocclPipelineTempRole {
@@ -60,6 +75,10 @@ struct cocclPipelineTempPlan {
   size_t offset;
   size_t logicalBytes;
   size_t alignedBytes;
+  size_t payloadBytes;
+  size_t frameMetadataOffset;
+  size_t frameMetadataBytes;
+  size_t frameStrideBytes;
   cocclPipelineTempStorage storage;
 };
 
@@ -121,6 +140,16 @@ ncclResult_t cocclPipelineStageOutputChunks(
     const cocclPipelineStage& stage, size_t inputChunks,
     size_t* outputChunks);
 ncclResult_t cocclExecutePipelineStage(
+    const cocclPipelineStageContext* context,
+    const cocclPipelineStage* stage, cocclPipelineEdge* edge,
+    const cocclPipelineStageOutput* output, cudaStream_t stream);
+bool cocclPipelineStageUsesFrameExchange(
+    const cocclPipelineStage& stage, const cocclPipelineEdge& edge);
+ncclResult_t cocclPreparePipelineFrameExchange(
+    const cocclPipelineStageContext* context,
+    const cocclPipelineStage* stage, const cocclPipelineEdge* edge,
+    const cocclPipelineStageOutput* output, cudaStream_t stream);
+ncclResult_t cocclCommitPipelineFrameExchange(
     const cocclPipelineStageContext* context,
     const cocclPipelineStage* stage, cocclPipelineEdge* edge,
     const cocclPipelineStageOutput* output, cudaStream_t stream);

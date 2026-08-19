@@ -14,6 +14,7 @@ void cocclM11ResetSizeQueryStub();
 void cocclM11ConfigureSizeQueryStub(
     size_t compressNumerator, size_t compressDenominator,
     size_t drcNumerator, size_t drcDenominator, bool supportsDrc);
+void cocclM14ConfigureFramedSizeQueryStub(bool framed);
 const cocclM11SizeQueryObservation& cocclM11CompressQueryObservation();
 const cocclM11SizeQueryObservation& cocclM11DrcQueryObservation();
 

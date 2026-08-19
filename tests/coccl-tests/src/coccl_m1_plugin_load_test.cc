@@ -34,9 +34,12 @@ int checkPlugin(const char* directory, const char* name) {
 }
 
 int main(int argc, char** argv) {
-  if (argc != 2 || checkPlugin(argv[1], "sdp4bit") ||
+  if (argc < 2 || checkPlugin(argv[1], "sdp4bit") ||
       checkPlugin(argv[1], "zfp")) {
     return 1;
+  }
+  for (int index = 2; index < argc; ++index) {
+    if (checkPlugin(argv[1], argv[index])) return 1;
   }
   printf("COCCL M1 plugin load tests passed\n");
   return 0;

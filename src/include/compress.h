@@ -38,6 +38,15 @@ ncclResult_t ncclCompress(
 ncclResult_t ncclDecompress(
     void* compressor, const cocclCompressorView& input,
     cocclCompressorView* output, cudaStream_t stream);
+ncclResult_t ncclDecompressReduce(
+    void* compressor, ncclComm_t ownerComm,
+    const cocclCompressorView& input, cocclCompressorView* output,
+    size_t reduceChunks, cudaStream_t stream);
+ncclResult_t ncclDecompReduceComp(
+    void* compressor, ncclComm_t ownerComm,
+    const cocclCompressorView& input, cocclCompressorView* output,
+    size_t reduceChunks, ncclDataType_t originalDatatype,
+    size_t originalElements, cudaStream_t stream);
 
 
 ncclResult_t ncclCompress(const void* orgbuff, void** compbuff, const size_t orgChunkCount, ncclDataType_t orgDayatype,

@@ -71,7 +71,7 @@ endif
 .PHONY: build clean m1-host-tests m1-plugin-load-test m2-host-tests \
 	m3-host-tests m4-host-tests m5-host-tests m5-layout-test m6-host-tests \
 	m7-host-tests m8-host-tests m9-host-tests m10-host-tests m11-host-tests \
-	m12-host-tests m13-host-tests
+	m12-host-tests m13-host-tests m14-host-tests m14-codec-build
 
 BUILDDIR ?= ../build
 ifneq ($(NCCL_HOME), "")
@@ -134,6 +134,17 @@ M11_SIZE_QUERY_STUB := coccl_m11_size_query_stub.cc
 M12_INPLACE_PLAN_TEST := $(DST_DIR)/coccl_m12_inplace_plan_test
 M13_FRAME_EXCHANGE_TEST := $(DST_DIR)/coccl_m13_frame_exchange_test
 M13_GROUP_BATCH_TEST := $(DST_DIR)/coccl_m13_group_batch_test
+M14_FRAME_STAGE_STUB := coccl_m14_frame_stage_stub.cc
+M14_FRAMED_PLAN_TEST := $(DST_DIR)/coccl_m14_framed_plan_test
+M14_DIETGPU_CODEC_TEST := $(DST_DIR)/coccl_m14_dietgpu_codec_test
+
+m14-codec-build: $(M14_DIETGPU_CODEC_TEST)
+
+m14-host-tests: $(M14_FRAMED_PLAN_TEST) $(M13_FRAME_EXCHANGE_TEST) \
+		$(M1_PLUGIN_LOAD_TEST)
+	$(M14_FRAMED_PLAN_TEST)
+	$(M13_FRAME_EXCHANGE_TEST)
+	$(M1_PLUGIN_LOAD_TEST) $(M1_PLUGIN_DIR) dietgpu
 
 m13-host-tests: $(M13_FRAME_EXCHANGE_TEST) $(M13_GROUP_BATCH_TEST)
 	$(M13_FRAME_EXCHANGE_TEST)
@@ -253,6 +264,17 @@ $(M13_GROUP_BATCH_TEST): coccl_m13_group_batch_test.cc \
 	@mkdir -p $(DST_DIR)
 	$(CXX) $(M1_CXXFLAGS) $(COCCL_INC) -I$(COCCL_SRC) -o $@ $^
 
+$(M14_FRAMED_PLAN_TEST): coccl_m14_framed_plan_test.cc \
+		$(COCCL_SRC)/misc/coccl_pipeline_plan.cc $(M11_SIZE_QUERY_STUB)
+	@printf "Linking  %-35s > %s\n" $< $@
+	@mkdir -p $(DST_DIR)
+	$(CXX) $(M1_CXXFLAGS) $(COCCL_INC) -I$(COCCL_SRC) -o $@ $^
+
+$(M14_DIETGPU_CODEC_TEST): coccl_m14_dietgpu_codec_test.cu
+	@printf "Linking  %-35s > %s\n" $< $@
+	@mkdir -p $(DST_DIR)
+	$(NVCC) -o $@ $(NVCUFLAGS) $(COCCL_INC) $< -ldl $(LDFLAGS)
+
 $(M2_RUNTIME_TEST): coccl_m2_runtime_test.cc \
 		$(COCCL_SRC)/misc/coccl_runtime.cc
 	@printf "Linking  %-35s > %s\n" $< $@
@@ -287,10 +309,11 @@ $(M5_PIPELINE_PLAN_TEST): coccl_m5_pipeline_plan_test.cc \
 	$(CXX) $(M1_CXXFLAGS) $(COCCL_INC) -I$(COCCL_SRC) -o $@ $^
 
 $(M5_PIPELINE_STAGE_TEST): coccl_m5_pipeline_stage_test.cc \
-		$(COCCL_SRC)/misc/coccl_pipeline_stage.cc
+		$(COCCL_SRC)/misc/coccl_pipeline_stage.cc $(M14_FRAME_STAGE_STUB)
 	@printf "Linking  %-35s > %s\n" $< $@
 	@mkdir -p $(DST_DIR)
-	$(CXX) $(M1_CXXFLAGS) $(COCCL_INC) -I$(COCCL_SRC) -o $@ $^
+	$(CXX) $(M1_CXXFLAGS) $(COCCL_INC) -I$(COCCL_SRC) -o $@ $^ \
+		-L$(CUDA_LIB) -lcudart
 
 $(M5_PIPELINE_LAYOUT_TEST): coccl_m5_pipeline_layout_test.cu \
 		$(COCCL_SRC)/device/pipeline/coccl_pipeline_layout.cu Makefile
@@ -306,10 +329,11 @@ $(M6_ALLGATHER_PLAN_TEST): coccl_m6_allgather_plan_test.cc \
 	$(CXX) $(M1_CXXFLAGS) $(COCCL_INC) -I$(COCCL_SRC) -o $@ $^
 
 $(M6_ALLGATHER_STAGE_TEST): coccl_m6_allgather_stage_test.cc \
-		$(COCCL_SRC)/misc/coccl_pipeline_stage.cc
+		$(COCCL_SRC)/misc/coccl_pipeline_stage.cc $(M14_FRAME_STAGE_STUB)
 	@printf "Linking  %-35s > %s\n" $< $@
 	@mkdir -p $(DST_DIR)
-	$(CXX) $(M1_CXXFLAGS) $(COCCL_INC) -I$(COCCL_SRC) -o $@ $^
+	$(CXX) $(M1_CXXFLAGS) $(COCCL_INC) -I$(COCCL_SRC) -o $@ $^ \
+		-L$(CUDA_LIB) -lcudart
 
 $(M7_REDUCESCATTER_PLAN_TEST): coccl_m7_reducescatter_plan_test.cc \
 		$(COCCL_SRC)/misc/coccl_pipeline_plan.cc $(M11_SIZE_QUERY_STUB)
@@ -318,10 +342,11 @@ $(M7_REDUCESCATTER_PLAN_TEST): coccl_m7_reducescatter_plan_test.cc \
 	$(CXX) $(M1_CXXFLAGS) $(COCCL_INC) -I$(COCCL_SRC) -o $@ $^
 
 $(M7_REDUCESCATTER_STAGE_TEST): coccl_m7_reducescatter_stage_test.cc \
-		$(COCCL_SRC)/misc/coccl_pipeline_stage.cc
+		$(COCCL_SRC)/misc/coccl_pipeline_stage.cc $(M14_FRAME_STAGE_STUB)
 	@printf "Linking  %-35s > %s\n" $< $@
 	@mkdir -p $(DST_DIR)
-	$(CXX) $(M1_CXXFLAGS) $(COCCL_INC) -I$(COCCL_SRC) -o $@ $^
+	$(CXX) $(M1_CXXFLAGS) $(COCCL_INC) -I$(COCCL_SRC) -o $@ $^ \
+		-L$(CUDA_LIB) -lcudart
 
 $(M8_ALLREDUCE_PLAN_TEST): coccl_m8_allreduce_plan_test.cc \
 		$(COCCL_SRC)/misc/coccl_pipeline_plan.cc $(M11_SIZE_QUERY_STUB)

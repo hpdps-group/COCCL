@@ -23,6 +23,22 @@ bool cocclFrameMetadataValid(
     const cocclCompressorFrameMetadata& metadata,
     size_t frameStrideBytes);
 
+ncclResult_t cocclBuildAllToAllFrameExchanges(
+    const void* sendBase, void* recvBase, size_t frames,
+    size_t frameStrideBytes, int nRanks,
+    const cocclCompressorFrameMetadata* sendMetadata,
+    const cocclCompressorFrameMetadata* recvMetadata,
+    cocclFrameExchange* exchanges, size_t exchangeCapacity,
+    size_t* exchangeCount);
+
+ncclResult_t cocclBuildAllGatherFrameExchanges(
+    const void* sendBase, void* recvBase, size_t localFrames,
+    size_t frameStrideBytes, int nRanks,
+    const cocclCompressorFrameMetadata* sendMetadata,
+    const cocclCompressorFrameMetadata* recvMetadata,
+    cocclFrameExchange* exchanges, size_t exchangeCapacity,
+    size_t* exchangeCount);
+
 ncclResult_t cocclCommitFrameExchange(
     const cocclFrameExchange* exchanges, size_t count,
     ncclComm_t comm, cudaStream_t stream);
