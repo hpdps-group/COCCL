@@ -1,6 +1,7 @@
 #include "compress.h"
 #include "coccl_buffer_management.h"
 
+#include "coccl_autotune.h"
 #include "coccl_config.h"
 #include "comm.h"
 #include "compressor_plugin/detail/coccl_compressor_abi.h"
@@ -307,6 +308,19 @@ ncclResult_t initializeRuntime(const ncclComm_t comm,
   enableSendRecvComp = defaultPolicies[sendRecv] != nullptr ||
       forwardPolicies[sendRecv] != nullptr ||
       backwardPolicies[sendRecv] != nullptr;
+  for (cocclOperation operation : {
+           cocclOperation::ReduceScatter, cocclOperation::AllReduce}) {
+    const size_t index = static_cast<size_t>(operation);
+    if (defaultPolicies[index] != nullptr) {
+      NCCLCHECK(cocclAutotuneRegisterEnabledCompressor(
+          defaultPolicies[index], cocclDefaultPolicy(operation)));
+    }
+    if (hierarchicalPolicies[index] != nullptr &&
+        hierarchicalPolicies[index] != defaultPolicies[index]) {
+      NCCLCHECK(cocclAutotuneRegisterEnabledCompressor(
+          hierarchicalPolicies[index], cocclHierarchicalPolicy(operation)));
+    }
+  }
   return ncclSuccess;
 }
 
@@ -560,6 +574,10 @@ bool cocclCompressorSupports(
       (policy->plugin->capabilities & (uint64_t)capability) != 0;
 }
 
+const cocclCompressorPlugin* cocclCompressorDescriptor(void* compressor) {
+  return static_cast<CompressorPolicy*>(compressor)->plugin;
+}
+
 ncclResult_t ncclCompress(
     void* compressor, const cocclCompressorView& input,
     cocclCompressorView* output, int rank, cudaStream_t stream) {
@@ -715,7 +733,15 @@ ncclResult_t ncclCompressInit(const ncclComm_t comm) {
     ++communicatorsByDevice[comm->cudaDev];
   }
   pthread_mutex_unlock(&compressorLock);
-  return result;
+  if (result != ncclSuccess) return result;
+
+  const ncclResult_t autotuneResult =
+      cocclAutotuneEnsureGlobalModels(comm);
+  if (autotuneResult != ncclSuccess && comm->rank == 0) {
+    WARN("COCCL autotune profiling failed with %d; using heuristics",
+         autotuneResult);
+  }
+  return ncclSuccess;
 }
 
 ncclResult_t ncclCompressDestroy(const ncclComm_t comm) {

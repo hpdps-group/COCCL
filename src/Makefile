@@ -13,6 +13,7 @@ LIBSRCFILES := \
 	init.cc init_nvtx.cc net.cc proxy.cc transport.cc register.cc\
 	$(wildcard graph/*.cc) \
 	$(wildcard misc/*.cc) \
+	$(wildcard misc/tuning/*.cc) \
 	$(wildcard transport/*.cc)
 
 ##### lib files
@@ -49,6 +50,9 @@ $(OBJDIR)/misc/coccl_config.o \
 $(OBJDIR)/misc/coccl_config_format.o \
 $(OBJDIR)/misc/coccl_config_log.o \
 $(OBJDIR)/misc/compress.o: CXXFLAGS += -std=c++17
+
+$(patsubst %.cc,$(OBJDIR)/%.o,$(wildcard misc/tuning/*.cc)): \
+	CXXFLAGS += -std=c++17
 
 DEVMANIFEST := $(BUILDDIR)/obj/device/manifest
 

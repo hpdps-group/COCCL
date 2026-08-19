@@ -1,5 +1,6 @@
 #include "coccl_runtime.h"
 
+#include "coccl_autotune.h"
 #include "coccl_config.h"
 #include "coccl_allgather.h"
 #include "coccl_allreduce.h"
@@ -76,50 +77,14 @@ bool totalBytes(const cocclInfo& info,
   return true;
 }
 
-bool hierarchicalTopology(ncclComm_t comm) {
-  return comm->nNodes > 1 && comm->localRanks > 1 &&
-      comm->nRanks == comm->nNodes * comm->localRanks;
-}
-
-cocclAlgorithmKind selectAlgorithm(const cocclInfo& info) {
-  if (info.operation != cocclOperation::ReduceScatter &&
-      info.operation != cocclOperation::AllReduce) {
-    return cocclAlgorithmNone;
-  }
-  const cocclAutotuneConfig& config = cocclGetConfig().autotune;
-  if (info.operation == cocclOperation::ReduceScatter) {
-    if (config.reduceScatterAlgorithm ==
-        cocclReduceScatterAlgorithmPolicy::OneShot) {
-      return cocclAlgorithmReduceScatterOneShot;
-    }
-    if (config.reduceScatterAlgorithm ==
-            cocclReduceScatterAlgorithmPolicy::TwoShot &&
-        !hierarchicalTopology(info.comm)) {
-      return cocclAlgorithmReduceScatterOneShot;
-    }
-    return hierarchicalTopology(info.comm)
-        ? cocclAlgorithmReduceScatterTwoShot
-        : cocclAlgorithmReduceScatterOneShot;
-  }
-  if (info.operation == cocclOperation::AllReduce) {
-    switch (config.allReduceAlgorithm) {
-      case cocclAllReduceAlgorithmPolicy::OneShot:
-        return cocclAlgorithmAllReduceOneShot;
-      case cocclAllReduceAlgorithmPolicy::TripleShot:
-        return hierarchicalTopology(info.comm)
-            ? cocclAlgorithmAllReduceTripleShot
-            : cocclAlgorithmAllReduceTwoShot;
-      case cocclAllReduceAlgorithmPolicy::Auto:
-      case cocclAllReduceAlgorithmPolicy::TwoShot:
-        return cocclAlgorithmAllReduceTwoShot;
-    }
-  }
-  return cocclAlgorithmNone;
-}
-
 bool hierarchicalAlgorithm(cocclAlgorithmKind algorithm) {
   return algorithm == cocclAlgorithmReduceScatterTwoShot ||
       algorithm == cocclAlgorithmAllReduceTripleShot;
+}
+
+bool tunableReduction(cocclOperation operation) {
+  return operation == cocclOperation::ReduceScatter ||
+      operation == cocclOperation::AllReduce;
 }
 
 bool sendRecvForward(const cocclInfo& info) {
@@ -192,7 +157,6 @@ ncclResult_t cocclEnqueueCheck(const cocclInfo* info, bool* isEnqueued) {
   cocclPreparedCall prepared;
   prepared.info = *info;
   prepared.descriptor = descriptor;
-  prepared.algorithm = selectAlgorithm(*info);
   cocclResolvedCompressorPolicy resolved;
   if (resolvePreparedCompressor(&prepared, &resolved) != ncclSuccess) {
     return routeNativeGroupedSendRecv(*info, isEnqueued);
@@ -202,6 +166,9 @@ ncclResult_t cocclEnqueueCheck(const cocclInfo* info, bool* isEnqueued) {
   }
   if (bytes <= resolved.thresholdBytes) {
     return routeNativeGroupedSendRecv(*info, isEnqueued);
+  }
+  if (tunableReduction(info->operation)) {
+    NCCLCHECK(cocclSelectAlgorithm(&prepared));
   }
 
   NCCLCHECK(cocclEnqueuePreparedCall(&prepared));
@@ -224,10 +191,13 @@ ncclResult_t cocclEnqueueExplicitCall(
   cocclPreparedCall prepared;
   prepared.info = *info;
   prepared.descriptor = descriptor;
-  prepared.algorithm = algorithm == cocclAlgorithmNone
-      ? selectAlgorithm(*info) : algorithm;
+  prepared.algorithm = algorithm;
   cocclResolvedCompressorPolicy resolved;
   NCCLCHECK(resolvePreparedCompressor(&prepared, &resolved));
+  if (algorithm == cocclAlgorithmNone &&
+      tunableReduction(info->operation)) {
+    NCCLCHECK(cocclSelectAlgorithm(&prepared));
+  }
   if (!compressorDatatypeSupported(info->datatype, prepared.compressor)) {
     return cocclReplayNativeCall(*info);
   }

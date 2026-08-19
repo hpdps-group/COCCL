@@ -142,11 +142,18 @@ M14_DIETGPU_CODEC_TEST := $(DST_DIR)/coccl_m14_dietgpu_codec_test
 M15_SWIZZLE_PLAN_TEST := $(DST_DIR)/coccl_m15_swizzle_plan_test
 M15_REDUCESCATTER_RECIPE_TEST := $(DST_DIR)/coccl_m15_reducescatter_recipe_test
 M16_CORRECTNESS_TEST := $(DST_DIR)/coccl_m16_correctness
+M18_AUTOTUNE_TEST := $(DST_DIR)/coccl_m18_autotune_test
+M18_MODEL_SELECTOR := $(DST_DIR)/coccl_m18_model_selector
+M18_COST_MODEL_SRC := $(COCCL_SRC)/misc/tuning/coccl_autotune_cost_model.cc
+M18_AUTOTUNE_INTERNAL := $(COCCL_SRC)/misc/tuning/coccl_autotune_internal.h
 DIETGPU_INTEGER_TEST := $(DST_DIR)/coccl_dietgpu_integer_test
 
 dietgpu-integer-build: $(DIETGPU_INTEGER_TEST)
 
 m16-correctness-build: $(M16_CORRECTNESS_TEST)
+
+m18-host-tests: $(M18_AUTOTUNE_TEST) $(M18_MODEL_SELECTOR)
+	$(M18_AUTOTUNE_TEST)
 
 m15-layout-test: $(M5_PIPELINE_LAYOUT_TEST)
 	$(M5_PIPELINE_LAYOUT_TEST)
@@ -312,6 +319,20 @@ $(M16_CORRECTNESS_TEST): coccl_m16_correctness.cu
 	@printf "Linking  %-35s > %s\n" $< $@
 	@mkdir -p $(DST_DIR)
 	$(NVCC) -o $@ $(NVCUFLAGS) $< $(NVLDFLAGS)
+
+$(M18_AUTOTUNE_TEST): coccl_m18_autotune_test.cc \
+		$(M18_COST_MODEL_SRC) $(M18_AUTOTUNE_INTERNAL)
+	@printf "Linking  %-35s > %s\n" $< $@
+	@mkdir -p $(DST_DIR)
+	$(CXX) $(M1_CXXFLAGS) $(COCCL_INC) -I$(COCCL_SRC) \
+		-o $@ $< $(M18_COST_MODEL_SRC)
+
+$(M18_MODEL_SELECTOR): coccl_m18_model_selector.cc \
+		$(M18_COST_MODEL_SRC) $(M18_AUTOTUNE_INTERNAL)
+	@printf "Linking  %-35s > %s\n" $< $@
+	@mkdir -p $(DST_DIR)
+	$(CXX) $(M1_CXXFLAGS) $(COCCL_INC) -I$(COCCL_SRC) \
+		-o $@ $< $(M18_COST_MODEL_SRC)
 
 $(DIETGPU_INTEGER_TEST): coccl_dietgpu_integer_test.cu
 	@printf "Linking  %-35s > %s\n" $< $@

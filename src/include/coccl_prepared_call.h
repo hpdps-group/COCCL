@@ -19,6 +19,10 @@ struct cocclPreparedCall {
   cocclPolicyKey policy;
   cocclAlgorithmKind algorithm = cocclAlgorithmNone;
   void* compressor = nullptr;
+  double oneShotUs = 0.0;
+  double twoShotUs = 0.0;
+  double tripleShotUs = 0.0;
+  bool usedModel = false;
 };
 
 ncclResult_t cocclEnqueuePreparedCall(const cocclPreparedCall* prepared);

@@ -133,6 +133,42 @@ const cocclConfig& cocclGetConfig() {
   return config;
 }
 
+ncclResult_t cocclSelectAlgorithm(cocclPreparedCall* prepared) {
+  const bool hierarchical = prepared->info.comm->nNodes > 1 &&
+      prepared->info.comm->localRanks > 1;
+  if (prepared->info.operation == cocclOperation::ReduceScatter) {
+    prepared->algorithm =
+        config.autotune.reduceScatterAlgorithm ==
+                cocclReduceScatterAlgorithmPolicy::OneShot ||
+            !hierarchical
+        ? cocclAlgorithmReduceScatterOneShot
+        : cocclAlgorithmReduceScatterTwoShot;
+  } else {
+    switch (config.autotune.allReduceAlgorithm) {
+      case cocclAllReduceAlgorithmPolicy::OneShot:
+        prepared->algorithm = cocclAlgorithmAllReduceOneShot;
+        break;
+      case cocclAllReduceAlgorithmPolicy::TripleShot:
+        prepared->algorithm = hierarchical
+            ? cocclAlgorithmAllReduceTripleShot
+            : cocclAlgorithmAllReduceTwoShot;
+        break;
+      case cocclAllReduceAlgorithmPolicy::Auto:
+      case cocclAllReduceAlgorithmPolicy::TwoShot:
+        prepared->algorithm = cocclAlgorithmAllReduceTwoShot;
+        break;
+    }
+  }
+  if (prepared->algorithm == cocclAlgorithmReduceScatterTwoShot ||
+      prepared->algorithm == cocclAlgorithmAllReduceTripleShot) {
+    prepared->policy = cocclHierarchicalPolicy(prepared->info.operation);
+    cocclResolvedCompressorPolicy resolved;
+    NCCLCHECK(cocclResolveCompressorPolicy(prepared->policy, &resolved));
+    prepared->compressor = resolved.compressor;
+  }
+  return ncclSuccess;
+}
+
 ncclResult_t cocclGroupEnqueue(const cocclPreparedCall* prepared) {
   grouped.push_back(*prepared);
   return ncclSuccess;
@@ -341,7 +377,7 @@ int main() {
   reduction.operation = cocclOperation::ReduceScatter;
   reduction.op = ncclSum;
   EXPECT(cocclEnqueueCheck(&reduction, &enqueued) == ncclSuccess);
-  EXPECT(enqueued && policyQueries == 1 &&
+  EXPECT(enqueued && policyQueries == 2 &&
          lastPolicy.variant == cocclPolicyVariant::Hierarchical &&
          executedAlgorithm == cocclAlgorithmReduceScatterTwoShot);
   comm.nNodes = 1;

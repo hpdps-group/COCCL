@@ -31,6 +31,7 @@ bool cocclCompressorPolicySupports(
     cocclPolicyKey key, cocclCompressorCapability capability);
 bool cocclCompressorSupports(
     void* compressor, cocclCompressorCapability capability);
+const cocclCompressorPlugin* cocclCompressorDescriptor(void* compressor);
 
 ncclResult_t ncclCompress(
     void* compressor, const cocclCompressorView& input,
