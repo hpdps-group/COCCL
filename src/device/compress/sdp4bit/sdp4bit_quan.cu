@@ -21,7 +21,6 @@ struct Sdp4BitConfig {
   int outGroupCount = 0;
   int pipelineSize = 1;
   bool subAdd = false;
-  bool hierarchical = false;
 
   int inputBits() const {
     return inQuantBits == 0 ? quantBits : inQuantBits;
@@ -200,28 +199,6 @@ void launchQuant(int8_t* output, const T* input, const coccl::Input& shape,
 }
 
 template <typename T>
-void launchHierarchicalQuant(int8_t* output, const T* input,
-                             const coccl::Input& shape,
-                             const Sdp4BitConfig& config,
-                             const coccl::Context& context) {
-  const int groupCount = config.inputGroups();
-  const int quantBits = config.inputBits();
-  if (config.hadamard) {
-    launch_swizzled_quant_ht(
-        output, nullptr, input, quantBits, config.quantType,
-        (int)shape.chunks(), (int64_t)shape.elementsPerChunk(), groupCount,
-        config.pipelineSize, context.nodes(), context.devicesPerNode(),
-        context.stream());
-  } else {
-    launch_swizzled_quant(
-        output, nullptr, input, quantBits, config.quantType,
-        (int)shape.chunks(), (int64_t)shape.elementsPerChunk(), groupCount,
-        config.pipelineSize, context.nodes(), context.devicesPerNode(),
-        context.stream());
-  }
-}
-
-template <typename T>
 void launchDequant(T* output, const coccl::Input& input,
                    const coccl::Output& shape,
                    const Sdp4BitConfig& config, cudaStream_t stream) {
@@ -242,11 +219,9 @@ void launchDequant(T* output, const coccl::Input& input,
 
 struct Sdp4BitCompressor {
   using Config = Sdp4BitConfig;
-  static constexpr bool kFusedHierarchicalSwizzle = true;
 
   static coccl::Status configure(coccl::ConfigReader& reader, Config& config,
-                                 const coccl::ConfigContext& context) {
-    config.hierarchical = context.hierarchical();
+                                 const coccl::ConfigContext&) {
     coccl::Status result =
         reader.get("groupCount", config.groupCount, 1, INT_MAX)
             .get("quantBits", config.quantBits, 1, 8)
@@ -358,13 +333,8 @@ struct Sdp4BitCompressor {
       cudaResult = cudaGetLastError();
     } else {
       auto launch = [&](const auto* typedInput) {
-        if (config.hierarchical && !config.subAdd) {
-          launchHierarchicalQuant(output.dataAs<int8_t>(), typedInput, input,
-                                  config, context);
-        } else {
-          launchQuant(output.dataAs<int8_t>(), typedInput, input, config,
-                      context.stream());
-        }
+        launchQuant(output.dataAs<int8_t>(), typedInput, input, config,
+                    context.stream());
       };
       switch (input.datatype()) {
         case ncclFloat32: launch(input.dataAs<float>()); break;
