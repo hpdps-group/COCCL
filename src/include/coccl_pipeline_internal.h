@@ -48,6 +48,9 @@ struct cocclPipelineStageContext {
   ncclComm_t ownerComm;
   void* compressor;
   cocclPipelineFrameResources* frameResources;
+  cocclPipelineInputLayout inputLayout;
+  int nNodes;
+  int ranksPerNode;
 };
 
 enum cocclPipelineTempRole {

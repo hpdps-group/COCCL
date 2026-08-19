@@ -190,6 +190,15 @@ cocclPipelineStageOutput stageOutput(const cocclPipelineContext& context,
 ncclResult_t runSerial(const cocclPipelineContext& context,
                        const cocclPipelineWorkspace& workspace) {
   cocclPipelineEdge edge = inputEdge(context, 0);
+  if (context.plan.inputStagingTemp >= 0) {
+    const cocclPipelineStage pack = cocclPipelinePack();
+    const cocclPipelineStageOutput output = {
+        tempPtr(context, workspace, 0, context.plan.inputStagingTemp),
+        edge.bytes, nullptr, 0};
+    NCCLCHECK(cocclExecutePipelineStage(
+        &context.stageContext, &pack, &edge, &output,
+        context.spec->stream));
+  }
   for (int stage = 0; stage < context.spec->stageCount; ++stage) {
     const cocclPipelineStageOutput output =
         stageOutput(context, workspace, stage, 0);

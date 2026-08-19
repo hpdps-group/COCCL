@@ -71,7 +71,8 @@ endif
 .PHONY: build clean m1-host-tests m1-plugin-load-test m2-host-tests \
 	m3-host-tests m4-host-tests m5-host-tests m5-layout-test m6-host-tests \
 	m7-host-tests m8-host-tests m9-host-tests m10-host-tests m11-host-tests \
-	m12-host-tests m13-host-tests m14-host-tests m14-codec-build
+	m12-host-tests m13-host-tests m14-host-tests m14-codec-build \
+	m15-host-tests m15-layout-test
 
 BUILDDIR ?= ../build
 ifneq ($(NCCL_HOME), "")
@@ -137,6 +138,19 @@ M13_GROUP_BATCH_TEST := $(DST_DIR)/coccl_m13_group_batch_test
 M14_FRAME_STAGE_STUB := coccl_m14_frame_stage_stub.cc
 M14_FRAMED_PLAN_TEST := $(DST_DIR)/coccl_m14_framed_plan_test
 M14_DIETGPU_CODEC_TEST := $(DST_DIR)/coccl_m14_dietgpu_codec_test
+M15_SWIZZLE_PLAN_TEST := $(DST_DIR)/coccl_m15_swizzle_plan_test
+M15_REDUCESCATTER_RECIPE_TEST := $(DST_DIR)/coccl_m15_reducescatter_recipe_test
+
+m15-layout-test: $(M5_PIPELINE_LAYOUT_TEST)
+	$(M5_PIPELINE_LAYOUT_TEST)
+
+m15-host-tests: $(M15_SWIZZLE_PLAN_TEST) \
+		$(M15_REDUCESCATTER_RECIPE_TEST) $(M8_ALLREDUCE_RECIPE_TEST) \
+		$(M1_PLUGIN_LOAD_TEST)
+	$(M15_SWIZZLE_PLAN_TEST)
+	$(M15_REDUCESCATTER_RECIPE_TEST)
+	$(M8_ALLREDUCE_RECIPE_TEST)
+	$(M1_PLUGIN_LOAD_TEST) $(M1_PLUGIN_DIR) dietgpu
 
 m14-codec-build: $(M14_DIETGPU_CODEC_TEST)
 
@@ -275,6 +289,18 @@ $(M14_DIETGPU_CODEC_TEST): coccl_m14_dietgpu_codec_test.cu
 	@mkdir -p $(DST_DIR)
 	$(NVCC) -o $@ $(NVCUFLAGS) $(COCCL_INC) $< -ldl $(LDFLAGS)
 
+$(M15_SWIZZLE_PLAN_TEST): coccl_m15_swizzle_plan_test.cc \
+		$(COCCL_SRC)/misc/coccl_pipeline_plan.cc $(M11_SIZE_QUERY_STUB)
+	@printf "Linking  %-35s > %s\n" $< $@
+	@mkdir -p $(DST_DIR)
+	$(CXX) $(M1_CXXFLAGS) $(COCCL_INC) -I$(COCCL_SRC) -o $@ $^
+
+$(M15_REDUCESCATTER_RECIPE_TEST): coccl_m15_reducescatter_recipe_test.cc \
+		$(COCCL_SRC)/misc/coccl_reducescatter.cc
+	@printf "Linking  %-35s > %s\n" $< $@
+	@mkdir -p $(DST_DIR)
+	$(CXX) $(M1_CXXFLAGS) $(COCCL_INC) -I$(COCCL_SRC) -o $@ $^
+
 $(M2_RUNTIME_TEST): coccl_m2_runtime_test.cc \
 		$(COCCL_SRC)/misc/coccl_runtime.cc
 	@printf "Linking  %-35s > %s\n" $< $@
@@ -319,7 +345,8 @@ $(M5_PIPELINE_LAYOUT_TEST): coccl_m5_pipeline_layout_test.cu \
 		$(COCCL_SRC)/device/pipeline/coccl_pipeline_layout.cu Makefile
 	@printf "Linking  %-35s > %s\n" $< $@
 	@mkdir -p $(DST_DIR)
-	$(NVCC) -o $@ $(NVCUFLAGS) $(COCCL_INC) \
+	$(NVCC) -o $@ $(filter-out -std=c++11,$(NVCUFLAGS)) -std=c++17 \
+		$(COCCL_INC) \
 		$(filter-out Makefile,$^) $(LDFLAGS)
 
 $(M6_ALLGATHER_PLAN_TEST): coccl_m6_allgather_plan_test.cc \

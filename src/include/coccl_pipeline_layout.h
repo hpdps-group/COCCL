@@ -3,12 +3,15 @@
 
 #include <stddef.h>
 
+#include "coccl_pipeline.h"
 #include "nccl.h"
 
 // Packs one slice from rank-major pitched chunks into one contiguous edge.
 ncclResult_t cocclLaunchPackSlice(const void* source,
                                   size_t sourcePitchBytes, void* destination,
                                   size_t sliceBytes, size_t chunkCount,
+                                  cocclPipelineInputLayout inputLayout,
+                                  int nNodes, int ranksPerNode,
                                   cudaStream_t stream);
 
 // Scatters one contiguous edge back into the same slice of each rank chunk.

@@ -7,6 +7,12 @@
 
 #include "coccl_pipeline_layout.h"
 
+#ifdef COCCL_M15_LEGACY_LAYOUT_API
+ncclResult_t cocclLaunchPackSlice(
+    const void* source, size_t sourcePitchBytes, void* destination,
+    size_t sliceBytes, size_t chunkCount, cudaStream_t stream);
+#endif
+
 namespace {
 
 constexpr unsigned char kGuard = 0xa5;
@@ -34,10 +40,29 @@ struct LayoutCase {
   size_t padding;
   size_t sourceOffset;
   size_t packedOffset;
+  cocclPipelineInputLayout inputLayout;
+  int nNodes;
+  int ranksPerNode;
 };
 
 unsigned char value(size_t row, size_t column) {
   return (unsigned char)((row * 131 + column * 17 + 29) & 0xff);
+}
+
+ncclResult_t launchPack(const void* source, size_t sourcePitchBytes,
+                        void* destination, size_t sliceBytes,
+                        size_t chunkCount,
+                        cocclPipelineInputLayout inputLayout,
+                        int nNodes, int ranksPerNode,
+                        cudaStream_t stream) {
+#ifdef COCCL_M15_LEGACY_LAYOUT_API
+  return cocclLaunchPackSlice(source, sourcePitchBytes, destination,
+                              sliceBytes, chunkCount, stream);
+#else
+  return cocclLaunchPackSlice(source, sourcePitchBytes, destination,
+                              sliceBytes, chunkCount, inputLayout,
+                              nNodes, ranksPerNode, stream);
+#endif
 }
 
 bool unchanged(const std::vector<unsigned char>& data, size_t begin,
@@ -90,8 +115,9 @@ bool runCase(const LayoutCase& test) {
       devicePacked + kGuardBytes + test.packedOffset;
   unsigned char* deviceUnpackedData =
       deviceUnpacked + kGuardBytes + test.sourceOffset;
-  NCCL_CHECK(cocclLaunchPackSlice(deviceSourceData, pitch, devicePackedData,
-                                  test.sliceBytes, test.chunks, stream));
+  NCCL_CHECK(launchPack(deviceSourceData, pitch, devicePackedData,
+                        test.sliceBytes, test.chunks, test.inputLayout,
+                        test.nNodes, test.ranksPerNode, stream));
   NCCL_CHECK(cocclLaunchUnpackSlice(devicePackedData, deviceUnpackedData,
                                     pitch, test.sliceBytes, test.chunks,
                                     stream));
@@ -106,21 +132,27 @@ bool runCase(const LayoutCase& test) {
       packed.data() + kGuardBytes + test.packedOffset;
   const unsigned char* unpackedData =
       unpacked.data() + kGuardBytes + test.sourceOffset;
-  for (size_t row = 0; row < test.chunks && passed; ++row) {
+  for (size_t sourceRow = 0; sourceRow < test.chunks && passed; ++sourceRow) {
+    const size_t packedRow = test.inputLayout ==
+            cocclPipelineInputHierarchicalSwizzle
+        ? (sourceRow % (size_t)test.ranksPerNode) *
+              (size_t)test.nNodes +
+              sourceRow / (size_t)test.ranksPerNode
+        : sourceRow;
     for (size_t column = 0; column < test.sliceBytes; ++column) {
-      const unsigned char expected = value(row, column);
-      if (packedData[row * test.sliceBytes + column] != expected ||
-          unpackedData[row * pitch + column] != expected) {
+      const unsigned char expected = value(sourceRow, column);
+      if (packedData[packedRow * test.sliceBytes + column] != expected ||
+          unpackedData[packedRow * pitch + column] != expected) {
         passed = false;
         break;
       }
     }
-    if (row + 1 < test.chunks) {
-      passed &= unchanged(unpacked,
-                          kGuardBytes + test.sourceOffset + row * pitch +
-                              test.sliceBytes,
-                          kGuardBytes + test.sourceOffset + (row + 1) * pitch);
-    }
+  }
+  for (size_t row = 0; row + 1 < test.chunks; ++row) {
+    passed &= unchanged(unpacked,
+                        kGuardBytes + test.sourceOffset + row * pitch +
+                            test.sliceBytes,
+                        kGuardBytes + test.sourceOffset + (row + 1) * pitch);
   }
   passed &= unchanged(packed, 0, kGuardBytes + test.packedOffset);
   passed &= unchanged(packed,
@@ -138,12 +170,13 @@ bool runCase(const LayoutCase& test) {
   return passed;
 }
 
-float measure(bool pack, const unsigned char* source,
+float measure(bool pack, cocclPipelineInputLayout inputLayout,
+              const unsigned char* source,
               unsigned char* destination, size_t chunkBytes,
               size_t sliceBytes, size_t chunks, int depth,
               cudaStream_t stream) {
-  constexpr int warmup = 5;
-  constexpr int iterations = 20;
+  constexpr int warmup = 20;
+  constexpr int iterations = 30;
   cudaEvent_t start = nullptr;
   cudaEvent_t stop = nullptr;
   CUDA_CHECK(cudaEventCreate(&start));
@@ -151,9 +184,10 @@ float measure(bool pack, const unsigned char* source,
   auto launch = [&]() {
     for (int slice = 0; slice < depth; ++slice) {
       if (pack) {
-        NCCL_CHECK(cocclLaunchPackSlice(
+        NCCL_CHECK(launchPack(
             source + (size_t)slice * sliceBytes, chunkBytes, destination,
-            sliceBytes, chunks, stream));
+            sliceBytes, chunks, inputLayout, 2, 4,
+            stream));
       } else {
         NCCL_CHECK(cocclLaunchUnpackSlice(
             source, destination + (size_t)slice * sliceBytes, chunkBytes,
@@ -174,13 +208,8 @@ float measure(bool pack, const unsigned char* source,
   return elapsedMs * 1000.0f / iterations;
 }
 
-void benchmark(size_t bytes, int depth) {
-  constexpr size_t chunks = 4;
-  if (depth == 1) {
-    std::printf("bytes,chunks,depth,pack_us,unpack_us,layout_us\n");
-    std::printf("%zu,%zu,%d,0,0,0\n", bytes, chunks, depth);
-    return;
-  }
+void benchmark(size_t bytes, int depth, const char* mode) {
+  constexpr size_t chunks = 8;
   const size_t chunkBytes = bytes / chunks;
   const size_t sliceBytes = chunkBytes / (size_t)depth;
   const size_t packedBytes = sliceBytes * chunks;
@@ -193,13 +222,17 @@ void benchmark(size_t bytes, int depth) {
   CUDA_CHECK(cudaMalloc(&output, bytes));
   CUDA_CHECK(cudaStreamCreateWithFlags(&stream, cudaStreamNonBlocking));
   CUDA_CHECK(cudaMemsetAsync(raw, 0x5a, bytes, stream));
-  const float packUs = measure(true, raw, packed, chunkBytes, sliceBytes,
-                               chunks, depth, stream);
-  const float unpackUs = measure(false, packed, output, chunkBytes,
-                                 sliceBytes, chunks, depth, stream);
-  std::printf("bytes,chunks,depth,pack_us,unpack_us,layout_us\n");
-  std::printf("%zu,%zu,%d,%.6f,%.6f,%.6f\n", bytes, chunks, depth,
-              packUs, unpackUs, packUs + unpackUs);
+  const bool swizzle = std::strcmp(mode, "swizzle") == 0;
+  const bool unpack = std::strcmp(mode, "plain-unpack") == 0;
+  const float timeUs = measure(
+      !unpack,
+      swizzle ? cocclPipelineInputHierarchicalSwizzle
+              : cocclPipelineInputContiguous,
+      unpack ? packed : raw, unpack ? output : packed, chunkBytes,
+      sliceBytes, chunks, depth, stream);
+  std::printf("bytes,chunks,depth,mode,time_us\n");
+  std::printf("%zu,%zu,%d,%s,%.6f\n", bytes, chunks, depth, mode,
+              timeUs);
   CUDA_CHECK(cudaStreamDestroy(stream));
   CUDA_CHECK(cudaFree(output));
   CUDA_CHECK(cudaFree(packed));
@@ -209,19 +242,37 @@ void benchmark(size_t bytes, int depth) {
 }  // namespace
 
 int main(int argc, char** argv) {
-  if (argc == 4 && std::strcmp(argv[1], "--benchmark") == 0) {
-    benchmark(std::strtoull(argv[2], nullptr, 10), std::atoi(argv[3]));
+  if (argc == 5 && std::strcmp(argv[1], "--benchmark") == 0) {
+    benchmark(std::strtoull(argv[2], nullptr, 10), std::atoi(argv[3]),
+              argv[4]);
     return 0;
   }
   const LayoutCase cases[] = {
-      {1, 1, 3, 0, 0},       {3, 4, 5, 1, 3},
-      {16, 4, 16, 0, 0},     {17, 4, 15, 0, 0},
-      {257, 4, 255, 0, 0},   {65535, 4, 65537, 1, 3},
+      {1, 1, 3, 0, 0, cocclPipelineInputContiguous, 1, 1},
+      {3, 4, 5, 1, 3, cocclPipelineInputContiguous, 1, 1},
+      {16, 4, 16, 0, 0, cocclPipelineInputContiguous, 1, 1},
+      {17, 4, 15, 0, 0, cocclPipelineInputContiguous, 1, 1},
+      {257, 4, 255, 0, 0, cocclPipelineInputContiguous, 1, 1},
+      {65535, 4, 65537, 1, 3, cocclPipelineInputContiguous, 1, 1},
+      {16, 8, 48, 0, 0, cocclPipelineInputHierarchicalSwizzle, 2, 4},
+      {8, 8, 56, 8, 0, cocclPipelineInputHierarchicalSwizzle, 2, 4},
+      {4, 8, 60, 12, 0, cocclPipelineInputHierarchicalSwizzle, 4, 2},
+      {3, 8, 61, 9, 1, cocclPipelineInputHierarchicalSwizzle, 4, 2},
   };
   for (const LayoutCase& test : cases) {
     if (!runCase(test)) return 1;
   }
-  std::printf("coccl M5 pipeline layout: PASS (%zu cases)\n",
-              sizeof(cases) / sizeof(cases[0]));
+  size_t testedCases = sizeof(cases) / sizeof(cases[0]);
+  for (int depth : {1, 2, 4, 8}) {
+    for (int slice = 0; slice < depth; ++slice) {
+      const LayoutCase test = {
+          16, 8, 16u * (size_t)(depth - 1),
+          16u * (size_t)slice, 0,
+          cocclPipelineInputHierarchicalSwizzle, 2, 4};
+      if (!runCase(test)) return 1;
+      ++testedCases;
+    }
+  }
+  std::printf("coccl M5 pipeline layout: PASS (%zu cases)\n", testedCases);
   return 0;
 }

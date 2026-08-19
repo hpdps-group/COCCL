@@ -599,6 +599,18 @@ struct FramedTraits<Compressor, VoidT<decltype(Compressor::kFramed)>> {
   static constexpr bool value = Compressor::kFramed;
 };
 
+template <typename Compressor, typename = void>
+struct FusedHierarchicalSwizzleTraits {
+  static constexpr bool value = false;
+};
+
+template <typename Compressor>
+struct FusedHierarchicalSwizzleTraits<
+    Compressor,
+    VoidT<decltype(Compressor::kFusedHierarchicalSwizzle)>> {
+  static constexpr bool value = Compressor::kFusedHierarchicalSwizzle;
+};
+
 template <typename Compressor>
 struct PluginAdapter {
   using Config = typename ConfigTraits<Compressor>::Type;
@@ -618,7 +630,9 @@ struct PluginAdapter {
         (HasDecompressReduceCompress<Compressor>::value
              ? cocclCompressorCapabilityDecompressReduceCompress : 0) |
         (FramedTraits<Compressor>::value
-             ? cocclCompressorCapabilityFramed : 0);
+             ? cocclCompressorCapabilityFramed : 0) |
+        (FusedHierarchicalSwizzleTraits<Compressor>::value
+             ? cocclCompressorCapabilityFusedHierarchicalSwizzle : 0);
   }
 
   static Status execute(cocclCompressorCall* call) {

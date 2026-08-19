@@ -93,6 +93,7 @@ void testHierarchicalReduction(ncclComm_t owner, ncclComm_t intra,
       "framed-reducescatter-twoshot", owner, 4, stages, 5);
   spec.compressorPolicy =
       cocclHierarchicalPolicy(cocclOperation::ReduceScatter);
+  spec.inputLayout = cocclPipelineInputHierarchicalSwizzle;
   cocclPipelineContext context = {};
   EXPECT(cocclPreparePipeline(&spec, 4, &context) == ncclSuccess);
   const int drcTemp = context.plan.stageOutputTemp[2];
@@ -114,6 +115,7 @@ int main() {
 
   ncclComm owner = {};
   owner.nRanks = 4;
+  owner.localRanks = 2;
   ncclComm intra = {};
   intra.nRanks = 2;
   ncclComm inter = {};

@@ -90,6 +90,7 @@ void checkTripleShot(ncclComm_t comm, ncclComm_t intra,
   cocclPipelineSpec spec = makeSpec("allreduce-tripleshot", comm, stages, 7);
   spec.compressorPolicy =
       cocclHierarchicalPolicy(cocclOperation::AllReduce);
+  spec.inputLayout = cocclPipelineInputHierarchicalSwizzle;
   cocclPipelineContext context = {};
   EXPECT(cocclPreparePipeline(&spec, 4, &context) == ncclSuccess);
   EXPECT(context.plan.tempCount == 8 && context.plan.finalChunks == 4);
@@ -163,6 +164,7 @@ int main(int argc, char** argv) {
   ncclComm owner = {};
   owner.nRanks = 4;
   owner.rank = 1;
+  owner.localRanks = 2;
   if (argc == 2 && std::strcmp(argv[1], "--csv") == 0) {
     dumpPlans(&owner);
     return 0;

@@ -97,7 +97,9 @@ void checkTwoShot(ncclComm_t owner, ncclComm_t intra, ncclComm_t inter,
       stages,
       5,
       cocclPipelineInPlaceOutputRankChunk,
+      cocclPipelineInputHierarchicalSwizzle,
   };
+  owner->localRanks = intra->nRanks;
   cocclPipelineContext context = {};
   EXPECT(cocclPreparePipeline(&spec, 4, &context) == ncclSuccess);
   EXPECT(context.plan.finalChunks == 1);
@@ -154,6 +156,7 @@ int main(int argc, char** argv) {
   ncclComm owner = {};
   owner.nRanks = 4;
   owner.rank = 1;
+  owner.localRanks = 4;
   if (argc == 2 && std::strcmp(argv[1], "--csv") == 0) {
     dumpPlans(&owner);
     return 0;

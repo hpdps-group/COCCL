@@ -22,6 +22,21 @@ int checkPlugin(const char* directory, const char* name) {
     dlclose(library);
     return 1;
   }
+  if (std::string(name) == "sdp4bit" &&
+      (plugin->capabilities &
+       cocclCompressorCapabilityFusedHierarchicalSwizzle) == 0) {
+    fprintf(stderr, "sdp4bit is missing fused hierarchical swizzle\n");
+    dlclose(library);
+    return 1;
+  }
+  if ((std::string(name) == "zfp" || std::string(name) == "dietgpu") &&
+      (plugin->capabilities &
+       cocclCompressorCapabilityFusedHierarchicalSwizzle) != 0) {
+    fprintf(stderr, "%s unexpectedly advertises fused hierarchical swizzle\n",
+            name);
+    dlclose(library);
+    return 1;
+  }
   cocclCompressorPlugin legacy = *plugin;
   legacy.abiVersion = 7;
   if (cocclValidateCompressorPlugin(name, &legacy, error, sizeof(error))) {

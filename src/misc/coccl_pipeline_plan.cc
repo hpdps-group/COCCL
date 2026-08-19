@@ -434,6 +434,21 @@ ncclResult_t cocclPreparePipeline(const cocclPipelineSpec* spec,
       spec->compressorPolicy, &resolved));
   context->stageContext.compressor = resolved.compressor;
   context->stageContext.frameResources = nullptr;
+  context->stageContext.inputLayout =
+      spec->inputLayout == cocclPipelineInputHierarchicalSwizzle &&
+          !cocclCompressorSupports(
+              resolved.compressor,
+              cocclCompressorCapabilityFusedHierarchicalSwizzle)
+      ? cocclPipelineInputHierarchicalSwizzle
+      : cocclPipelineInputContiguous;
+  context->stageContext.nNodes = 1;
+  context->stageContext.ranksPerNode = 1;
+  if (context->stageContext.inputLayout ==
+      cocclPipelineInputHierarchicalSwizzle) {
+    context->stageContext.ranksPerNode = spec->ownerComm->localRanks;
+    context->stageContext.nNodes =
+        spec->ownerComm->nRanks / spec->ownerComm->localRanks;
+  }
 
   cocclPipelinePlan& plan = context->plan;
   plan.inputStagingTemp = -1;
@@ -444,7 +459,9 @@ ncclResult_t cocclPreparePipeline(const cocclPipelineSpec* spec,
 
   cocclPipelinePlannedEdge edge = {};
   NCCLCHECK(planRawEdge(context, spec->inputChunks, &edge));
-  if (context->depth > 1 && spec->inputChunks > 1) {
+  if (spec->inputChunks > 1 &&
+      (context->depth > 1 || context->stageContext.inputLayout ==
+                                 cocclPipelineInputHierarchicalSwizzle)) {
     NCCLCHECK(addTemp(&plan, cocclPipelineTempInputStaging, edge,
                       &plan.inputStagingTemp));
   }

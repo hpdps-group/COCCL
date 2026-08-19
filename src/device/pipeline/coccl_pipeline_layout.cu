@@ -63,17 +63,23 @@ __device__ __forceinline__ void copyLayoutRow(
                                             elementsPerChunk);
 }
 
-template <typename CopyType>
+template <typename CopyType, bool Swizzle>
 __global__ __launch_bounds__(kLayoutThreads) void packSliceKernel(
     const unsigned char* __restrict__ source, size_t sourcePitchBytes,
     unsigned char* __restrict__ destination, size_t sliceBytes,
-    size_t chunkCount) {
+    size_t chunkCount, int nNodes, int ranksPerNode) {
   const size_t elementsPerChunk = sliceBytes / sizeof(CopyType);
-  for (size_t chunk = blockIdx.y; chunk < chunkCount; chunk += gridDim.y) {
+  for (size_t sourceChunk = blockIdx.y; sourceChunk < chunkCount;
+       sourceChunk += gridDim.y) {
+    const size_t destinationChunk = Swizzle
+        ? (sourceChunk % (size_t)ranksPerNode) * (size_t)nNodes +
+              sourceChunk / (size_t)ranksPerNode
+        : sourceChunk;
     const CopyType* __restrict__ sourceRow =
-        reinterpret_cast<const CopyType*>(source + chunk * sourcePitchBytes);
+        reinterpret_cast<const CopyType*>(
+            source + sourceChunk * sourcePitchBytes);
     CopyType* __restrict__ destinationRow = reinterpret_cast<CopyType*>(
-        destination + chunk * sliceBytes);
+        destination + destinationChunk * sliceBytes);
     copyLayoutRow(sourceRow, destinationRow, elementsPerChunk);
   }
 }
@@ -113,16 +119,49 @@ dim3 layoutGrid(size_t sliceBytes, size_t chunkCount) {
   return dim3(blocksPerRow == 0 ? 1 : blocksPerRow, gridY, 1);
 }
 
-template <typename CopyType>
+template <typename CopyType, bool Swizzle>
 ncclResult_t launchPackTyped(const void* source, size_t sourcePitchBytes,
                              void* destination, size_t sliceBytes,
-                             size_t chunkCount, cudaStream_t stream) {
-  packSliceKernel<CopyType><<<layoutGrid<CopyType>(sliceBytes, chunkCount),
-                              kLayoutThreads, 0, stream>>>(
+                             size_t chunkCount, int nNodes,
+                             int ranksPerNode, cudaStream_t stream) {
+  packSliceKernel<CopyType, Swizzle>
+      <<<layoutGrid<CopyType>(sliceBytes, chunkCount), kLayoutThreads, 0,
+         stream>>>(
       static_cast<const unsigned char*>(source), sourcePitchBytes,
-      static_cast<unsigned char*>(destination), sliceBytes, chunkCount);
+      static_cast<unsigned char*>(destination), sliceBytes, chunkCount,
+      nNodes, ranksPerNode);
   return cudaGetLastError() == cudaSuccess ? ncclSuccess
                                            : ncclUnhandledCudaError;
+}
+
+size_t layoutVectorBytes(const void* source, size_t sourcePitchBytes,
+                         const void* destination,
+                         size_t destinationPitchBytes, size_t sliceBytes);
+
+template <bool Swizzle>
+ncclResult_t dispatchPack(const void* source, size_t sourcePitchBytes,
+                          void* destination, size_t sliceBytes,
+                          size_t chunkCount, int nNodes, int ranksPerNode,
+                          cudaStream_t stream) {
+  switch (layoutVectorBytes(source, sourcePitchBytes, destination, sliceBytes,
+                            sliceBytes)) {
+    case 16:
+      return launchPackTyped<uint4, Swizzle>(
+          source, sourcePitchBytes, destination, sliceBytes, chunkCount,
+          nNodes, ranksPerNode, stream);
+    case 8:
+      return launchPackTyped<unsigned long long, Swizzle>(
+          source, sourcePitchBytes, destination, sliceBytes, chunkCount,
+          nNodes, ranksPerNode, stream);
+    case 4:
+      return launchPackTyped<unsigned int, Swizzle>(
+          source, sourcePitchBytes, destination, sliceBytes, chunkCount,
+          nNodes, ranksPerNode, stream);
+    default:
+      return launchPackTyped<unsigned char, Swizzle>(
+          source, sourcePitchBytes, destination, sliceBytes, chunkCount,
+          nNodes, ranksPerNode, stream);
+  }
 }
 
 template <typename CopyType>
@@ -156,29 +195,18 @@ size_t layoutVectorBytes(const void* source, size_t sourcePitchBytes,
 ncclResult_t cocclLaunchPackSlice(const void* source,
                                   size_t sourcePitchBytes, void* destination,
                                   size_t sliceBytes, size_t chunkCount,
+                                  cocclPipelineInputLayout inputLayout,
+                                  int nNodes, int ranksPerNode,
                                   cudaStream_t stream) {
   if (source == nullptr || destination == nullptr || sliceBytes == 0 ||
       chunkCount == 0 || sourcePitchBytes < sliceBytes) {
     return ncclInvalidArgument;
   }
-  switch (layoutVectorBytes(source, sourcePitchBytes, destination, sliceBytes,
-                            sliceBytes)) {
-    case 16:
-      return launchPackTyped<uint4>(source, sourcePitchBytes, destination,
-                                    sliceBytes, chunkCount, stream);
-    case 8:
-      return launchPackTyped<unsigned long long>(
-          source, sourcePitchBytes, destination, sliceBytes, chunkCount,
-          stream);
-    case 4:
-      return launchPackTyped<unsigned int>(source, sourcePitchBytes,
-                                           destination, sliceBytes,
-                                           chunkCount, stream);
-    default:
-      return launchPackTyped<unsigned char>(source, sourcePitchBytes,
-                                            destination, sliceBytes,
-                                            chunkCount, stream);
-  }
+  return inputLayout == cocclPipelineInputHierarchicalSwizzle
+      ? dispatchPack<true>(source, sourcePitchBytes, destination, sliceBytes,
+                           chunkCount, nNodes, ranksPerNode, stream)
+      : dispatchPack<false>(source, sourcePitchBytes, destination, sliceBytes,
+                            chunkCount, nNodes, ranksPerNode, stream);
 }
 
 ncclResult_t cocclLaunchUnpackSlice(const void* source, void* destination,

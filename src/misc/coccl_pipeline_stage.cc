@@ -236,7 +236,8 @@ ncclResult_t runPack(const cocclPipelineStageContext* context,
                      cudaStream_t stream) {
   NCCLCHECK(cocclLaunchPackSlice(
       edge->ptr, context->rawChunkBytes, output->ptr,
-      context->rawSliceBytes, edge->logicalChunks, stream));
+      context->rawSliceBytes, edge->logicalChunks, context->inputLayout,
+      context->nNodes, context->ranksPerNode, stream));
   edge->ptr = output->ptr;
   return ncclSuccess;
 }

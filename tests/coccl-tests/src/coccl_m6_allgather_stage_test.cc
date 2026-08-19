@@ -79,7 +79,8 @@ ncclResult_t ncclDecompressReduce(
 }
 
 ncclResult_t cocclLaunchPackSlice(const void*, size_t, void*, size_t,
-                                  size_t, cudaStream_t) {
+                                  size_t, cocclPipelineInputLayout, int, int,
+                                  cudaStream_t) {
   return ncclInternalError;
 }
 

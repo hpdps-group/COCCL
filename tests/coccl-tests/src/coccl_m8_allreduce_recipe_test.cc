@@ -59,6 +59,10 @@ ncclResult_t cocclRunPipeline(const cocclPipelineSpec* spec) {
   ++pipelineCalls;
   EXPECT(spec->rawChunkCount == 256 && spec->inputChunks == 4);
   EXPECT(spec->inPlaceLayout == cocclPipelineInPlaceSameBuffer);
+  EXPECT(spec->inputLayout ==
+         (expectedAlgorithm == cocclAlgorithmAllReduceTripleShot
+              ? cocclPipelineInputHierarchicalSwizzle
+              : cocclPipelineInputContiguous));
   if (expectedAlgorithm == cocclAlgorithmAllReduceOneShot) {
     EXPECT(std::strcmp(spec->name, "allreduce-oneshot") == 0);
     EXPECT(spec->stageCount == 3);

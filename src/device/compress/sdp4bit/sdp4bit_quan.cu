@@ -242,6 +242,7 @@ void launchDequant(T* output, const coccl::Input& input,
 
 struct Sdp4BitCompressor {
   using Config = Sdp4BitConfig;
+  static constexpr bool kFusedHierarchicalSwizzle = true;
 
   static coccl::Status configure(coccl::ConfigReader& reader, Config& config,
                                  const coccl::ConfigContext& context) {

@@ -32,6 +32,7 @@ enum cocclCompressorCapability : uint64_t {
   cocclCompressorCapabilityDecompressReduce = 1ULL << 2,
   cocclCompressorCapabilityDecompressReduceCompress = 1ULL << 3,
   cocclCompressorCapabilityFramed = 1ULL << 4,
+  cocclCompressorCapabilityFusedHierarchicalSwizzle = 1ULL << 5,
 };
 
 constexpr uint64_t COCCL_COMPRESSOR_REQUIRED_CAPABILITIES =

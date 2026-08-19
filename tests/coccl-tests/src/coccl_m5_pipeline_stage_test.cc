@@ -82,6 +82,7 @@ ncclResult_t ncclDecompressReduce(
 
 ncclResult_t cocclLaunchPackSlice(const void*, size_t pitch, void*,
                                   size_t sliceBytes, size_t chunks,
+                                  cocclPipelineInputLayout, int, int,
                                   cudaStream_t) {
   ++packCalls;
   EXPECT(pitch == 1024 && sliceBytes == 256 && chunks == 4);
