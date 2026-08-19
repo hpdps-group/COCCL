@@ -1558,7 +1558,9 @@ static ncclResult_t ncclCommInitRankFunc(struct ncclAsyncJob* job_) {
   }
 
   NCCLCHECKGOTO(ncclCompressInit(comm), res, fail);
-  NCCLCHECKGOTO(cocclBufferCommInit(comm), res, fail);
+  if (cocclCompressionEnabled()) {
+    NCCLCHECKGOTO(cocclBufferCommInit(comm), res, fail);
+  }
   // update communicator state
   comm->initState = ncclSuccess;
 

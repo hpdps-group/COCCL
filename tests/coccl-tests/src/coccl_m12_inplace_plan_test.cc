@@ -127,6 +127,8 @@ void checkPlannerLayouts() {
   ncclComm comm = {};
   comm.nRanks = 4;
   comm.rank = 2;
+  comm.localRanks = 2;
+  comm.nNodes = 2;
   constexpr size_t rawChunkCount = 4096;
   constexpr size_t rawChunkBytes = rawChunkCount * sizeof(float);
   constexpr uintptr_t inputBase = 0x100000000ULL;
@@ -134,12 +136,12 @@ void checkPlannerLayouts() {
   cocclM11ConfigureSizeQueryStub(1, 4, 1, 1, false);
 
   const cocclPipelineStage allGatherStages[] = {
-      cocclPipelineCompress(), cocclPipelineAllGather(&comm),
+      cocclPipelineCompress(reinterpret_cast<void*>(0x1)), cocclPipelineAllGather(&comm),
       cocclPipelineDecompress()};
   cocclPipelineSpec allGather = {
       "allgather", reinterpret_cast<void*>(inputBase),
       reinterpret_cast<void*>(outputBase), rawChunkCount, 1, ncclFloat32,
-      cocclDefaultPolicy(cocclOperation::AllGather), &comm, nullptr,
+      &comm, nullptr,
       allGatherStages, 3, cocclPipelineInPlaceInputRankChunk};
   cocclPipelineSpec allGatherInPlace = allGather;
   allGatherInPlace.output = reinterpret_cast<void*>(inputBase);
@@ -148,12 +150,12 @@ void checkPlannerLayouts() {
   expectSamePlan(allGather, allGatherInPlace, 8);
 
   const cocclPipelineStage reduceScatterStages[] = {
-      cocclPipelineCompress(), cocclPipelineAllToAll(&comm),
+      cocclPipelineCompress(reinterpret_cast<void*>(0x1)), cocclPipelineAllToAll(&comm),
       cocclPipelineDecompressReduce(4)};
   cocclPipelineSpec reduceScatter = {
       "reducescatter-oneshot", reinterpret_cast<void*>(inputBase),
       reinterpret_cast<void*>(outputBase), rawChunkCount, 4, ncclFloat32,
-      cocclDefaultPolicy(cocclOperation::ReduceScatter), &comm, nullptr,
+      &comm, nullptr,
       reduceScatterStages, 3, cocclPipelineInPlaceOutputRankChunk};
   cocclPipelineSpec reduceScatterInPlace = reduceScatter;
   reduceScatterInPlace.output = reinterpret_cast<void*>(
@@ -161,13 +163,14 @@ void checkPlannerLayouts() {
   expectSamePlan(reduceScatter, reduceScatterInPlace, 8);
 
   const cocclPipelineStage allReduceStages[] = {
-      cocclPipelineCompress(), cocclPipelineAllToAll(&comm),
-      cocclPipelineDecompReduceComp(4), cocclPipelineAllGather(&comm),
+      cocclPipelineCompress(reinterpret_cast<void*>(0x1)), cocclPipelineAllToAll(&comm),
+      cocclPipelineDecompReduceComp(4, reinterpret_cast<void*>(0x1)),
+      cocclPipelineAllGather(&comm),
       cocclPipelineDecompress()};
   cocclPipelineSpec allReduce = {
       "allreduce-twoshot", reinterpret_cast<void*>(inputBase),
       reinterpret_cast<void*>(outputBase), rawChunkCount, 4, ncclFloat32,
-      cocclDefaultPolicy(cocclOperation::AllReduce), &comm, nullptr,
+      &comm, nullptr,
       allReduceStages, 5, cocclPipelineInPlaceSameBuffer};
   cocclPipelineSpec allReduceInPlace = allReduce;
   allReduceInPlace.output = reinterpret_cast<void*>(inputBase);
@@ -178,30 +181,35 @@ void checkPlannerLayouts() {
   ncclComm inter = {};
   inter.nRanks = 2;
   const cocclPipelineStage reduceScatterTwoShotStages[] = {
-      cocclPipelineCompress(), cocclPipelineAllToAll(&intra),
-      cocclPipelineDecompReduceComp(2), cocclPipelineAllToAll(&inter),
+      cocclPipelineCompress(reinterpret_cast<void*>(0x1)), cocclPipelineAllToAll(&intra),
+      cocclPipelineDecompReduceComp(2, reinterpret_cast<void*>(0x1)),
+      cocclPipelineAllToAll(&inter),
       cocclPipelineDecompressReduce(2)};
   cocclPipelineSpec reduceScatterTwoShot = {
       "reducescatter-twoshot", reinterpret_cast<void*>(inputBase),
       reinterpret_cast<void*>(outputBase), rawChunkCount, 4, ncclFloat32,
-      cocclHierarchicalPolicy(cocclOperation::ReduceScatter), &comm, nullptr,
+      &comm, nullptr,
       reduceScatterTwoShotStages, 5,
-      cocclPipelineInPlaceOutputRankChunk};
+      cocclPipelineInPlaceOutputRankChunk,
+      cocclPipelineInputHierarchicalSwizzle};
   cocclPipelineSpec reduceScatterTwoShotInPlace = reduceScatterTwoShot;
   reduceScatterTwoShotInPlace.output = reinterpret_cast<void*>(
       inputBase + (size_t)comm.rank * rawChunkBytes);
   expectSamePlan(reduceScatterTwoShot, reduceScatterTwoShotInPlace, 8);
 
   const cocclPipelineStage allReduceTripleShotStages[] = {
-      cocclPipelineCompress(), cocclPipelineAllToAll(&intra),
-      cocclPipelineDecompReduceComp(2), cocclPipelineAllToAll(&inter),
-      cocclPipelineDecompReduceComp(2), cocclPipelineAllGather(&comm),
+      cocclPipelineCompress(reinterpret_cast<void*>(0x1)), cocclPipelineAllToAll(&intra),
+      cocclPipelineDecompReduceComp(2, reinterpret_cast<void*>(0x1)),
+      cocclPipelineAllToAll(&inter),
+      cocclPipelineDecompReduceComp(2, reinterpret_cast<void*>(0x1)),
+      cocclPipelineAllGather(&comm),
       cocclPipelineDecompress()};
   cocclPipelineSpec allReduceTripleShot = {
       "allreduce-tripleshot", reinterpret_cast<void*>(inputBase),
       reinterpret_cast<void*>(outputBase), rawChunkCount, 4, ncclFloat32,
-      cocclHierarchicalPolicy(cocclOperation::AllReduce), &comm, nullptr,
-      allReduceTripleShotStages, 7, cocclPipelineInPlaceSameBuffer};
+      &comm, nullptr,
+      allReduceTripleShotStages, 7, cocclPipelineInPlaceSameBuffer,
+      cocclPipelineInputHierarchicalSwizzle};
   cocclPipelineSpec allReduceTripleShotInPlace = allReduceTripleShot;
   allReduceTripleShotInPlace.output = reinterpret_cast<void*>(inputBase);
   expectSamePlan(allReduceTripleShot, allReduceTripleShotInPlace, 8);
@@ -214,12 +222,12 @@ void checkPlannerLayouts() {
   EXPECT(context.depth == 1);
 
   const cocclPipelineStage allToAllStages[] = {
-      cocclPipelineCompress(), cocclPipelineAllToAll(&comm),
+      cocclPipelineCompress(reinterpret_cast<void*>(0x1)), cocclPipelineAllToAll(&comm),
       cocclPipelineDecompress()};
   cocclPipelineSpec allToAll = {
       "alltoall", reinterpret_cast<void*>(inputBase),
       reinterpret_cast<void*>(inputBase), rawChunkCount, 4, ncclFloat32,
-      cocclDefaultPolicy(cocclOperation::AllToAll), &comm, nullptr,
+      &comm, nullptr,
       allToAllStages, 3, cocclPipelineInPlaceNone};
   EXPECT(cocclPreparePipeline(&allToAll, 8, &context) == ncclSuccess);
   EXPECT(context.depth == 1);

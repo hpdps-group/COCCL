@@ -26,12 +26,12 @@ cocclPipelineSpec makeSpec(const char* name, ncclComm_t comm,
       4ULL << 20,
       (size_t)comm->nRanks,
       ncclFloat32,
-      cocclDefaultPolicy(cocclOperation::AllReduce),
       comm,
       nullptr,
       stages,
       stageCount,
       cocclPipelineInPlaceSameBuffer,
+      cocclPipelineInputContiguous,
   };
 }
 
@@ -47,7 +47,7 @@ void expectChunks(const cocclPipelineStage* stages, int stageCount,
 
 void checkOneShot(ncclComm_t comm) {
   const cocclPipelineStage stages[] = {
-      cocclPipelineCompress(), cocclPipelineAllGather(comm),
+      cocclPipelineCompress(reinterpret_cast<void*>(0x1)), cocclPipelineAllGather(comm),
       cocclPipelineDecompressReduce((size_t)comm->nRanks)};
   const size_t chunks[] = {4, 16, 4};
   expectChunks(stages, 3, 4, chunks);
@@ -65,8 +65,9 @@ void checkOneShot(ncclComm_t comm) {
 
 void checkTwoShot(ncclComm_t comm) {
   const cocclPipelineStage stages[] = {
-      cocclPipelineCompress(), cocclPipelineAllToAll(comm),
-      cocclPipelineDecompReduceComp((size_t)comm->nRanks),
+      cocclPipelineCompress(reinterpret_cast<void*>(0x1)), cocclPipelineAllToAll(comm),
+      cocclPipelineDecompReduceComp(
+          (size_t)comm->nRanks, reinterpret_cast<void*>(0x1)),
       cocclPipelineAllGather(comm), cocclPipelineDecompress()};
   const size_t chunks[] = {4, 4, 1, 4, 4};
   expectChunks(stages, 5, 4, chunks);
@@ -80,16 +81,16 @@ void checkTwoShot(ncclComm_t comm) {
 void checkTripleShot(ncclComm_t comm, ncclComm_t intra,
                      ncclComm_t inter) {
   const cocclPipelineStage stages[] = {
-      cocclPipelineCompress(), cocclPipelineAllToAll(intra),
-      cocclPipelineDecompReduceComp(2), cocclPipelineAllToAll(inter),
-      cocclPipelineDecompReduceComp(2), cocclPipelineAllGather(comm),
+      cocclPipelineCompress(reinterpret_cast<void*>(0x1)), cocclPipelineAllToAll(intra),
+      cocclPipelineDecompReduceComp(2, reinterpret_cast<void*>(0x1)),
+      cocclPipelineAllToAll(inter),
+      cocclPipelineDecompReduceComp(2, reinterpret_cast<void*>(0x1)),
+      cocclPipelineAllGather(comm),
       cocclPipelineDecompress()};
   const size_t chunks[] = {4, 4, 2, 2, 1, 4, 4};
   expectChunks(stages, 7, 4, chunks);
 
   cocclPipelineSpec spec = makeSpec("allreduce-tripleshot", comm, stages, 7);
-  spec.compressorPolicy =
-      cocclHierarchicalPolicy(cocclOperation::AllReduce);
   spec.inputLayout = cocclPipelineInputHierarchicalSwizzle;
   cocclPipelineContext context = {};
   EXPECT(cocclPreparePipeline(&spec, 4, &context) == ncclSuccess);
@@ -134,11 +135,12 @@ void dumpPlan(const char* algorithm, ncclComm_t comm,
 
 void dumpPlans(ncclComm_t comm) {
   const cocclPipelineStage oneShot[] = {
-      cocclPipelineCompress(), cocclPipelineAllGather(comm),
+      cocclPipelineCompress(reinterpret_cast<void*>(0x1)), cocclPipelineAllGather(comm),
       cocclPipelineDecompressReduce((size_t)comm->nRanks)};
   const cocclPipelineStage twoShot[] = {
-      cocclPipelineCompress(), cocclPipelineAllToAll(comm),
-      cocclPipelineDecompReduceComp((size_t)comm->nRanks),
+      cocclPipelineCompress(reinterpret_cast<void*>(0x1)), cocclPipelineAllToAll(comm),
+      cocclPipelineDecompReduceComp(
+          (size_t)comm->nRanks, reinterpret_cast<void*>(0x1)),
       cocclPipelineAllGather(comm), cocclPipelineDecompress()};
   const size_t sizes[] = {64ULL << 20, 1ULL << 30, 8ULL << 30};
   const int depths[] = {1, 2, 4, 8};

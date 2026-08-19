@@ -70,6 +70,9 @@ struct ExecutionResources {
 
 constexpr size_t kOperationCount =
     static_cast<size_t>(cocclOperation::Count);
+constexpr size_t kPolicyVariantCount = 3;
+constexpr size_t kCompressionScopeCount =
+    static_cast<size_t>(cocclCompressionScope::Count);
 
 pthread_mutex_t compressorLock = PTHREAD_MUTEX_INITIALIZER;
 bool runtimeInitialized = false;
@@ -81,10 +84,8 @@ std::map<int, int> rankByDevice;
 std::map<int, size_t> communicatorsByDevice;
 std::map<std::string, LoadedPlugin> loadedPlugins;
 std::vector<std::unique_ptr<CompressorPolicy>> ownedPolicies;
-std::array<CompressorPolicy*, kOperationCount> defaultPolicies = {};
-std::array<CompressorPolicy*, kOperationCount> hierarchicalPolicies = {};
-std::array<CompressorPolicy*, kOperationCount> forwardPolicies = {};
-std::array<CompressorPolicy*, kOperationCount> backwardPolicies = {};
+CompressorPolicy* policies[kPolicyVariantCount][kOperationCount]
+                              [kCompressionScopeCount] = {};
 
 class ConfigViewStorage {
  public:
@@ -195,20 +196,15 @@ ncclResult_t loadPlugins(const cocclConfig& config) {
   return ncclSuccess;
 }
 
-ncclResult_t createPolicy(const cocclCompressorPolicyEntry& configured,
-                          cocclCompressorConfigVariant variant,
+ncclResult_t createPolicy(const cocclCompressorScopeEntry& configured,
                           CompressorPolicy** policy) {
   auto plugin = loadedPlugins.find(configured.name);
   if (plugin == loadedPlugins.end()) return ncclInvalidArgument;
 
-  const cocclConfigValues& values =
-      variant == cocclCompressorConfigHierarchical
-          ? configured.hierarchicalValues
-          : configured.defaultValues;
-  ConfigViewStorage storage(values);
+  ConfigViewStorage storage(configured.values);
   const cocclConfigView view = storage.view();
   const cocclCompressorConfigContext context = {
-      variant, runtimeNodes, runtimeDevicesPerNode};
+      cocclCompressorConfigDefault, runtimeNodes, runtimeDevicesPerNode};
   char error[256] = {};
   void* parsedConfig = nullptr;
   ncclResult_t result = plugin->second.descriptor->parseConfig(
@@ -229,37 +225,40 @@ ncclResult_t createPolicy(const cocclCompressorPolicyEntry& configured,
 
 ncclResult_t installPolicy(cocclOperation operation,
                            const cocclPrimitivePolicy& configured,
-                           cocclPolicyVariant variant,
-                           bool hierarchical) {
-  if (configured.compressor.name.empty()) return ncclSuccess;
+                           cocclPolicyVariant variant) {
   const size_t index = static_cast<size_t>(operation);
-  CompressorPolicy** policy = nullptr;
-  switch (variant) {
-    case cocclPolicyVariant::Default:
-      policy = &defaultPolicies[index];
-      break;
-    case cocclPolicyVariant::Forward:
-      policy = &forwardPolicies[index];
-      break;
-    case cocclPolicyVariant::Backward:
-      policy = &backwardPolicies[index];
-      break;
-    case cocclPolicyVariant::Hierarchical:
-      return ncclInvalidUsage;
-  }
-  NCCLCHECK(createPolicy(configured.compressor, cocclCompressorConfigDefault,
-                         policy));
-  (*policy)->thresholdBytes = configured.thresholdBytes;
-  if (variant != cocclPolicyVariant::Default) return ncclSuccess;
-
-  hierarchicalPolicies[index] = *policy;
-  if (hierarchical && configured.compressor.hasHierarchicalConfig) {
-    NCCLCHECK(createPolicy(configured.compressor,
-                           cocclCompressorConfigHierarchical,
-                           &hierarchicalPolicies[index]));
-    hierarchicalPolicies[index]->thresholdBytes = configured.thresholdBytes;
+  const size_t role = static_cast<size_t>(variant);
+  for (cocclCompressionScope scope : {
+           cocclCompressionScope::Default,
+           cocclCompressionScope::Intra,
+           cocclCompressionScope::Inter}) {
+    const size_t scopeIndex = static_cast<size_t>(scope);
+    const cocclEffectiveCompressorScope effective =
+        cocclEffectiveCompressorScopeFor(configured, scope);
+    if (!effective.enabled()) continue;
+    if (scope != cocclCompressionScope::Default &&
+        effective.source == cocclCompressionScope::Default) {
+      policies[role][index][scopeIndex] =
+          policies[role][index][static_cast<size_t>(
+              cocclCompressionScope::Default)];
+      continue;
+    }
+    NCCLCHECK(createPolicy(
+        *effective.entry, &policies[role][index][scopeIndex]));
+    policies[role][index][scopeIndex]->thresholdBytes =
+        configured.thresholdBytes;
   }
   return ncclSuccess;
+}
+
+bool operationHasPolicy(cocclOperation operation) {
+  const size_t operationIndex = static_cast<size_t>(operation);
+  for (size_t role = 0; role < kPolicyVariantCount; ++role) {
+    for (size_t scope = 0; scope < kCompressionScopeCount; ++scope) {
+      if (policies[role][operationIndex][scope] != nullptr) return true;
+    }
+  }
+  return false;
 }
 
 ncclResult_t initializeRuntime(const ncclComm_t comm,
@@ -271,54 +270,51 @@ ncclResult_t initializeRuntime(const ncclComm_t comm,
   if (config.runtime.mode == cocclRuntimeMode::Normal) {
     NCCLCHECK(installPolicy(cocclOperation::AllToAll,
                             config.normal.allToAll,
-                            cocclPolicyVariant::Default, false));
+                            cocclPolicyVariant::Default));
     NCCLCHECK(installPolicy(cocclOperation::AllGather,
                             config.normal.allGather,
-                            cocclPolicyVariant::Default, false));
+                            cocclPolicyVariant::Default));
     NCCLCHECK(installPolicy(cocclOperation::AllReduce,
                             config.normal.allReduce,
-                            cocclPolicyVariant::Default, true));
+                            cocclPolicyVariant::Default));
     NCCLCHECK(installPolicy(cocclOperation::ReduceScatter,
                             config.normal.reduceScatter,
-                            cocclPolicyVariant::Default, true));
+                            cocclPolicyVariant::Default));
     NCCLCHECK(installPolicy(cocclOperation::SendRecv,
                             config.normal.sendRecv,
-                            cocclPolicyVariant::Default, false));
+                            cocclPolicyVariant::Default));
   } else {
     NCCLCHECK(installPolicy(
         cocclOperation::SendRecv,
         config.trainingPolicies.pipelineSendRecvForward,
-        cocclPolicyVariant::Forward, false));
+        cocclPolicyVariant::Forward));
     NCCLCHECK(installPolicy(
         cocclOperation::SendRecv,
         config.trainingPolicies.pipelineSendRecvBackward,
-        cocclPolicyVariant::Backward, false));
+        cocclPolicyVariant::Backward));
   }
 
   CompEnableThreshold = config.runtime.compressionThresholdBytes;
-  enableAllToAllComp = defaultPolicies[static_cast<size_t>(
-      cocclOperation::AllToAll)] != nullptr;
-  enableAllGatherComp = defaultPolicies[static_cast<size_t>(
-      cocclOperation::AllGather)] != nullptr;
-  enableAllReduceComp = defaultPolicies[static_cast<size_t>(
-      cocclOperation::AllReduce)] != nullptr;
-  enableReduceScatterComp = defaultPolicies[static_cast<size_t>(
-      cocclOperation::ReduceScatter)] != nullptr;
-  const size_t sendRecv = static_cast<size_t>(cocclOperation::SendRecv);
-  enableSendRecvComp = defaultPolicies[sendRecv] != nullptr ||
-      forwardPolicies[sendRecv] != nullptr ||
-      backwardPolicies[sendRecv] != nullptr;
+  enableAllToAllComp = operationHasPolicy(cocclOperation::AllToAll);
+  enableAllGatherComp = operationHasPolicy(cocclOperation::AllGather);
+  enableAllReduceComp = operationHasPolicy(cocclOperation::AllReduce);
+  enableReduceScatterComp = operationHasPolicy(
+      cocclOperation::ReduceScatter);
+  enableSendRecvComp = operationHasPolicy(cocclOperation::SendRecv);
   for (cocclOperation operation : {
            cocclOperation::ReduceScatter, cocclOperation::AllReduce}) {
-    const size_t index = static_cast<size_t>(operation);
-    if (defaultPolicies[index] != nullptr) {
-      NCCLCHECK(cocclAutotuneRegisterEnabledCompressor(
-          defaultPolicies[index], cocclDefaultPolicy(operation)));
-    }
-    if (hierarchicalPolicies[index] != nullptr &&
-        hierarchicalPolicies[index] != defaultPolicies[index]) {
-      NCCLCHECK(cocclAutotuneRegisterEnabledCompressor(
-          hierarchicalPolicies[index], cocclHierarchicalPolicy(operation)));
+    CompressorPolicy* previous = nullptr;
+    for (cocclCompressionScope scope : {
+             cocclCompressionScope::Default,
+             cocclCompressionScope::Intra,
+             cocclCompressionScope::Inter}) {
+      CompressorPolicy* policy = policies[0][static_cast<size_t>(operation)]
+                                      [static_cast<size_t>(scope)];
+      if (policy != nullptr && policy != previous) {
+        NCCLCHECK(cocclAutotuneRegisterEnabledCompressor(
+            policy, cocclDefaultPolicy(operation, scope)));
+      }
+      previous = policy;
     }
   }
   return ncclSuccess;
@@ -326,34 +322,34 @@ ncclResult_t initializeRuntime(const ncclComm_t comm,
 
 CompressorPolicy* policyFor(ncclCommOp_t operation) {
   cocclOperation mapped = cocclOperation::Count;
-  bool hierarchical = false;
+  cocclCompressionScope scope = cocclCompressionScope::Default;
   switch (operation) {
     case AlltoAll: mapped = cocclOperation::AllToAll; break;
     case AlltoAll_Inter:
       mapped = cocclOperation::AllToAll;
-      hierarchical = true;
+      scope = cocclCompressionScope::Inter;
       break;
     case AllReduce: mapped = cocclOperation::AllReduce; break;
     case AllReduce_Inter:
       mapped = cocclOperation::AllReduce;
-      hierarchical = true;
+      scope = cocclCompressionScope::Inter;
       break;
     case AllGather: mapped = cocclOperation::AllGather; break;
     case AllGather_Inter:
       mapped = cocclOperation::AllGather;
-      hierarchical = true;
+      scope = cocclCompressionScope::Inter;
       break;
     case ReduceScatter: mapped = cocclOperation::ReduceScatter; break;
     case ReduceScatter_Inter:
       mapped = cocclOperation::ReduceScatter;
-      hierarchical = true;
+      scope = cocclCompressionScope::Inter;
       break;
     case SendRecv:
     case SendRecv_BWD: mapped = cocclOperation::SendRecv; break;
   }
   if (mapped == cocclOperation::Count) return nullptr;
-  const size_t index = static_cast<size_t>(mapped);
-  return hierarchical ? hierarchicalPolicies[index] : defaultPolicies[index];
+  return policies[static_cast<size_t>(cocclPolicyVariant::Default)]
+                 [static_cast<size_t>(mapped)][static_cast<size_t>(scope)];
 }
 
 int rankForDevice(int cudaDev) {
@@ -525,18 +521,14 @@ bool cocclCompressionEnabled() {
 ncclResult_t cocclResolveCompressorPolicy(
     cocclPolicyKey key, cocclResolvedCompressorPolicy* resolved) {
   const size_t index = static_cast<size_t>(key.operation);
-  if (index >= kOperationCount) return ncclInvalidUsage;
-
-  CompressorPolicy* policy = nullptr;
-  if (key.variant == cocclPolicyVariant::Default) {
-    policy = defaultPolicies[index];
-  } else if (key.variant == cocclPolicyVariant::Hierarchical) {
-    policy = hierarchicalPolicies[index];
-  } else if (key.variant == cocclPolicyVariant::Forward) {
-    policy = forwardPolicies[index];
-  } else if (key.variant == cocclPolicyVariant::Backward) {
-    policy = backwardPolicies[index];
+  const size_t role = static_cast<size_t>(key.variant);
+  const size_t scope = static_cast<size_t>(key.scope);
+  if (index >= kOperationCount || role >= kPolicyVariantCount ||
+      scope >= kCompressionScopeCount) {
+    return ncclInvalidUsage;
   }
+
+  CompressorPolicy* policy = policies[role][index][scope];
   if (policy == nullptr) return ncclInvalidUsage;
   resolved->compressor = policy;
   resolved->thresholdBytes = policy->thresholdBytes;
@@ -551,6 +543,17 @@ ncclResult_t cocclGetCompressorEncodedSizeBound(
   NCCLCHECK(cocclResolveCompressorPolicy(key, &resolved));
   CompressorPolicy* policy =
       static_cast<CompressorPolicy*>(resolved.compressor);
+  return cocclQueryCompressorEncodedSizeBound(
+      policy->plugin, policy->config, operation, elements, chunks,
+      datatype, encodedBytes);
+}
+
+ncclResult_t cocclGetCompressorEncodedSizeBound(
+    void* compressor, cocclCompressorOperation operation,
+    size_t elements, size_t chunks, ncclDataType_t datatype,
+    size_t* encodedBytes) {
+  CompressorPolicy* policy = static_cast<CompressorPolicy*>(compressor);
+  if (policy == nullptr) return ncclInvalidUsage;
   return cocclQueryCompressorEncodedSizeBound(
       policy->plugin, policy->config, operation, elements, chunks,
       datatype, encodedBytes);
@@ -664,16 +667,23 @@ ncclResult_t ncclDecompressReduce(
 }
 
 ncclResult_t ncclDecompReduceComp(
-    void* compressor, ncclComm_t ownerComm,
+    void* decoder, void* encoder, ncclComm_t ownerComm,
     const cocclCompressorView& input, cocclCompressorView* output,
     size_t reduceChunks, ncclDataType_t originalDatatype,
     size_t originalElements, cudaStream_t stream) {
-  CompressorPolicy* policy = static_cast<CompressorPolicy*>(compressor);
-  if (policy == nullptr || output == nullptr) return ncclInvalidArgument;
+  CompressorPolicy* decoderPolicy =
+      static_cast<CompressorPolicy*>(decoder);
+  CompressorPolicy* encoderPolicy =
+      static_cast<CompressorPolicy*>(encoder);
+  if (decoderPolicy == nullptr || encoderPolicy == nullptr ||
+      output == nullptr) {
+    return ncclInvalidArgument;
+  }
   if (input.frameMetadata == nullptr &&
       input.datatype != COCCL_COMPRESSOR_RAW_PASSTHROUGH &&
+      decoder == encoder &&
       cocclCompressorSupports(
-          compressor,
+          decoder,
           cocclCompressorCapabilityDecompressReduceCompress)) {
     int cudaDev = 0;
     CUDACHECK(cudaGetDevice(&cudaDev));
@@ -683,7 +693,7 @@ ncclResult_t ncclDecompReduceComp(
         cocclCompressorOperationDecompressReduceCompress,
         input, output, rank, reduceChunks, originalDatatype,
         originalElements, nullptr, nullptr};
-    NCCLCHECK(execute(policy, &call, rank, stream));
+    NCCLCHECK(execute(decoderPolicy, &call, rank, stream));
     return validateEncodedOutput(*output, input.chunks / reduceChunks);
   }
 
@@ -700,7 +710,7 @@ ncclResult_t ncclDecompReduceComp(
         workspace.ptr, workspace.bytes, decompressedBytes,
         decompressedElements, input.chunks, originalDatatype, nullptr, 0};
     ret = ncclDecompress(
-        compressor, input, &decompressed, stream);
+        decoder, input, &decompressed, stream);
   }
   if (ret == ncclSuccess) {
     ret = ncclReduceChunk(
@@ -712,7 +722,7 @@ ncclResult_t ncclDecompReduceComp(
         workspace.ptr, reducedBytes, reducedBytes, originalElements,
         input.chunks / reduceChunks, originalDatatype, nullptr, 0};
     ret = ncclCompress(
-        compressor, reduced, output, 0, stream);
+        encoder, reduced, output, ownerComm->rank, stream);
   }
   const ncclResult_t release =
       cocclReleaseBuffer(&workspace, stream);
@@ -728,12 +738,13 @@ ncclResult_t ncclCompressInit(const ncclComm_t comm) {
         ? initializeRuntime(comm, cocclGetConfig()) : ncclSuccess;
   }
   const ncclResult_t result = runtimeInitResult;
-  if (result == ncclSuccess) {
+  if (result == ncclSuccess && configReady) {
     rankByDevice[comm->cudaDev] = comm->rank;
     ++communicatorsByDevice[comm->cudaDev];
   }
   pthread_mutex_unlock(&compressorLock);
   if (result != ncclSuccess) return result;
+  if (!configReady) return ncclSuccess;
 
   const ncclResult_t autotuneResult =
       cocclAutotuneEnsureGlobalModels(comm);

@@ -12,6 +12,11 @@ bool valueIs(const cocclConfigValues& values, const char* key,
   return value != values.end() && value->second == expected;
 }
 
+const cocclCompressorScopeEntry& scope(
+    const cocclPrimitivePolicy& policy, cocclCompressionScope value) {
+  return cocclConfiguredCompressorScope(policy, value);
+}
+
 int checkCatalog(const cocclConfig& config) {
   return config.plugins.compressors.size() == 2 &&
          config.plugins.compressors[0] == "sdp4bit" &&
@@ -29,26 +34,35 @@ int checkSdp(const char* path) {
     return 1;
   }
   if (checkCatalog(config) || config.runtime.compressionThresholdBytes != 0 ||
-      config.normal.allToAll.compressor.name != "sdp4bit" ||
-      config.normal.allGather.compressor.name != "sdp4bit" ||
-      config.normal.allReduce.compressor.name != "sdp4bit" ||
-      config.normal.reduceScatter.compressor.name != "sdp4bit") {
+      scope(config.normal.allToAll, cocclCompressionScope::Default).name !=
+          "sdp4bit" ||
+      scope(config.normal.allGather, cocclCompressionScope::Default).name !=
+          "sdp4bit" ||
+      scope(config.normal.allReduce, cocclCompressionScope::Default).name !=
+          "sdp4bit" ||
+      scope(config.normal.reduceScatter,
+            cocclCompressionScope::Default).name != "sdp4bit") {
     fprintf(stderr, "SDP4Bit policy mapping is incomplete\n");
     return 1;
   }
-  const auto& a2a = config.normal.allToAll.compressor.defaultValues;
-  const auto& ar = config.normal.allReduce.compressor.defaultValues;
-  const auto& arHier =
-      config.normal.allReduce.compressor.hierarchicalValues;
-  const auto& rs = config.normal.reduceScatter.compressor.defaultValues;
+  const auto& a2a = scope(
+      config.normal.allToAll, cocclCompressionScope::Default).values;
+  const auto& ar = scope(
+      config.normal.allReduce, cocclCompressionScope::Default).values;
+  const auto& arInter = scope(
+      config.normal.allReduce, cocclCompressionScope::Inter).values;
+  const auto& rs = scope(
+      config.normal.reduceScatter, cocclCompressionScope::Default).values;
   if (!valueIs(a2a, "groupCount", "2048") ||
       !valueIs(a2a, "quantBits", "4") ||
       !valueIs(a2a, "quantType", "Symmetric") ||
       !valueIs(ar, "groupCount", "128") ||
       !valueIs(ar, "hadamard", "false") ||
-      !valueIs(arHier, "inQuantBits", "4") ||
-      !valueIs(arHier, "outQuantBits", "4") ||
-      !valueIs(arHier, "hadamard", "true") ||
+      !valueIs(arInter, "quantBits", "4") ||
+      !valueIs(arInter, "groupCount", "128") ||
+      !valueIs(arInter, "hadamard", "true") ||
+      arInter.count("inQuantBits") != 0 ||
+      arInter.count("inGroupCount") != 0 ||
       !valueIs(rs, "groupCount", "128") ||
       !valueIs(rs, "hadamard", "true")) {
     fprintf(stderr, "SDP4Bit TOML values differ from the M0 configs\n");
@@ -65,17 +79,25 @@ int checkZfp(const char* path) {
     return 1;
   }
   if (checkCatalog(config) ||
-      config.normal.allToAll.compressor.name != "zfp" ||
-      config.normal.allGather.compressor.name != "zfp" ||
-      config.normal.allReduce.compressor.name != "zfp" ||
-      config.normal.reduceScatter.compressor.name != "zfp" ||
-      !valueIs(config.normal.allToAll.compressor.defaultValues,
+      scope(config.normal.allToAll, cocclCompressionScope::Default).name !=
+          "zfp" ||
+      scope(config.normal.allGather, cocclCompressionScope::Default).name !=
+          "zfp" ||
+      scope(config.normal.allReduce, cocclCompressionScope::Default).name !=
+          "zfp" ||
+      scope(config.normal.reduceScatter,
+            cocclCompressionScope::Default).name != "zfp" ||
+      !valueIs(scope(config.normal.allToAll,
+                     cocclCompressionScope::Default).values,
                "rate", "4") ||
-      !valueIs(config.normal.allGather.compressor.defaultValues,
+      !valueIs(scope(config.normal.allGather,
+                     cocclCompressionScope::Default).values,
                "rate", "8") ||
-      !valueIs(config.normal.allReduce.compressor.defaultValues,
+      !valueIs(scope(config.normal.allReduce,
+                     cocclCompressionScope::Default).values,
                "rate", "8") ||
-      !valueIs(config.normal.reduceScatter.compressor.defaultValues,
+      !valueIs(scope(config.normal.reduceScatter,
+                     cocclCompressionScope::Default).values,
                "rate", "8")) {
     fprintf(stderr, "ZFP policy mapping differs from the M0 configs\n");
     return 1;

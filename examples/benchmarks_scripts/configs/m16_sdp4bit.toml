@@ -1,4 +1,4 @@
-schema_version = 2
+schema_version = 3
 
 [runtime]
 mode = "normal"
@@ -8,66 +8,82 @@ compression_threshold_bytes = 1048576
 compressors = ["sdp4bit"]
 library_path = "../../../build/obj/device/compress/libcompress"
 
-[normal.all_to_all]
+[normal.all_to_all.default]
 compressor = "sdp4bit"
 
-[normal.all_to_all.config.default]
+[normal.all_to_all.default.config]
 groupCount = 2048
 quantBits = 4
 quantType = "Symmetric"
 
-[normal.all_gather]
+[normal.all_gather.default]
 compressor = "sdp4bit"
 
-[normal.all_gather.config.default]
+[normal.all_gather.default.config]
 groupCount = 2048
 quantBits = 4
 quantType = "Symmetric"
 
-[normal.all_reduce]
+[normal.all_reduce.default]
 compressor = "sdp4bit"
 
-[normal.all_reduce.config.default]
+[normal.all_reduce.default.config]
 groupCount = 128
 quantBits = 4
 quantType = "Symmetric"
 hadamard = false
 
-[normal.all_reduce.config.hierarchical]
+[normal.all_reduce.intra]
+compressor = "sdp4bit"
+
+[normal.all_reduce.intra.config]
 groupCount = 128
 quantBits = 4
-inQuantBits = 4
-outQuantBits = 4
-inGroupCount = 128
-outGroupCount = 128
 quantType = "Symmetric"
 hadamard = false
 pipelineSize = 1
 
-[normal.reduce_scatter]
+[normal.all_reduce.inter]
 compressor = "sdp4bit"
 
-[normal.reduce_scatter.config.default]
+[normal.all_reduce.inter.config]
+groupCount = 128
+quantBits = 4
+quantType = "Symmetric"
+hadamard = false
+pipelineSize = 1
+[normal.reduce_scatter.default]
+compressor = "sdp4bit"
+
+[normal.reduce_scatter.default.config]
 groupCount = 128
 quantBits = 4
 quantType = "Symmetric"
 hadamard = true
 
-[normal.reduce_scatter.config.hierarchical]
+[normal.reduce_scatter.intra]
+compressor = "sdp4bit"
+
+[normal.reduce_scatter.intra.config]
 groupCount = 128
 quantBits = 4
-inQuantBits = 4
-outQuantBits = 4
-inGroupCount = 128
-outGroupCount = 128
 quantType = "Symmetric"
 hadamard = false
 pipelineSize = 1
 
-[normal.sendrecv]
+[normal.reduce_scatter.inter]
 compressor = "sdp4bit"
 
-[normal.sendrecv.config.default]
+[normal.reduce_scatter.inter.config]
+groupCount = 128
+quantBits = 4
+quantType = "Symmetric"
+hadamard = false
+pipelineSize = 1
+[normal.sendrecv.default]
+compressor = "sdp4bit"
+
+[normal.sendrecv.default.config]
 groupCount = 128
 quantBits = 4
 quantType = "Symmetric"

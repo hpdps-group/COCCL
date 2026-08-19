@@ -110,7 +110,6 @@ cocclPipelineSpec makeSpec(const char* name, ncclComm_t comm,
       totalInputBytes / inputChunks / sizeof(float),
       inputChunks,
       ncclFloat32,
-      cocclDefaultPolicy(operation),
       comm,
       nullptr,
       stages,
@@ -141,7 +140,7 @@ void checkRecipes() {
   inter.nRanks = 2;
 
   const cocclPipelineStage allToAllStages[] = {
-      cocclPipelineCompress(), cocclPipelineAllToAll(&owner),
+      cocclPipelineCompress(reinterpret_cast<void*>(0x1)), cocclPipelineAllToAll(&owner),
       cocclPipelineDecompress()};
   cocclPipelineSpec allToAll = makeSpec(
       "alltoall", &owner, allToAllStages, 3, rawBytes, 4,
@@ -150,7 +149,7 @@ void checkRecipes() {
               2 * rawBytes);
 
   const cocclPipelineStage allGatherStages[] = {
-      cocclPipelineCompress(), cocclPipelineAllGather(&owner),
+      cocclPipelineCompress(reinterpret_cast<void*>(0x1)), cocclPipelineAllGather(&owner),
       cocclPipelineDecompress()};
   cocclPipelineSpec allGather = makeSpec(
       "allgather", &owner, allGatherStages, 3, rawBytes / 4, 1,
@@ -159,7 +158,7 @@ void checkRecipes() {
               7 * rawBytes / 4);
 
   const cocclPipelineStage reduceScatterOneShotStages[] = {
-      cocclPipelineCompress(), cocclPipelineAllToAll(&owner),
+      cocclPipelineCompress(reinterpret_cast<void*>(0x1)), cocclPipelineAllToAll(&owner),
       cocclPipelineDecompressReduce(4)};
   cocclPipelineSpec reduceScatterOneShot = makeSpec(
       "reducescatter-oneshot", &owner, reduceScatterOneShotStages, 3,
@@ -168,8 +167,9 @@ void checkRecipes() {
               cocclPipelineWorkspaceUnified, 2 * rawBytes);
 
   const cocclPipelineStage reduceScatterTwoShotStages[] = {
-      cocclPipelineCompress(), cocclPipelineAllToAll(&intra),
-      cocclPipelineDecompReduceComp(2), cocclPipelineAllToAll(&inter),
+      cocclPipelineCompress(reinterpret_cast<void*>(0x1)), cocclPipelineAllToAll(&intra),
+      cocclPipelineDecompReduceComp(2, reinterpret_cast<void*>(0x1)),
+      cocclPipelineAllToAll(&inter),
       cocclPipelineDecompressReduce(2)};
   cocclPipelineSpec reduceScatterTwoShot = makeSpec(
       "reducescatter-twoshot", &owner, reduceScatterTwoShotStages, 5,
@@ -178,7 +178,7 @@ void checkRecipes() {
               cocclPipelineWorkspaceUnified, 2 * rawBytes);
 
   const cocclPipelineStage allReduceOneShotStages[] = {
-      cocclPipelineCompress(), cocclPipelineAllGather(&owner),
+      cocclPipelineCompress(reinterpret_cast<void*>(0x1)), cocclPipelineAllGather(&owner),
       cocclPipelineDecompressReduce(4)};
   cocclPipelineSpec allReduceOneShot = makeSpec(
       "allreduce-oneshot", &owner, allReduceOneShotStages, 3,
@@ -187,8 +187,9 @@ void checkRecipes() {
               cocclPipelineWorkspaceUnified, 5 * oneShotBytes);
 
   const cocclPipelineStage allReduceTwoShotStages[] = {
-      cocclPipelineCompress(), cocclPipelineAllToAll(&owner),
-      cocclPipelineDecompReduceComp(4), cocclPipelineAllGather(&owner),
+      cocclPipelineCompress(reinterpret_cast<void*>(0x1)), cocclPipelineAllToAll(&owner),
+      cocclPipelineDecompReduceComp(4, reinterpret_cast<void*>(0x1)),
+      cocclPipelineAllGather(&owner),
       cocclPipelineDecompress()};
   cocclPipelineSpec allReduceTwoShot = makeSpec(
       "allreduce-twoshot", &owner, allReduceTwoShotStages, 5,
@@ -197,9 +198,11 @@ void checkRecipes() {
               cocclPipelineWorkspaceUnified, 2 * rawBytes);
 
   const cocclPipelineStage allReduceTripleShotStages[] = {
-      cocclPipelineCompress(), cocclPipelineAllToAll(&intra),
-      cocclPipelineDecompReduceComp(2), cocclPipelineAllToAll(&inter),
-      cocclPipelineDecompReduceComp(2), cocclPipelineAllGather(&owner),
+      cocclPipelineCompress(reinterpret_cast<void*>(0x1)), cocclPipelineAllToAll(&intra),
+      cocclPipelineDecompReduceComp(2, reinterpret_cast<void*>(0x1)),
+      cocclPipelineAllToAll(&inter),
+      cocclPipelineDecompReduceComp(2, reinterpret_cast<void*>(0x1)),
+      cocclPipelineAllGather(&owner),
       cocclPipelineDecompress()};
   cocclPipelineSpec allReduceTripleShot = makeSpec(
       "allreduce-tripleshot", &owner, allReduceTripleShotStages, 7,

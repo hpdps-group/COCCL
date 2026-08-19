@@ -105,24 +105,30 @@ bool checkSdp4Bit(const LoadedPlugin& plugin) {
                  1024, 4, ncclBfloat16, 576);
   plugin.descriptor->destroyConfig(config);
   if (!sizes) return false;
-  void* separate = parseConfig(plugin,
-      {{"groupCount", "128"}, {"quantBits", "4"},
-       {"inQuantBits", "8"}, {"outQuantBits", "4"},
-       {"inGroupCount", "128"}, {"outGroupCount", "256"},
+  void* inputConfig = parseConfig(plugin,
+      {{"groupCount", "128"}, {"quantBits", "8"},
        {"quantType", "Symmetric"}}, true);
-  if (separate == nullptr || separate == reinterpret_cast<void*>(1)) {
+  void* outputConfig = parseConfig(plugin,
+      {{"groupCount", "256"}, {"quantBits", "4"},
+       {"quantType", "Symmetric"}}, true);
+  if (inputConfig == nullptr || inputConfig == reinterpret_cast<void*>(1) ||
+      outputConfig == nullptr || outputConfig == reinterpret_cast<void*>(1)) {
     return false;
   }
   const bool separateSizes =
-      checkBound(plugin, separate, cocclCompressorOperationCompress,
+      checkBound(plugin, inputConfig, cocclCompressorOperationCompress,
                  1024, 4, ncclFloat32, 1056) &&
-      checkBound(plugin, separate,
+      checkBound(plugin, outputConfig,
                  cocclCompressorOperationDecompressReduceCompress,
                  1024, 4, ncclFloat32, 528);
-  plugin.descriptor->destroyConfig(separate);
+  plugin.descriptor->destroyConfig(inputConfig);
+  plugin.descriptor->destroyConfig(outputConfig);
   if (!separateSizes) return false;
   return parseConfig(plugin,
       {{"groupCount", "128"}, {"quantBits", "2"}}, false) == nullptr &&
+      parseConfig(plugin,
+      {{"groupCount", "128"}, {"quantBits", "4"},
+       {"inQuantBits", "8"}}, false) == nullptr &&
       parseConfig(plugin,
       {{"groupCount", "127"}, {"quantBits", "4"}}, false) == nullptr;
 }

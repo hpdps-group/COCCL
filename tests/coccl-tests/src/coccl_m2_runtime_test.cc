@@ -22,7 +22,8 @@ int compressedCalls = 0;
 int nativeCalls = 0;
 ncclResult_t resolverResult = ncclSuccess;
 cocclAlgorithmKind executedAlgorithm = cocclAlgorithmNone;
-cocclPolicyKey lastPolicy;
+std::array<void*, 3> scopeCompressors;
+std::vector<cocclPolicyKey> queriedPolicies;
 cocclConfig config;
 std::vector<cocclPreparedCall> grouped;
 
@@ -61,7 +62,10 @@ void reset() {
   nativeCalls = 0;
   resolverResult = ncclSuccess;
   executedAlgorithm = cocclAlgorithmNone;
-  lastPolicy = {};
+  scopeCompressors = {
+      reinterpret_cast<void*>(0x10), reinterpret_cast<void*>(0x11),
+      reinterpret_cast<void*>(0x12)};
+  queriedPolicies.clear();
   config = {};
   grouped.clear();
 }
@@ -73,6 +77,24 @@ cocclInfo allToAllInfo(ncclComm_t comm) {
   info.count = 1024;
   info.datatype = ncclFloat32;
   info.operation = cocclOperation::AllToAll;
+  info.comm = comm;
+  return info;
+}
+
+void enableOnly(cocclCompressionScope scope) {
+  scopeCompressors = {nullptr, nullptr, nullptr};
+  scopeCompressors[static_cast<size_t>(scope)] =
+      reinterpret_cast<void*>(0x10 + static_cast<size_t>(scope));
+}
+
+cocclInfo sendInfo(ncclComm_t comm, int peer) {
+  cocclInfo info;
+  info.sendbuff = reinterpret_cast<void*>(0x3000);
+  info.count = 1024;
+  info.datatype = ncclFloat32;
+  info.peer = peer;
+  info.func = ncclFuncSend;
+  info.operation = cocclOperation::SendRecv;
   info.comm = comm;
   return info;
 }
@@ -109,9 +131,10 @@ bool cocclCompressorSupports(
 ncclResult_t cocclResolveCompressorPolicy(
     cocclPolicyKey key, cocclResolvedCompressorPolicy* resolved) {
   ++policyQueries;
-  lastPolicy = key;
+  queriedPolicies.push_back(key);
   if (resolverResult != ncclSuccess) return resolverResult;
-  resolved->compressor = reinterpret_cast<void*>(0x1);
+  resolved->compressor = scopeCompressors[static_cast<size_t>(key.scope)];
+  if (resolved->compressor == nullptr) return ncclInvalidUsage;
   resolved->thresholdBytes = thresholdBytes;
   return ncclSuccess;
 }
@@ -158,13 +181,6 @@ ncclResult_t cocclSelectAlgorithm(cocclPreparedCall* prepared) {
         prepared->algorithm = cocclAlgorithmAllReduceTwoShot;
         break;
     }
-  }
-  if (prepared->algorithm == cocclAlgorithmReduceScatterTwoShot ||
-      prepared->algorithm == cocclAlgorithmAllReduceTripleShot) {
-    prepared->policy = cocclHierarchicalPolicy(prepared->info.operation);
-    cocclResolvedCompressorPolicy resolved;
-    NCCLCHECK(cocclResolveCompressorPolicy(prepared->policy, &resolved));
-    prepared->compressor = resolved.compressor;
   }
   return ncclSuccess;
 }
@@ -265,6 +281,10 @@ int main() {
   comm.nRanks = 4;
   comm.nNodes = 1;
   comm.localRanks = 4;
+  comm.rank = 0;
+  comm.node = 0;
+  int rankToNode[] = {0, 0, 0, 0};
+  comm.rankToNode = rankToNode;
   cocclInfo info = allToAllInfo(&comm);
   bool enqueued = false;
 
@@ -278,7 +298,7 @@ int main() {
   info = allToAllInfo(&comm);
   info.datatype = ncclInt8;
   EXPECT(cocclEnqueueCheck(&info, &enqueued) == ncclSuccess);
-  EXPECT(!enqueued && policyQueries == 1);
+  EXPECT(!enqueued && policyQueries == 3);
 
   for (ncclDataType_t datatype : {ncclInt8, ncclInt32, ncclInt64}) {
     reset();
@@ -286,44 +306,56 @@ int main() {
     info = allToAllInfo(&comm);
     info.datatype = datatype;
     EXPECT(cocclEnqueueCheck(&info, &enqueued) == ncclSuccess);
-    EXPECT(enqueued && policyQueries == 1 && compressedCalls == 1);
+    EXPECT(enqueued && policyQueries == 3 && compressedCalls == 1);
   }
 
   reset();
   info = allToAllInfo(&comm);
   info.datatype = ncclInt32;
   EXPECT(cocclEnqueueExplicitCall(&info, cocclAlgorithmNone) == ncclSuccess);
-  EXPECT(policyQueries == 1 && nativeCalls == 1 && compressedCalls == 0);
+  EXPECT(policyQueries == 3 && nativeCalls == 1 && compressedCalls == 0);
 
   reset();
   bytewiseLossless = true;
   info = allToAllInfo(&comm);
   info.datatype = ncclInt64;
   EXPECT(cocclEnqueueExplicitCall(&info, cocclAlgorithmNone) == ncclSuccess);
-  EXPECT(policyQueries == 1 && compressedCalls == 1);
+  EXPECT(policyQueries == 3 && compressedCalls == 1);
 
   reset();
   info = allToAllInfo(&comm);
   resolverResult = ncclInvalidUsage;
   EXPECT(cocclEnqueueCheck(&info, &enqueued) == ncclSuccess);
-  EXPECT(!enqueued && policyQueries == 1 && compressedCalls == 0);
+  EXPECT(!enqueued && policyQueries == 3 && compressedCalls == 0);
 
   reset();
   info = allToAllInfo(&comm);
   thresholdBytes = std::numeric_limits<size_t>::max();
   EXPECT(cocclEnqueueCheck(&info, &enqueued) == ncclSuccess);
-  EXPECT(!enqueued && policyQueries == 1 && compressedCalls == 0);
+  EXPECT(!enqueued && policyQueries == 3 && compressedCalls == 0);
 
   reset();
   info = allToAllInfo(&comm);
   EXPECT(cocclEnqueueCheck(&info, &enqueued) == ncclSuccess);
-  EXPECT(enqueued && policyQueries == 1 && compressedCalls == 1);
+  EXPECT(enqueued && policyQueries == 3 && compressedCalls == 1);
+
+  reset();
+  enableOnly(cocclCompressionScope::Inter);
+  info = allToAllInfo(&comm);
+  EXPECT(cocclEnqueueCheck(&info, &enqueued) == ncclSuccess);
+  EXPECT(!enqueued && compressedCalls == 0);
+
+  reset();
+  enableOnly(cocclCompressionScope::Intra);
+  info = allToAllInfo(&comm);
+  EXPECT(cocclEnqueueCheck(&info, &enqueued) == ncclSuccess);
+  EXPECT(enqueued && compressedCalls == 1);
 
   reset();
   thresholdBytes = std::numeric_limits<size_t>::max();
   info = allToAllInfo(&comm);
   EXPECT(cocclEnqueueExplicitCall(&info, cocclAlgorithmNone) == ncclSuccess);
-  EXPECT(policyQueries == 1 && compressedCalls == 1);
+  EXPECT(policyQueries == 3 && compressedCalls == 1);
 
   reset();
   info = allToAllInfo(&comm);
@@ -338,19 +370,45 @@ int main() {
   EXPECT(enqueued && grouped.size() == 1 && compressedCalls == 0);
 
   reset();
-  cocclInfo send;
-  send.sendbuff = reinterpret_cast<void*>(0x3000);
-  send.count = 1024;
-  send.datatype = ncclFloat32;
-  send.peer = 1;
-  send.func = ncclFuncSend;
-  send.operation = cocclOperation::SendRecv;
-  send.comm = &comm;
+  cocclInfo send = sendInfo(&comm, 1);
   thresholdBytes = std::numeric_limits<size_t>::max();
   ncclGroupDepth = 1;
   EXPECT(cocclEnqueueCheck(&send, &enqueued) == ncclSuccess);
   ncclGroupDepth = 0;
-  EXPECT(enqueued && grouped.size() == 1 && grouped[0].compressor == nullptr);
+  EXPECT(enqueued && grouped.size() == 1 &&
+         !grouped[0].compressors.anyEnabled());
+
+  rankToNode[2] = 1;
+  comm.nNodes = 2;
+  comm.localRanks = 2;
+
+  reset();
+  enableOnly(cocclCompressionScope::Intra);
+  send = sendInfo(&comm, 1);
+  EXPECT(cocclEnqueueCheck(&send, &enqueued) == ncclSuccess);
+  EXPECT(enqueued && compressedCalls == 1);
+
+  reset();
+  enableOnly(cocclCompressionScope::Intra);
+  send = sendInfo(&comm, 2);
+  EXPECT(cocclEnqueueCheck(&send, &enqueued) == ncclSuccess);
+  EXPECT(!enqueued && compressedCalls == 0);
+
+  reset();
+  enableOnly(cocclCompressionScope::Inter);
+  send = sendInfo(&comm, 2);
+  EXPECT(cocclEnqueueCheck(&send, &enqueued) == ncclSuccess);
+  EXPECT(enqueued && compressedCalls == 1);
+
+  reset();
+  enableOnly(cocclCompressionScope::Inter);
+  send = sendInfo(&comm, 1);
+  EXPECT(cocclEnqueueCheck(&send, &enqueued) == ncclSuccess);
+  EXPECT(!enqueued && compressedCalls == 0);
+
+  comm.nNodes = 1;
+  comm.localRanks = 4;
+  rankToNode[2] = 0;
 
   reset();
   cocclInfo reduction = allToAllInfo(&comm);
@@ -377,9 +435,51 @@ int main() {
   reduction.operation = cocclOperation::ReduceScatter;
   reduction.op = ncclSum;
   EXPECT(cocclEnqueueCheck(&reduction, &enqueued) == ncclSuccess);
-  EXPECT(enqueued && policyQueries == 2 &&
-         lastPolicy.variant == cocclPolicyVariant::Hierarchical &&
+  EXPECT(enqueued && policyQueries == 3 &&
          executedAlgorithm == cocclAlgorithmReduceScatterTwoShot);
+
+  reset();
+  enableOnly(cocclCompressionScope::Intra);
+  reduction = allToAllInfo(&comm);
+  reduction.operation = cocclOperation::ReduceScatter;
+  reduction.op = ncclSum;
+  EXPECT(cocclEnqueueCheck(&reduction, &enqueued) == ncclSuccess);
+  EXPECT(enqueued &&
+         executedAlgorithm == cocclAlgorithmReduceScatterTwoShot);
+
+  reset();
+  enableOnly(cocclCompressionScope::Inter);
+  reduction = allToAllInfo(&comm);
+  reduction.operation = cocclOperation::ReduceScatter;
+  reduction.op = ncclSum;
+  EXPECT(cocclEnqueueCheck(&reduction, &enqueued) == ncclSuccess);
+  EXPECT(enqueued &&
+         executedAlgorithm == cocclAlgorithmReduceScatterTwoShot);
+
+  reset();
+  scopeCompressors = {nullptr, nullptr, nullptr};
+  reduction = allToAllInfo(&comm);
+  reduction.operation = cocclOperation::ReduceScatter;
+  reduction.op = ncclSum;
+  EXPECT(cocclEnqueueCheck(&reduction, &enqueued) == ncclSuccess);
+  EXPECT(!enqueued && compressedCalls == 0);
+
+  reset();
+  enableOnly(cocclCompressionScope::Default);
+  reduction = allToAllInfo(&comm);
+  reduction.operation = cocclOperation::AllReduce;
+  reduction.op = ncclSum;
+  config.autotune.allReduceAlgorithm =
+      cocclAllReduceAlgorithmPolicy::TripleShot;
+  EXPECT(cocclEnqueueCheck(&reduction, &enqueued) == ncclSuccess);
+  EXPECT(enqueued &&
+         executedAlgorithm == cocclAlgorithmAllReduceTripleShot);
+
+  reset();
+  enableOnly(cocclCompressionScope::Inter);
+  info = allToAllInfo(&comm);
+  EXPECT(cocclEnqueueCheck(&info, &enqueued) == ncclSuccess);
+  EXPECT(!enqueued && compressedCalls == 0);
   comm.nNodes = 1;
   comm.localRanks = 4;
 

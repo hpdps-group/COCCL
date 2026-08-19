@@ -1,4 +1,4 @@
-schema_version = 2
+schema_version = 3
 
 [runtime]
 mode = "normal"
@@ -8,8 +8,8 @@ compression_threshold_bytes = 17179869184
 compressors = ["sdp4bit", "zfp"]
 library_path = "../../../build/obj/device/compress/libcompress"
 
-[normal.all_to_all]
+[normal.all_to_all.default]
 compressor = "zfp"
 
-[normal.all_to_all.config.default]
+[normal.all_to_all.default.config]
 rate = 4

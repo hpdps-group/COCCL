@@ -5,6 +5,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
 #include <string>
 #include <vector>
 
@@ -16,17 +17,21 @@ int gWorldRank = 0;
 enum class Operation {
   AllToAll,
   AllGather,
-  ReduceScatter,
+  ReduceScatterOneShot,
+  ReduceScatterTwoShot,
   AllReduceOneShot,
   AllReduceTwoShot,
+  AllReduceTripleShot,
   SendRecv,
+  SendRecvCrossNode,
 };
 
 struct Options {
   std::string mode;
   std::string datatype;
-  std::string operation = "allgather";
+  std::string operation = "all";
   std::string path = "compressed";
+  std::string pattern = "compressible";
   size_t elements = 0;
   int warmups = 20;
   int iterations = 30;
@@ -76,6 +81,7 @@ Options parseOptions(int argc, char** argv) {
     else if (key == "--datatype") options.datatype = value;
     else if (key == "--operation") options.operation = value;
     else if (key == "--path") options.path = value;
+    else if (key == "--pattern") options.pattern = value;
     else if (key == "--elements") {
       options.elements = std::strtoull(value.c_str(), nullptr, 10);
     } else if (key == "--warmups") {
@@ -98,10 +104,13 @@ const char* operationName(Operation operation) {
   switch (operation) {
     case Operation::AllToAll: return "alltoall";
     case Operation::AllGather: return "allgather";
-    case Operation::ReduceScatter: return "reducescatter-oneshot";
+    case Operation::ReduceScatterOneShot: return "reducescatter-oneshot";
+    case Operation::ReduceScatterTwoShot: return "reducescatter-twoshot";
     case Operation::AllReduceOneShot: return "allreduce-oneshot";
     case Operation::AllReduceTwoShot: return "allreduce-twoshot";
+    case Operation::AllReduceTripleShot: return "allreduce-tripleshot";
     case Operation::SendRecv: return "sendrecv";
+    case Operation::SendRecvCrossNode: return "sendrecv-cross-node";
   }
   return "unknown";
 }
@@ -109,17 +118,43 @@ const char* operationName(Operation operation) {
 Operation parseOperation(const std::string& value) {
   if (value == "alltoall") return Operation::AllToAll;
   if (value == "allgather") return Operation::AllGather;
-  if (value == "reducescatter") return Operation::ReduceScatter;
-  if (value == "allreduce") return Operation::AllReduceOneShot;
+  if (value == "reducescatter" || value == "reducescatter-oneshot") {
+    return Operation::ReduceScatterOneShot;
+  }
+  if (value == "reducescatter-twoshot") {
+    return Operation::ReduceScatterTwoShot;
+  }
+  if (value == "allreduce" || value == "allreduce-oneshot") {
+    return Operation::AllReduceOneShot;
+  }
+  if (value == "allreduce-twoshot") return Operation::AllReduceTwoShot;
+  if (value == "allreduce-tripleshot") {
+    return Operation::AllReduceTripleShot;
+  }
   if (value == "sendrecv") return Operation::SendRecv;
+  if (value == "sendrecv-cross-node") return Operation::SendRecvCrossNode;
   fail("operation", "unknown operation", __FILE__, __LINE__);
   return Operation::AllGather;
 }
 
 size_t outputElements(Operation operation, size_t elements, int ranks) {
   if (operation == Operation::AllGather) return elements * ranks;
-  if (operation == Operation::ReduceScatter) return elements / ranks;
+  if (operation == Operation::ReduceScatterOneShot ||
+      operation == Operation::ReduceScatterTwoShot) {
+    return elements / ranks;
+  }
   return elements;
+}
+
+void sendRecvPeers(Operation operation, int rank, int ranks,
+                   int* recvPeer, int* sendPeer) {
+  if (operation == Operation::SendRecvCrossNode) {
+    *recvPeer = (rank + ranks / 2) % ranks;
+    *sendPeer = *recvPeer;
+    return;
+  }
+  *recvPeer = (rank + ranks - 1) % ranks;
+  *sendPeer = (rank + 1) % ranks;
 }
 
 template <typename T>
@@ -146,21 +181,25 @@ void runPublic(Operation operation, const void* input, void* output,
       NCCLCHECK(ncclAllGather(input, output, elements, datatype,
                               comm, stream));
       return;
-    case Operation::ReduceScatter:
+    case Operation::ReduceScatterOneShot:
+    case Operation::ReduceScatterTwoShot:
       NCCLCHECK(ncclReduceScatter(input, output, elements / ranks, datatype,
                                   ncclSum, comm, stream));
       return;
     case Operation::AllReduceOneShot:
     case Operation::AllReduceTwoShot:
+    case Operation::AllReduceTripleShot:
       NCCLCHECK(ncclAllReduce(input, output, elements, datatype, ncclSum,
                               comm, stream));
       return;
-    case Operation::SendRecv: {
-      const int previous = (rank + ranks - 1) % ranks;
-      const int next = (rank + 1) % ranks;
+    case Operation::SendRecv:
+    case Operation::SendRecvCrossNode: {
+      int recvPeer = 0;
+      int sendPeer = 0;
+      sendRecvPeers(operation, rank, ranks, &recvPeer, &sendPeer);
       NCCLCHECK(ncclGroupStart());
-      NCCLCHECK(ncclRecv(output, elements, datatype, previous, comm, stream));
-      NCCLCHECK(ncclSend(input, elements, datatype, next, comm, stream));
+      NCCLCHECK(ncclRecv(output, elements, datatype, recvPeer, comm, stream));
+      NCCLCHECK(ncclSend(input, elements, datatype, sendPeer, comm, stream));
       NCCLCHECK(ncclGroupEnd());
       return;
     }
@@ -179,8 +218,12 @@ void runCompressed(Operation operation, const void* input, void* output,
       NCCLCHECK(cocclAllGatherComp(input, output, elements, datatype,
                                    comm, stream));
       return;
-    case Operation::ReduceScatter:
+    case Operation::ReduceScatterOneShot:
       NCCLCHECK(cocclReduceScatterCompOneShot(
+          input, output, elements / ranks, datatype, ncclSum, comm, stream));
+      return;
+    case Operation::ReduceScatterTwoShot:
+      NCCLCHECK(cocclReduceScatterCompTwoShot(
           input, output, elements / ranks, datatype, ncclSum, comm, stream));
       return;
     case Operation::AllReduceOneShot:
@@ -191,13 +234,20 @@ void runCompressed(Operation operation, const void* input, void* output,
       NCCLCHECK(cocclAllReduceCompTwoShot(
           input, output, elements, datatype, ncclSum, comm, stream));
       return;
-    case Operation::SendRecv: {
-      const int previous = (rank + ranks - 1) % ranks;
-      const int next = (rank + 1) % ranks;
+    case Operation::AllReduceTripleShot:
+      NCCLCHECK(cocclAllReduceCompTripleShot(
+          input, output, elements, datatype, ncclSum, comm, stream));
+      return;
+    case Operation::SendRecv:
+    case Operation::SendRecvCrossNode: {
+      int recvPeer = 0;
+      int sendPeer = 0;
+      sendRecvPeers(operation, rank, ranks, &recvPeer, &sendPeer);
       NCCLCHECK(ncclGroupStart());
-      NCCLCHECK(cocclRecvDecomp(output, elements, datatype, previous,
+      NCCLCHECK(cocclRecvDecomp(output, elements, datatype, recvPeer,
                                 comm, stream));
-      NCCLCHECK(cocclSendComp(input, elements, datatype, next, comm, stream));
+      NCCLCHECK(cocclSendComp(input, elements, datatype, sendPeer,
+                              comm, stream));
       NCCLCHECK(ncclGroupEnd());
       return;
     }
@@ -271,10 +321,17 @@ void runCorrectness(const Options& options, ncclDataType_t datatype,
                     ncclComm_t nativeComm, ncclComm_t compressedComm,
                     cudaStream_t nativeStream, cudaStream_t compressedStream,
                     int rank, int ranks) {
-  const Operation operations[] = {
-      Operation::AllToAll, Operation::AllGather, Operation::ReduceScatter,
-      Operation::AllReduceOneShot, Operation::AllReduceTwoShot,
-      Operation::SendRecv};
+  std::vector<Operation> operations;
+  if (options.operation == "all") {
+    operations = {
+        Operation::AllToAll, Operation::AllGather,
+        Operation::ReduceScatterOneShot, Operation::ReduceScatterTwoShot,
+        Operation::AllReduceOneShot, Operation::AllReduceTwoShot,
+        Operation::AllReduceTripleShot, Operation::SendRecv,
+        Operation::SendRecvCrossNode};
+  } else {
+    operations.push_back(parseOperation(options.operation));
+  }
   for (Operation operation : operations) {
     runCorrectnessCase<T>(operation, datatype, options, nativeComm,
                           compressedComm, nativeStream, compressedStream,
@@ -339,12 +396,31 @@ void runPerformance(const Options& options, ncclDataType_t datatype,
   T* output = nullptr;
   CUDACHECK(cudaMalloc(&input, inputBytes));
   CUDACHECK(cudaMalloc(&output, outputBytes));
-  CUDACHECK(cudaMemset(input, 0, inputBytes));
+  if (options.pattern == "compressible") {
+    CUDACHECK(cudaMemset(input, 0, inputBytes));
+  } else if (options.pattern == "random") {
+    std::vector<T> hostInput(elements);
+    uint32_t state = 0x9e3779b9u ^ static_cast<uint32_t>(rank + 1);
+    auto* bytes = reinterpret_cast<unsigned char*>(hostInput.data());
+    for (size_t index = 0; index < inputBytes; ++index) {
+      state ^= state << 13;
+      state ^= state >> 17;
+      state ^= state << 5;
+      bytes[index] = static_cast<unsigned char>(state);
+    }
+    CUDACHECK(cudaMemcpy(input, hostInput.data(), inputBytes,
+                         cudaMemcpyHostToDevice));
+  } else {
+    fail("pattern", "unknown input pattern", __FILE__, __LINE__);
+  }
   CUDACHECK(cudaMemset(output, 0, outputBytes));
 
+  const auto execute = options.path == "compressed" ? runCompressed
+                                                      : runPublic;
+
   for (int iteration = 0; iteration < options.warmups; ++iteration) {
-    runPublic(operation, input, output, elements, datatype, comm, stream,
-              rank, ranks);
+    execute(operation, input, output, elements, datatype, comm, stream,
+            rank, ranks);
   }
   CUDACHECK(cudaStreamSynchronize(stream));
   MPICHECK(MPI_Barrier(MPI_COMM_WORLD));
@@ -354,8 +430,8 @@ void runPerformance(const Options& options, ncclDataType_t datatype,
   CUDACHECK(cudaEventCreate(&end));
   CUDACHECK(cudaEventRecord(begin, stream));
   for (int iteration = 0; iteration < options.iterations; ++iteration) {
-    runPublic(operation, input, output, elements, datatype, comm, stream,
-              rank, ranks);
+    execute(operation, input, output, elements, datatype, comm, stream,
+            rank, ranks);
   }
   CUDACHECK(cudaEventRecord(end, stream));
   CUDACHECK(cudaEventSynchronize(end));
@@ -368,11 +444,12 @@ void runPerformance(const Options& options, ncclDataType_t datatype,
   if (rank == 0) {
     const double bandwidth = static_cast<double>(inputBytes) / maxUs / 1.0e3;
     std::printf("COCCL_INTEGER_PERF operation=%s datatype=%s path=%s "
-                "input_bytes=%zu warmups=%d iterations=%d "
+                "pattern=%s depth=%d input_bytes=%zu warmups=%d iterations=%d "
                 "latency_us=%.3f input_GBps=%.3f\n",
                 options.operation.c_str(), options.datatype.c_str(),
-                options.path.c_str(), inputBytes, options.warmups,
-                options.iterations, maxUs, bandwidth);
+                options.path.c_str(), options.pattern.c_str(), options.depth,
+                inputBytes, options.warmups, options.iterations, maxUs,
+                bandwidth);
     std::fflush(stdout);
   }
   CUDACHECK(cudaEventDestroy(end));

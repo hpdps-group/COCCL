@@ -15,26 +15,12 @@ struct Sdp4BitConfig {
   int quantBits = 8;
   bool hadamard = false;
   quantize::Type quantType = quantize::Type::Symmetric;
-  int inQuantBits = 0;
-  int outQuantBits = 0;
-  int inGroupCount = 0;
-  int outGroupCount = 0;
   int pipelineSize = 1;
   bool subAdd = false;
 
-  int inputBits() const {
-    return inQuantBits == 0 ? quantBits : inQuantBits;
-  }
-  int outputBits() const {
-    return outQuantBits == 0 ? quantBits : outQuantBits;
-  }
-  int inputGroups(bool limitHadamard = true) const {
-    int groups = inGroupCount == 0 ? groupCount : inGroupCount;
-    return limitHadamard && hadamard && groups > 128 ? 128 : groups;
-  }
-  int outputGroups(bool limitHadamard = true) const {
-    int groups = outGroupCount == 0 ? groupCount : outGroupCount;
-    return limitHadamard && hadamard && groups > 128 ? 128 : groups;
+  int kernelGroupCount(bool limitHadamard = true) const {
+    return limitHadamard && hadamard && groupCount > 128
+        ? 128 : groupCount;
   }
 };
 
@@ -108,7 +94,7 @@ bool compressedBytes(const Shape& input, const Sdp4BitConfig& config,
   if (bytes == nullptr) return false;
   Sdp4BitEncodedLayout layout;
   if (!encodedLayout(input.elements(), input.chunks(), input.datatype(),
-                     config.inputGroups(), config.inputBits(),
+                     config.kernelGroupCount(), config.quantBits,
                      config.quantType, &layout)) {
     return false;
   }
@@ -141,10 +127,10 @@ bool drcLayout(const Shape& input, const Sdp4BitConfig& config,
     return false;
   }
 
-  const int inputGroupCount = config.inputGroups(false);
-  const int outputGroupCount = config.outputGroups(false);
-  const int inputBits = config.inputBits();
-  const int outputBits = config.outputBits();
+  const int inputGroupCount = config.kernelGroupCount(false);
+  const int outputGroupCount = config.kernelGroupCount(false);
+  const int inputBits = config.quantBits;
+  const int outputBits = config.quantBits;
   if (inputGroupCount <= 0 || outputGroupCount <= 0 ||
       !validQuantBits(inputBits, false) ||
       !validQuantBits(outputBits, false)) {
@@ -185,8 +171,8 @@ bool drcLayout(const Shape& input, const Sdp4BitConfig& config,
 template <typename T>
 void launchQuant(int8_t* output, const T* input, const coccl::Input& shape,
                  const Sdp4BitConfig& config, cudaStream_t stream) {
-  const int groupCount = config.inputGroups();
-  const int quantBits = config.inputBits();
+  const int groupCount = config.kernelGroupCount();
+  const int quantBits = config.quantBits;
   if (config.hadamard) {
     launch_quant_ht(output, nullptr, input, (int)shape.chunks(),
                     (int64_t)shape.elementsPerChunk(), groupCount, quantBits,
@@ -202,8 +188,8 @@ template <typename T>
 void launchDequant(T* output, const coccl::Input& input,
                    const coccl::Output& shape,
                    const Sdp4BitConfig& config, cudaStream_t stream) {
-  const int groupCount = config.outputGroups();
-  const int quantBits = config.outputBits();
+  const int groupCount = config.kernelGroupCount();
+  const int quantBits = config.quantBits;
   const int64_t elementsPerChunk =
       (int64_t)(shape.elements() / shape.chunks());
   if (config.hadamard) {
@@ -229,19 +215,11 @@ struct Sdp4BitCompressor {
             .getEnum("quantType", config.quantType,
                      {{"Symmetric", quantize::Type::Symmetric},
                       {"Asymmetric", quantize::Type::Asymmetric}})
-            .get("inQuantBits", config.inQuantBits, 0, 8)
-            .get("outQuantBits", config.outQuantBits, 0, 8)
-            .get("inGroupCount", config.inGroupCount, 0, INT_MAX)
-            .get("outGroupCount", config.outGroupCount, 0, INT_MAX)
             .get("pipelineSize", config.pipelineSize, 1, INT_MAX)
             .get("subAdd", config.subAdd)
             .finish();
     if (result != ncclSuccess) return result;
-    return validQuantBits(config.quantBits, false) &&
-                   validQuantBits(config.inQuantBits, true) &&
-                   validQuantBits(config.outQuantBits, true) &&
-                   validPacking(config.inputGroups(), config.inputBits()) &&
-                   validPacking(config.outputGroups(), config.outputBits()) &&
+    return validPacking(config.kernelGroupCount(), config.quantBits) &&
                    !(config.subAdd && config.hadamard)
         ? ncclSuccess
         : ncclInvalidArgument;
@@ -270,7 +248,7 @@ struct Sdp4BitCompressor {
     }
     Sdp4BitEncodedLayout layout;
     if (!encodedLayout(input.elements(), input.chunks(), input.datatype(),
-                       config.outputGroups(false), config.outputBits(),
+                       config.kernelGroupCount(false), config.quantBits,
                        config.quantType, &layout)) {
       return ncclInvalidArgument;
     }
@@ -320,8 +298,9 @@ struct Sdp4BitCompressor {
             output.dataAs<int8_t>(),
             static_cast<const T*>(state->shardParams) +
                 context.rank() * input.elementsPerChunk(),
-            typedInput, config.inputBits(), config.quantType,
-            config.inputGroups(), (int64_t)input.elementsPerChunk(), 1, 0,
+            typedInput, config.quantBits, config.quantType,
+            config.kernelGroupCount(),
+            (int64_t)input.elementsPerChunk(), 1, 0,
             context.stream());
       };
       switch (input.datatype()) {
@@ -395,8 +374,8 @@ struct Sdp4BitCompressor {
           using T = typename std::remove_pointer<decltype(typedOutput)>::type;
           launch_fused_dequant_add_cuda(
               typedOutput, static_cast<const T*>(state->shardParams),
-              input.dataAs<int8_t>(), config.outputBits(), config.quantType,
-              config.outputGroups(),
+              input.dataAs<int8_t>(), config.quantBits, config.quantType,
+              config.kernelGroupCount(),
               (int64_t)(output.elements() / output.chunks()),
               (int)output.chunks(), context.stream());
         };
@@ -440,15 +419,16 @@ struct Sdp4BitCompressor {
       return ncclInvalidArgument;
     }
 
-    const int groupCount = config.outputGroups();
-    const int quantBits = config.outputBits();
-    const size_t groups = output.elements() == 0
-        ? 0
-        : 1 + (output.elements() - 1) / (size_t)groupCount;
+    const int groupCount = config.kernelGroupCount();
+    const int quantBits = config.quantBits;
+    const size_t elementsPerChunk = output.elements() / output.chunks();
+    const size_t groupsPerChunk =
+        1 + (elementsPerChunk - 1) / (size_t)groupCount;
+    size_t groups = 0;
     const size_t groupBytes =
         (size_t)groupCount / (size_t)(8 / quantBits);
     size_t chunkBytes = 0;
-    if (groups == 0 ||
+    if (!coccl::checkedMultiply(output.chunks(), groupsPerChunk, &groups) ||
         !coccl::checkedMultiply(groups, groupBytes, &chunkBytes) ||
         chunkBytes > INT64_MAX || reduceChunks > INT_MAX) {
       return ncclInvalidArgument;
@@ -459,12 +439,14 @@ struct Sdp4BitCompressor {
         launch_dequant_reduce_ht(
             typedOutput, input.dataAs<int8_t>(), nullptr,
             (int)reduceChunks, quantBits, config.quantType,
-            (int64_t)chunkBytes, (int)groupBytes, context.stream());
+            (int64_t)chunkBytes, (int)groupBytes,
+            (int64_t)elementsPerChunk, context.stream());
       } else {
         launch_dequant_reduce(
             typedOutput, input.dataAs<int8_t>(), nullptr,
             (int)reduceChunks, quantBits, config.quantType,
-            (int64_t)chunkBytes, (int)groupBytes, context.stream());
+            (int64_t)chunkBytes, (int)groupBytes,
+            (int64_t)elementsPerChunk, context.stream());
       }
     };
     switch (output.datatype()) {
@@ -491,8 +473,8 @@ struct Sdp4BitCompressor {
       return ncclInvalidArgument;
     }
 
-    const int inQuantBits = config.inputBits();
-    const int outQuantBits = config.outputBits();
+    const int inQuantBits = config.quantBits;
+    const int outQuantBits = config.quantBits;
     Sdp4BitDrcLayout layout;
     if (!drcLayout(input, config, reduceChunks,
                    context.originalDatatype(), context.originalElements(),

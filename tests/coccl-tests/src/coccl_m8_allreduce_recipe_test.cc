@@ -40,9 +40,12 @@ cocclPreparedCall makeCall(ncclComm_t comm, cocclAlgorithmKind algorithm,
   prepared.info.operation = cocclOperation::AllReduce;
   prepared.info.comm = comm;
   prepared.algorithm = algorithm;
-  prepared.policy = algorithm == cocclAlgorithmAllReduceTripleShot
-      ? cocclHierarchicalPolicy(cocclOperation::AllReduce)
-      : cocclDefaultPolicy(cocclOperation::AllReduce);
+  prepared.policy = cocclDefaultPolicy(cocclOperation::AllReduce);
+  prepared.compressors.handles = {
+      reinterpret_cast<void*>(0x1),
+      reinterpret_cast<void*>(0x1),
+      reinterpret_cast<void*>(0x1)};
+  prepared.compressors.datatypeSupported = {true, true, true};
   return prepared;
 }
 

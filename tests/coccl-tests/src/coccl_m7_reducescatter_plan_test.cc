@@ -38,18 +38,18 @@ cocclPipelineSpec oneShotSpec(ncclComm_t comm, size_t outputBytes,
       outputBytes / sizeof(float),
       (size_t)comm->nRanks,
       ncclFloat32,
-      cocclDefaultPolicy(cocclOperation::ReduceScatter),
       comm,
       nullptr,
       stages,
       3,
       cocclPipelineInPlaceOutputRankChunk,
+      cocclPipelineInputContiguous,
   };
 }
 
 void checkOneShot(ncclComm_t comm, int depth) {
   const cocclPipelineStage stages[] = {
-      cocclPipelineCompress(), cocclPipelineAllToAll(comm),
+      cocclPipelineCompress(reinterpret_cast<void*>(0x1)), cocclPipelineAllToAll(comm),
       cocclPipelineDecompressReduce((size_t)comm->nRanks)};
   constexpr size_t outputBytes = 16 << 20;
   cocclPipelineSpec spec = oneShotSpec(comm, outputBytes, stages);
@@ -79,8 +79,9 @@ void checkTwoShot(ncclComm_t owner, ncclComm_t intra, ncclComm_t inter,
                   size_t expectedNodes) {
   const size_t localRanks = (size_t)intra->nRanks;
   const cocclPipelineStage stages[] = {
-      cocclPipelineCompress(), cocclPipelineAllToAll(intra),
-      cocclPipelineDecompReduceComp(localRanks),
+      cocclPipelineCompress(reinterpret_cast<void*>(0x1)), cocclPipelineAllToAll(intra),
+      cocclPipelineDecompReduceComp(localRanks,
+                                    reinterpret_cast<void*>(0x1)),
       cocclPipelineAllToAll(inter),
       cocclPipelineDecompressReduce(expectedNodes)};
   constexpr size_t outputBytes = 16 << 20;
@@ -91,7 +92,6 @@ void checkTwoShot(ncclComm_t owner, ncclComm_t intra, ncclComm_t inter,
       outputBytes / sizeof(float),
       (size_t)owner->nRanks,
       ncclFloat32,
-      cocclHierarchicalPolicy(cocclOperation::ReduceScatter),
       owner,
       nullptr,
       stages,
@@ -115,7 +115,7 @@ void checkTwoShot(ncclComm_t owner, ncclComm_t intra, ncclComm_t inter,
 
 void dumpPlans(ncclComm_t comm) {
   const cocclPipelineStage stages[] = {
-      cocclPipelineCompress(), cocclPipelineAllToAll(comm),
+      cocclPipelineCompress(reinterpret_cast<void*>(0x1)), cocclPipelineAllToAll(comm),
       cocclPipelineDecompressReduce((size_t)comm->nRanks)};
   const size_t sizes[] = {64ULL << 20, 1ULL << 30, 8ULL << 30};
   const int depths[] = {1, 2, 4, 8};
@@ -177,12 +177,13 @@ int main(int argc, char** argv) {
   checkTwoShot(&owner, &intra, &inter, 2);
 
   size_t chunks = 0;
-  const cocclPipelineStage invalid = cocclPipelineDecompReduceComp(3);
+  const cocclPipelineStage invalid = cocclPipelineDecompReduceComp(
+      3, reinterpret_cast<void*>(0x1));
   EXPECT(cocclPipelineStageOutputChunks(invalid, 4, &chunks) ==
          ncclInvalidArgument);
 
   const cocclPipelineStage stages[] = {
-      cocclPipelineCompress(), cocclPipelineAllToAll(&owner),
+      cocclPipelineCompress(reinterpret_cast<void*>(0x1)), cocclPipelineAllToAll(&owner),
       cocclPipelineDecompressReduce(4)};
   cocclPipelineSpec overflow = oneShotSpec(&owner, 16 << 20, stages);
   overflow.rawChunkCount = SIZE_MAX;

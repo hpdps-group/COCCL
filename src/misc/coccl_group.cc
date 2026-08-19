@@ -36,7 +36,7 @@ ncclResult_t cocclGroupPrepareEnd(bool nativePending) {
   for (const cocclPreparedCall& pending : pendingCalls) {
     hasSendRecv |= pending.info.operation == cocclOperation::SendRecv;
     hasCollective |= pending.info.operation != cocclOperation::SendRecv;
-    replayNative |= pending.compressor == nullptr;
+    replayNative |= !pending.compressors.anyEnabled();
   }
   replayNative |= hasSendRecv && hasCollective;
   if (!replayNative) return ncclSuccess;

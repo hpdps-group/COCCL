@@ -38,9 +38,12 @@ cocclPreparedCall makeCall(ncclComm_t comm, cocclAlgorithmKind algorithm) {
   prepared.info.operation = cocclOperation::ReduceScatter;
   prepared.info.comm = comm;
   prepared.algorithm = algorithm;
-  prepared.policy = algorithm == cocclAlgorithmReduceScatterTwoShot
-      ? cocclHierarchicalPolicy(cocclOperation::ReduceScatter)
-      : cocclDefaultPolicy(cocclOperation::ReduceScatter);
+  prepared.policy = cocclDefaultPolicy(cocclOperation::ReduceScatter);
+  prepared.compressors.handles = {
+      reinterpret_cast<void*>(0x1),
+      reinterpret_cast<void*>(0x1),
+      reinterpret_cast<void*>(0x1)};
+  prepared.compressors.datatypeSupported = {true, true, true};
   return prepared;
 }
 

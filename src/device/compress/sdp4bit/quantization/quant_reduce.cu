@@ -31,6 +31,8 @@ __global__ void __launch_bounds__(1024) dequant_reduce(T* reduced_data,
                                                        int64_t elems_per_in_tensor_padding,
                                                        int groups_per_in_tensor,
                                                        int elems_per_in_group,
+                                                       int64_t elements_per_output_chunk,
+                                                       int groups_per_output_chunk,
                                                        int num_tensors)
 {
     cg::thread_block tb = cg::this_thread_block();
@@ -148,13 +150,33 @@ __global__ void __launch_bounds__(1024) dequant_reduce(T* reduced_data,
 
 #pragma unroll
     for (int i = 0; i < totalChunks; i++) {
-        const int64_t iter_offset = (i * stride + base_offset) * (8 / numBits);
-        // const int64_t 
-        if (valid_group && (i * stride + elem_offset < elems_per_in_group) &&
-            (iter_offset < elems_per_in_tensor * (8 / numBits))) {
-            mem_access::store_global<16>(
-                reduced_data + iter_offset,
-                local_buffer + i * storage_values);
+        const int64_t group_element_offset =
+            static_cast<int64_t>(group_id % groups_per_output_chunk) *
+            elems_per_in_group * (8 / numBits);
+        const int64_t remaining_elements =
+            elements_per_output_chunk - group_element_offset;
+        const int64_t valid_elements = valid_group
+            ? min(static_cast<int64_t>(elems_per_in_group * (8 / numBits)),
+                  remaining_elements)
+            : 0;
+        const int64_t local_element_offset =
+            static_cast<int64_t>(i * stride + elem_offset) * (8 / numBits);
+        const int64_t output_offset =
+            static_cast<int64_t>(group_id / groups_per_output_chunk) *
+                elements_per_output_chunk +
+            group_element_offset + local_element_offset;
+        if (local_element_offset + storage_values <= valid_elements &&
+            output_offset % storage_values == 0) {
+            mem_access::store_global<16>(reduced_data + output_offset,
+                                         local_buffer + i * storage_values);
+        } else if (local_element_offset < valid_elements) {
+#pragma unroll
+            for (int value = 0; value < storage_values; ++value) {
+                if (local_element_offset + value < valid_elements) {
+                    reduced_data[output_offset + value] =
+                        local_buffer[i * storage_values + value];
+                }
+            }
         }
     }
 }
@@ -174,6 +196,8 @@ int32_t pow2_round(int32_t raw_value)
                                      elems_per_in_tensor_padding, \
                                      groups_per_in_tensor,     \
                                      elems_per_in_group,       \
+                                     elements_per_output_chunk, \
+                                     groups_per_output_chunk,  \
                                      num_tensors);
 
 template <typename T, int numBits, int numTensors,
@@ -186,6 +210,7 @@ void launch_dequant_reduce_impl(T* reduced_data,
                                 int64_t elems_per_in_tensor,
                                 // int groups_per_in_tensor,
                                 int elems_per_in_group,
+                                int64_t elements_per_output_chunk,
                                 int num_tensors,
                                 cudaStream_t stream)
 {
@@ -199,6 +224,11 @@ void launch_dequant_reduce_impl(T* reduced_data,
                                 / (elems_per_in_group * (8 / numBits));
     int64_t elems_per_in_tensor_padding = (int64_t) groups_per_in_tensor * elems_per_in_group;
     int out_groups = groups_per_in_tensor;
+    const int64_t elements_per_group =
+        static_cast<int64_t>(elems_per_in_group) * (8 / numBits);
+    const int groups_per_output_chunk =
+        (elements_per_output_chunk + elements_per_group - 1) /
+        elements_per_group;
 
     const int groups_per_block =
         (kMinBlockThreads + threads_per_group - 1) / threads_per_group;
@@ -240,6 +270,7 @@ void launch_dequant_reduce_impl(T* reduced_data,
                                                                input_scales,         \
                                                                elems_per_in_tensor,  \
                                                                elems_per_in_group,   \
+                                                               elements_per_output_chunk, \
                                                                num_gpus,             \
                                                                stream);
 
@@ -255,6 +286,7 @@ void launch_dequant_reduce(T* reduced_data,
                            int64_t elems_per_in_tensor,
                         //    int groups_per_in_tensor,
                            int elems_per_in_group,
+                           int64_t elements_per_output_chunk,
                            cudaStream_t stream)
 {
     if (quant_type == quantize::Type::Symmetric) {
@@ -310,12 +342,12 @@ void launch_dequant_reduce(T* reduced_data,
 
 template void launch_dequant_reduce<float>(
     float*, const int8_t*, const float*, int, int, quantize::Type, int64_t,
-    int, cudaStream_t);
+    int, int64_t, cudaStream_t);
 template void launch_dequant_reduce<__half>(
     __half*, const int8_t*, const float*, int, int, quantize::Type, int64_t,
-    int, cudaStream_t);
+    int, int64_t, cudaStream_t);
 #ifdef BF16_AVAILABLE
 template void launch_dequant_reduce<__nv_bfloat16>(
     __nv_bfloat16*, const int8_t*, const float*, int, int, quantize::Type,
-    int64_t, int, cudaStream_t);
+    int64_t, int, int64_t, cudaStream_t);
 #endif

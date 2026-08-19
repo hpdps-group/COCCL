@@ -25,7 +25,6 @@ cocclPipelineSpec hierarchicalSpec(
       4096,
       (size_t)comm->nRanks,
       ncclFloat32,
-      cocclHierarchicalPolicy(cocclOperation::ReduceScatter),
       comm,
       nullptr,
       stages,
@@ -72,7 +71,7 @@ int main() {
   owner.nRanks = 8;
   owner.localRanks = 4;
   const cocclPipelineStage stages[] = {
-      cocclPipelineCompress(), cocclPipelineDecompress()};
+      cocclPipelineCompress(reinterpret_cast<void*>(0x1)), cocclPipelineDecompress()};
   checkNonFused(&owner, stages);
   checkFused(&owner, stages);
   std::printf("COCCL M15 swizzle path selection: PASS\n");

@@ -81,7 +81,8 @@ ncclResult_t readFrameMetadata(
 }
 
 ncclResult_t runCompress(const cocclPipelineStageContext* context,
-                         const cocclPipelineStage*, cocclPipelineEdge* edge,
+                         const cocclPipelineStage* stage,
+                         cocclPipelineEdge* edge,
                          const cocclPipelineStageOutput* output,
                          cudaStream_t stream) {
   const cocclCompressorView input = {
@@ -92,13 +93,14 @@ ncclResult_t runCompress(const cocclPipelineStageContext* context,
       output->ptr, output->capacityBytes, 0, 0, edge->logicalChunks,
       ncclInt8, output->frameMetadata, output->frameStrideBytes};
   NCCLCHECK(ncclCompress(
-      context->compressor, input, &encoded, context->ownerComm->rank,
+      stage->compressor, input, &encoded, context->ownerComm->rank,
       stream));
   edge->ptr = encoded.data;
   edge->bytes = encoded.bytes;
   edge->totalElements = encoded.elements;
   edge->datatype = encoded.datatype;
   edge->logicalChunks = encoded.chunks;
+  edge->compressor = stage->compressor;
   edge->frameMetadata = encoded.frameMetadata;
   edge->frameStrideBytes = encoded.frameStrideBytes;
   return ncclSuccess;
@@ -157,12 +159,13 @@ ncclResult_t runDecompress(const cocclPipelineStageContext* context,
       context->rawSliceCount * edge->logicalChunks,
       edge->logicalChunks, context->rawDatatype, nullptr, 0};
   NCCLCHECK(ncclDecompress(
-      context->compressor, input, &decoded, stream));
+      edge->compressor, input, &decoded, stream));
   edge->ptr = decoded.data;
   edge->bytes = decoded.bytes;
   edge->totalElements = decoded.elements;
   edge->datatype = decoded.datatype;
   edge->logicalChunks = decoded.chunks;
+  edge->compressor = nullptr;
   edge->frameMetadata = nullptr;
   edge->frameStrideBytes = 0;
   return ncclSuccess;
@@ -187,7 +190,8 @@ ncclResult_t runDecompReduceComp(
       output->ptr, output->capacityBytes, 0, 0, outputChunks,
       ncclInt8, output->frameMetadata, output->frameStrideBytes};
   NCCLCHECK(ncclDecompReduceComp(
-      context->compressor, context->ownerComm, input, &encoded,
+      edge->compressor, stage->compressor, context->ownerComm,
+      input, &encoded,
       stage->reduceChunks, context->rawDatatype, reductionElements,
       stream));
   edge->ptr = encoded.data;
@@ -195,6 +199,7 @@ ncclResult_t runDecompReduceComp(
   edge->totalElements = encoded.elements;
   edge->datatype = encoded.datatype;
   edge->logicalChunks = encoded.chunks;
+  edge->compressor = stage->compressor;
   edge->frameMetadata = encoded.frameMetadata;
   edge->frameStrideBytes = encoded.frameStrideBytes;
   return ncclSuccess;
@@ -218,13 +223,35 @@ ncclResult_t runDecompressReduce(
       output->ptr, output->capacityBytes, 0, reductionElements,
       outputChunks, context->rawDatatype, nullptr, 0};
   NCCLCHECK(ncclDecompressReduce(
-      context->compressor, context->ownerComm, input, &reduced,
+      edge->compressor, context->ownerComm, input, &reduced,
       stage->reduceChunks, stream));
   edge->ptr = reduced.data;
   edge->bytes = reduced.bytes;
   edge->totalElements = reduced.elements;
   edge->datatype = reduced.datatype;
   edge->logicalChunks = reduced.chunks;
+  edge->compressor = nullptr;
+  edge->frameMetadata = nullptr;
+  edge->frameStrideBytes = 0;
+  return ncclSuccess;
+}
+
+ncclResult_t runReduceScatter(
+    const cocclPipelineStageContext* context,
+    const cocclPipelineStage* stage, cocclPipelineEdge* edge,
+    const cocclPipelineStageOutput* output, cudaStream_t stream) {
+  const size_t outputChunks =
+      edge->logicalChunks / (size_t)stage->comm->nRanks;
+  const size_t recvcount = context->rawSliceCount * outputChunks;
+  NCCLCHECK(ncclReduceScatter(
+      edge->ptr, output->ptr, recvcount, context->rawDatatype, ncclSum,
+      stage->comm, stream));
+  edge->ptr = output->ptr;
+  edge->bytes = recvcount * (size_t)ncclTypeSize(context->rawDatatype);
+  edge->totalElements = recvcount;
+  edge->datatype = context->rawDatatype;
+  edge->logicalChunks = outputChunks;
+  edge->compressor = nullptr;
   edge->frameMetadata = nullptr;
   edge->frameStrideBytes = 0;
   return ncclSuccess;
@@ -263,14 +290,15 @@ static_assert(cocclPipelineStageCompress == 0 &&
                   cocclPipelineStageDecompReduceComp == 3 &&
                   cocclPipelineStageDecompressReduce == 4 &&
                   cocclPipelineStageDecompress == 5 &&
-                  cocclPipelineStagePack == 6 &&
-                  cocclPipelineStageUnpack == 7,
+                  cocclPipelineStageReduceScatter == 6 &&
+                  cocclPipelineStagePack == 7 &&
+                  cocclPipelineStageUnpack == 8,
               "pipeline stage kinds must match the handler table");
 
 const StageHandler handlers[kCocclPipelineStageKindCount] = {
     runCompress, runAllToAll, runAllGather,
     runDecompReduceComp, runDecompressReduce, runDecompress,
-    runPack, runUnpack};
+    runReduceScatter, runPack, runUnpack};
 
 }  // namespace
 

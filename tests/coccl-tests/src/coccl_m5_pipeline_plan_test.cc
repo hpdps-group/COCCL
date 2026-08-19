@@ -45,18 +45,18 @@ cocclPipelineSpec makeSpec(ncclComm_t comm, size_t totalBytes,
       rawChunkCount,
       chunks,
       ncclFloat32,
-      cocclDefaultPolicy(cocclOperation::AllToAll),
       comm,
       nullptr,
       stages,
       3,
       cocclPipelineInPlaceNone,
+      cocclPipelineInputContiguous,
   };
 }
 
 void checkDepth(ncclComm_t comm, int depth) {
   const cocclPipelineStage stages[] = {
-      cocclPipelineCompress(), cocclPipelineAllToAll(comm),
+      cocclPipelineCompress(reinterpret_cast<void*>(0x1)), cocclPipelineAllToAll(comm),
       cocclPipelineDecompress()};
   constexpr size_t totalBytes = 16 * 1024 * 1024;
   cocclPipelineSpec spec = makeSpec(comm, totalBytes, false, stages);
@@ -101,7 +101,7 @@ void checkDepth(ncclComm_t comm, int depth) {
 
 void dumpPlans(ncclComm_t comm) {
   const cocclPipelineStage stages[] = {
-      cocclPipelineCompress(), cocclPipelineAllToAll(comm),
+      cocclPipelineCompress(reinterpret_cast<void*>(0x1)), cocclPipelineAllToAll(comm),
       cocclPipelineDecompress()};
   const size_t sizes[] = {64ULL << 20, 1ULL << 30, 8ULL << 30};
   const int depths[] = {1, 2, 4, 8};
@@ -153,7 +153,7 @@ int main(int argc, char** argv) {
   checkDepth(&comm, 8);
 
   const cocclPipelineStage stages[] = {
-      cocclPipelineCompress(), cocclPipelineAllToAll(&comm),
+      cocclPipelineCompress(reinterpret_cast<void*>(0x1)), cocclPipelineAllToAll(&comm),
       cocclPipelineDecompress()};
   cocclPipelineSpec inPlace = makeSpec(&comm, 16 << 20, true, stages);
   cocclPipelineContext context = {};

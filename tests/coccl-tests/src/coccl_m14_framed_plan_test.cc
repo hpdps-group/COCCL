@@ -26,7 +26,6 @@ cocclPipelineSpec makeSpec(
       256,
       inputChunks,
       ncclFloat32,
-      cocclDefaultPolicy(cocclOperation::AllToAll),
       comm,
       nullptr,
       stages,
@@ -51,7 +50,7 @@ void expectFramedTemp(const cocclPipelineTempPlan& temp,
 
 void testAllToAll(ncclComm_t comm) {
   const cocclPipelineStage stages[] = {
-      cocclPipelineCompress(), cocclPipelineAllToAll(comm),
+      cocclPipelineCompress(reinterpret_cast<void*>(0x1)), cocclPipelineAllToAll(comm),
       cocclPipelineDecompress()};
   const cocclPipelineSpec spec = makeSpec(
       "framed-alltoall", comm, 4, stages, 3);
@@ -67,11 +66,10 @@ void testAllToAll(ncclComm_t comm) {
 
 void testAllGather(ncclComm_t comm) {
   const cocclPipelineStage stages[] = {
-      cocclPipelineCompress(), cocclPipelineAllGather(comm),
+      cocclPipelineCompress(reinterpret_cast<void*>(0x1)), cocclPipelineAllGather(comm),
       cocclPipelineDecompress()};
   cocclPipelineSpec spec = makeSpec(
       "framed-allgather", comm, 1, stages, 3);
-  spec.compressorPolicy = cocclDefaultPolicy(cocclOperation::AllGather);
   cocclPipelineContext context = {};
   EXPECT(cocclPreparePipeline(&spec, 4, &context) == ncclSuccess);
   EXPECT(context.plan.tempCount == 3);
@@ -83,16 +81,14 @@ void testAllGather(ncclComm_t comm) {
 void testHierarchicalReduction(ncclComm_t owner, ncclComm_t intra,
                                ncclComm_t inter) {
   const cocclPipelineStage stages[] = {
-      cocclPipelineCompress(),
+      cocclPipelineCompress(reinterpret_cast<void*>(0x1)),
       cocclPipelineAllToAll(intra),
-      cocclPipelineDecompReduceComp(2),
+      cocclPipelineDecompReduceComp(2, reinterpret_cast<void*>(0x1)),
       cocclPipelineAllToAll(inter),
       cocclPipelineDecompressReduce(2),
   };
   cocclPipelineSpec spec = makeSpec(
       "framed-reducescatter-twoshot", owner, 4, stages, 5);
-  spec.compressorPolicy =
-      cocclHierarchicalPolicy(cocclOperation::ReduceScatter);
   spec.inputLayout = cocclPipelineInputHierarchicalSwizzle;
   cocclPipelineContext context = {};
   EXPECT(cocclPreparePipeline(&spec, 4, &context) == ncclSuccess);

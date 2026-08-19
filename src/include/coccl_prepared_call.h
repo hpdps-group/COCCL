@@ -1,6 +1,8 @@
 #ifndef COCCL_PREPARED_CALL_H_
 #define COCCL_PREPARED_CALL_H_
 
+#include <array>
+
 #include "coccl_runtime.h"
 
 enum cocclAlgorithmKind {
@@ -12,13 +14,37 @@ enum cocclAlgorithmKind {
   cocclAlgorithmAllReduceTripleShot,
 };
 
+struct cocclPreparedCompressorSet {
+  std::array<void*, static_cast<size_t>(cocclCompressionScope::Count)>
+      handles = {};
+  std::array<bool, static_cast<size_t>(cocclCompressionScope::Count)>
+      datatypeSupported = {};
+  size_t thresholdBytes = 0;
+
+  void* get(cocclCompressionScope scope) const {
+    return handles[static_cast<size_t>(scope)];
+  }
+
+  bool supports(cocclCompressionScope scope) const {
+    const size_t index = static_cast<size_t>(scope);
+    return handles[index] != nullptr && datatypeSupported[index];
+  }
+
+  bool anyEnabled() const {
+    for (void* handle : handles) {
+      if (handle != nullptr) return true;
+    }
+    return false;
+  }
+};
+
 // Fully resolved immutable call retained by grouped replay.
 struct cocclPreparedCall {
   cocclInfo info;
   const cocclOperationDescriptor* descriptor = nullptr;
   cocclPolicyKey policy;
   cocclAlgorithmKind algorithm = cocclAlgorithmNone;
-  void* compressor = nullptr;
+  cocclPreparedCompressorSet compressors;
   double oneShotUs = 0.0;
   double twoShotUs = 0.0;
   double tripleShotUs = 0.0;
@@ -27,6 +53,10 @@ struct cocclPreparedCall {
 
 ncclResult_t cocclEnqueuePreparedCall(const cocclPreparedCall* prepared);
 ncclResult_t cocclExecutePreparedCall(const cocclPreparedCall* prepared);
+bool cocclPreparedAlgorithmHasCompression(
+    const cocclPreparedCall* prepared, cocclAlgorithmKind algorithm);
+bool cocclPreparedAlgorithmSupported(
+    const cocclPreparedCall* prepared, cocclAlgorithmKind algorithm);
 ncclResult_t cocclEnqueueExplicitCall(
     const cocclInfo* info, cocclAlgorithmKind algorithm);
 

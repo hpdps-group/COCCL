@@ -1,6 +1,7 @@
 #include "coccl_reducescatter.h"
 
 #include "checks.h"
+#include "coccl_hierarchical_reduction.h"
 #include "coccl_pipeline.h"
 #include "coccl_prepared_call.h"
 #include "comm.h"
@@ -12,15 +13,17 @@ namespace {
 
 ncclResult_t runOneShot(const cocclPreparedCall* prepared) {
   const cocclInfo& info = prepared->info;
+  const cocclCompressionScope scope = info.comm->nNodes == 1
+      ? cocclCompressionScope::Intra
+      : cocclCompressionScope::Default;
   const cocclPipelineStage stages[] = {
-      cocclPipelineCompress(),
+      cocclPipelineCompress(prepared->compressors.get(scope)),
       cocclPipelineAllToAll(info.comm),
       cocclPipelineDecompressReduce((size_t)info.comm->nRanks),
   };
   const cocclPipelineSpec spec = {
       "reducescatter-oneshot", info.sendbuff, info.recvbuff, info.count,
-      (size_t)info.comm->nRanks, info.datatype, prepared->policy,
-      info.comm, info.stream, stages,
+      (size_t)info.comm->nRanks, info.datatype, info.comm, info.stream, stages,
       (int)(sizeof(stages) / sizeof(stages[0])),
       cocclPipelineInPlaceOutputRankChunk,
       cocclPipelineInputContiguous};
@@ -31,7 +34,6 @@ ncclResult_t runTwoShot(const cocclPreparedCall* prepared) {
   const cocclInfo& info = prepared->info;
   ncclComm_t comm = info.comm;
   const int localRanks = comm->localRanks;
-  const int nNodes = comm->nRanks / localRanks;
   if (IntraSubComm == nullptr) {
     NCCLCHECK(ncclCommSplit(
         comm, comm->rank / localRanks, comm->rank, &IntraSubComm, nullptr));
@@ -39,18 +41,13 @@ ncclResult_t runTwoShot(const cocclPreparedCall* prepared) {
         comm, comm->rank % localRanks, comm->rank, &InterSubComm, nullptr));
   }
 
-  const cocclPipelineStage stages[] = {
-      cocclPipelineCompress(),
-      cocclPipelineAllToAll(IntraSubComm),
-      cocclPipelineDecompReduceComp((size_t)localRanks),
-      cocclPipelineAllToAll(InterSubComm),
-      cocclPipelineDecompressReduce((size_t)nNodes),
-  };
+  cocclPipelineStage stages[5];
+  const int stageCount = cocclBuildHierarchicalReduction(
+      prepared, IntraSubComm, InterSubComm, nullptr, stages);
   const cocclPipelineSpec spec = {
       "reducescatter-twoshot", info.sendbuff, info.recvbuff, info.count,
-      (size_t)comm->nRanks, info.datatype, prepared->policy,
-      comm, info.stream, stages,
-      (int)(sizeof(stages) / sizeof(stages[0])),
+      (size_t)comm->nRanks, info.datatype, comm, info.stream, stages,
+      stageCount,
       cocclPipelineInPlaceOutputRankChunk,
       cocclPipelineInputHierarchicalSwizzle};
   return cocclRunPipeline(&spec);

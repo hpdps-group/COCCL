@@ -106,6 +106,15 @@ ncclResult_t cocclGetCompressorEncodedSizeBound(
   return ncclSuccess;
 }
 
+ncclResult_t cocclGetCompressorEncodedSizeBound(
+    void*, cocclCompressorOperation operation,
+    size_t elements, size_t chunks, ncclDataType_t datatype,
+    size_t* encodedBytes) {
+  return cocclGetCompressorEncodedSizeBound(
+      cocclPolicyKey{}, operation, elements, chunks, datatype,
+      encodedBytes);
+}
+
 bool cocclCompressorPolicySupports(
     cocclPolicyKey, cocclCompressorCapability capability) {
   if (capability == cocclCompressorCapabilityFramed) return state.framed;

@@ -1,4 +1,4 @@
-schema_version = 2
+schema_version = 3
 
 [runtime]
 mode = "normal"
@@ -8,38 +8,54 @@ compression_threshold_bytes = 0
 compressors = ["dietgpu"]
 library_path = "../../../build/obj/device/compress/libcompress"
 
-[normal.all_to_all]
+[normal.all_to_all.default]
 compressor = "dietgpu"
 
-[normal.all_to_all.config.default]
+[normal.all_to_all.default.config]
 probBits = 10
 
-[normal.all_gather]
+[normal.all_gather.default]
 compressor = "dietgpu"
 
-[normal.all_gather.config.default]
+[normal.all_gather.default.config]
 probBits = 10
 
-[normal.all_reduce]
+[normal.all_reduce.default]
 compressor = "dietgpu"
 
-[normal.all_reduce.config.default]
+[normal.all_reduce.default.config]
 probBits = 10
 
-[normal.all_reduce.config.hierarchical]
-probBits = 10
-
-[normal.reduce_scatter]
+[normal.all_reduce.intra]
 compressor = "dietgpu"
 
-[normal.reduce_scatter.config.default]
+[normal.all_reduce.intra.config]
 probBits = 10
 
-[normal.reduce_scatter.config.hierarchical]
-probBits = 10
-
-[normal.sendrecv]
+[normal.all_reduce.inter]
 compressor = "dietgpu"
 
-[normal.sendrecv.config.default]
+[normal.all_reduce.inter.config]
+probBits = 10
+[normal.reduce_scatter.default]
+compressor = "dietgpu"
+
+[normal.reduce_scatter.default.config]
+probBits = 10
+
+[normal.reduce_scatter.intra]
+compressor = "dietgpu"
+
+[normal.reduce_scatter.intra.config]
+probBits = 10
+
+[normal.reduce_scatter.inter]
+compressor = "dietgpu"
+
+[normal.reduce_scatter.inter.config]
+probBits = 10
+[normal.sendrecv.default]
+compressor = "dietgpu"
+
+[normal.sendrecv.default.config]
 probBits = 10

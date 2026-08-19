@@ -38,18 +38,18 @@ cocclPipelineSpec makeSpec(ncclComm_t comm, size_t gatheredBytes,
       rawChunkCount,
       1,
       ncclFloat32,
-      cocclDefaultPolicy(cocclOperation::AllGather),
       comm,
       nullptr,
       stages,
       3,
       cocclPipelineInPlaceInputRankChunk,
+      cocclPipelineInputContiguous,
   };
 }
 
 void checkDepth(ncclComm_t comm, int depth) {
   const cocclPipelineStage stages[] = {
-      cocclPipelineCompress(), cocclPipelineAllGather(comm),
+      cocclPipelineCompress(reinterpret_cast<void*>(0x1)), cocclPipelineAllGather(comm),
       cocclPipelineDecompress()};
   constexpr size_t gatheredBytes = 16 * 1024 * 1024;
   cocclPipelineSpec spec = makeSpec(comm, gatheredBytes, stages);
@@ -98,7 +98,7 @@ void checkDepth(ncclComm_t comm, int depth) {
 
 void dumpPlans(ncclComm_t comm) {
   const cocclPipelineStage stages[] = {
-      cocclPipelineCompress(), cocclPipelineAllGather(comm),
+      cocclPipelineCompress(reinterpret_cast<void*>(0x1)), cocclPipelineAllGather(comm),
       cocclPipelineDecompress()};
   const size_t sizes[] = {64ULL << 20, 1ULL << 30, 8ULL << 30};
   const int depths[] = {1, 2, 4, 8};
@@ -158,7 +158,7 @@ int main(int argc, char** argv) {
 
   comm.nRanks = 4;
   const cocclPipelineStage stages[] = {
-      cocclPipelineCompress(), cocclPipelineAllGather(&comm),
+      cocclPipelineCompress(reinterpret_cast<void*>(0x1)), cocclPipelineAllGather(&comm),
       cocclPipelineDecompress()};
   cocclPipelineSpec inPlace = makeSpec(&comm, 16 << 20, stages);
   const size_t rankBytes =

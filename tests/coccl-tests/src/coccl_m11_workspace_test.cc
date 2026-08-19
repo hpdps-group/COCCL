@@ -108,7 +108,6 @@ cocclPipelineSpec makeSpec(const char* name, ncclComm_t comm,
       totalInputBytes / inputChunks / sizeof(float),
       inputChunks,
       ncclFloat32,
-      cocclDefaultPolicy(operation),
       comm,
       nullptr,
       stages,
@@ -122,7 +121,7 @@ void checkQueryShapes() {
   constexpr size_t inputBytes = 4096;
 
   const cocclPipelineStage allToAllStages[] = {
-      cocclPipelineCompress(), cocclPipelineAllToAll(&comm),
+      cocclPipelineCompress(reinterpret_cast<void*>(0x1)), cocclPipelineAllToAll(&comm),
       cocclPipelineDecompress()};
   cocclPipelineSpec allToAll = makeSpec(
       "alltoall", &comm, allToAllStages, 3, inputBytes, 4,
@@ -139,8 +138,8 @@ void checkQueryShapes() {
   EXPECT(context.plan.totalBytes == 5120);
 
   const cocclPipelineStage allReduceStages[] = {
-      cocclPipelineCompress(), cocclPipelineAllToAll(&comm),
-      cocclPipelineDecompReduceComp(4),
+      cocclPipelineCompress(reinterpret_cast<void*>(0x1)), cocclPipelineAllToAll(&comm),
+      cocclPipelineDecompReduceComp(4, reinterpret_cast<void*>(0x1)),
       cocclPipelineAllGather(&comm), cocclPipelineDecompress()};
   cocclPipelineSpec allReduce = makeSpec(
       "allreduce-twoshot", &comm, allReduceStages, 5,
@@ -173,17 +172,17 @@ void dumpPlans() {
   ncclComm comm = {};
   comm.nRanks = 4;
   const cocclPipelineStage allToAllStages[] = {
-      cocclPipelineCompress(), cocclPipelineAllToAll(&comm),
+      cocclPipelineCompress(reinterpret_cast<void*>(0x1)), cocclPipelineAllToAll(&comm),
       cocclPipelineDecompress()};
   const cocclPipelineStage allGatherStages[] = {
-      cocclPipelineCompress(), cocclPipelineAllGather(&comm),
+      cocclPipelineCompress(reinterpret_cast<void*>(0x1)), cocclPipelineAllGather(&comm),
       cocclPipelineDecompress()};
   const cocclPipelineStage reduceScatterStages[] = {
-      cocclPipelineCompress(), cocclPipelineAllToAll(&comm),
+      cocclPipelineCompress(reinterpret_cast<void*>(0x1)), cocclPipelineAllToAll(&comm),
       cocclPipelineDecompressReduce(4)};
   const cocclPipelineStage allReduceStages[] = {
-      cocclPipelineCompress(), cocclPipelineAllToAll(&comm),
-      cocclPipelineDecompReduceComp(4),
+      cocclPipelineCompress(reinterpret_cast<void*>(0x1)), cocclPipelineAllToAll(&comm),
+      cocclPipelineDecompReduceComp(4, reinterpret_cast<void*>(0x1)),
       cocclPipelineAllGather(&comm), cocclPipelineDecompress()};
   const size_t sizes[] = {64ULL << 20, 1ULL << 30, 8ULL << 30};
   const int depths[] = {1, 2, 4, 8};

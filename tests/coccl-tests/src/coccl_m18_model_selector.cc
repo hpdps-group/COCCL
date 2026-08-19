@@ -81,13 +81,15 @@ int main() {
         nodes > 1 && localRanks > 1, true};
     cocclAutotuneCandidateSet candidates =
         cocclAutotuneBuildCandidates(operation, eligibility);
+    const cocclAutotuneCodecSet codecs = {
+        {true, &baseCodec},
+        {true, &hierarchicalCodec},
+        {true, &hierarchicalCodec},
+    };
     for (size_t i = 0; i < candidates.count; ++i) {
       cocclAutotuneCandidate& candidate = candidates.candidates[i];
-      const cocclCodecModel* codec =
-          candidate.spec->policyVariant == cocclPolicyVariant::Hierarchical
-          ? &hierarchicalCodec : &baseCodec;
       candidate.scoreUs = cocclAutotuneEvaluateCost(
-          candidate.spec->costKind, performance, codec, bytes,
+          candidate.spec->costKind, performance, codecs, bytes,
           localRanks, nodes);
     }
     const cocclAutotuneDecision decision = cocclAutotuneChooseCandidate(

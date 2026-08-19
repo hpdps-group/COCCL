@@ -1,4 +1,4 @@
-schema_version = 2
+schema_version = 3
 
 [runtime]
 mode = "normal"
@@ -8,8 +8,8 @@ compression_threshold_bytes = 0
 compressors = ["zfp"]
 library_path = "../../../build/obj/device/compress/libcompress"
 
-[normal.sendrecv]
+[normal.sendrecv.default]
 compressor = "zfp"
 
-[normal.sendrecv.config.default]
+[normal.sendrecv.default.config]
 rate = 64

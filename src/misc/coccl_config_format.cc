@@ -75,20 +75,37 @@ void appendConfigValues(std::vector<std::string>* lines,
   }
 }
 
+const char* compressionScopeName(cocclCompressionScope scope) {
+  switch (scope) {
+    case cocclCompressionScope::Default: return "default";
+    case cocclCompressionScope::Intra: return "intra";
+    case cocclCompressionScope::Inter: return "inter";
+    case cocclCompressionScope::Count: break;
+  }
+  return "unknown";
+}
+
 void appendPolicy(std::vector<std::string>* lines, const std::string& path,
                   const cocclPrimitivePolicy& policy) {
-  lines->push_back(path + ".enabled = " +
-                   (policy.compressor.name.empty() ? "false" : "true"));
   lines->push_back(path + ".threshold_bytes = " +
                    std::to_string(policy.thresholdBytes));
-  lines->push_back(path + ".compressor = " +
-                   quote(policy.compressor.name));
-  if (policy.compressor.name.empty()) return;
-  appendConfigValues(lines, path + ".config.default",
-                     policy.compressor.defaultValues);
-  if (policy.compressor.hasHierarchicalConfig) {
-    appendConfigValues(lines, path + ".config.hierarchical",
-                       policy.compressor.hierarchicalValues);
+  for (cocclCompressionScope scope : {
+           cocclCompressionScope::Default,
+           cocclCompressionScope::Intra,
+           cocclCompressionScope::Inter}) {
+    const cocclEffectiveCompressorScope effective =
+        cocclEffectiveCompressorScopeFor(policy, scope);
+    const std::string scopePath =
+        path + "." + compressionScopeName(scope);
+    lines->push_back("# " + scopePath + " source=" +
+                     compressionScopeName(effective.source));
+    lines->push_back(scopePath + ".enabled = " +
+                     (effective.enabled() ? "true" : "false"));
+    if (!effective.enabled()) continue;
+    lines->push_back(scopePath + ".compressor = " +
+                     quote(effective.entry->name));
+    appendConfigValues(lines, scopePath + ".config",
+                       effective.entry->values);
   }
 }
 

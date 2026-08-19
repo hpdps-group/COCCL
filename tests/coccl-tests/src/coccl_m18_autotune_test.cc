@@ -147,10 +147,12 @@ void testCostModel() {
       {1.0, 0.001, true}, {2.0, 0.002, true}};
   const cocclCodecModel codec = {
       {3.0, 0.003, true}, 2.0, true};
+  const cocclAutotuneCodecSet codecs = {
+      {true, &codec}, {true, &codec}, {true, &codec}};
   for (const cocclAutotuneCandidateSpec& spec :
        kCocclAutotuneCandidateSpecs) {
     const double cost = cocclAutotuneEvaluateCost(
-        spec.costKind, performance, &codec, 1024.0, 4, 2);
+        spec.costKind, performance, codecs, 1024.0, 4, 2);
     if (!std::isfinite(cost) || cost <= 0.0) {
       fail("valid model returned invalid cost");
     }
@@ -158,15 +160,17 @@ void testCostModel() {
 
   const double oneShot = cocclAutotuneEvaluateCost(
       cocclAutotuneCostKind::AllReduceOneShot, performance,
-      &codec, 1024.0, 4, 2);
+      codecs, 1024.0, 4, 2);
   if (std::abs(oneShot - 34.9072) > 1e-9) {
     fail("allreduce oneshot must include intra-node and inter-node phases");
   }
 
   const cocclCodecModel invalidCodec;
+  const cocclAutotuneCodecSet invalidCodecs = {
+      {true, &invalidCodec}, {true, &codec}, {true, &codec}};
   if (std::isfinite(cocclAutotuneEvaluateCost(
           cocclAutotuneCostKind::AllReduceOneShot, performance,
-          &invalidCodec, 1024.0, 4, 2))) {
+          invalidCodecs, 1024.0, 4, 2))) {
     fail("invalid model returned finite cost");
   }
   rows.push_back({"cost_model_and_invalid_infinity", "all", "all", 1, 0,

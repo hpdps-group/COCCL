@@ -22,7 +22,8 @@ cocclPreparedCall compressed(cocclOperation operation, int id) {
   cocclPreparedCall call;
   call.info.operation = operation;
   call.info.peer = id;
-  call.compressor = reinterpret_cast<void*>(1);
+  call.compressors.handles[static_cast<size_t>(
+      cocclCompressionScope::Default)] = reinterpret_cast<void*>(1);
   return call;
 }
 

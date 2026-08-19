@@ -44,9 +44,6 @@ bool cocclOperationSupportsPolicy(const cocclOperationDescriptor* descriptor,
   switch (variant) {
     case cocclPolicyVariant::Default:
       return true;
-    case cocclPolicyVariant::Hierarchical:
-      return cocclOperationHasTrait(
-          descriptor, cocclOperationTraitHierarchicalPolicy);
     case cocclPolicyVariant::Forward:
     case cocclPolicyVariant::Backward:
       return cocclOperationHasTrait(

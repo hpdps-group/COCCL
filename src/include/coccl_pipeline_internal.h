@@ -8,7 +8,7 @@
 
 constexpr int kCocclPipelineExplicitStages = 7;
 constexpr int kCocclPipelinePhysicalStages = 9;
-constexpr int kCocclPipelineStageKindCount = 8;
+constexpr int kCocclPipelineStageKindCount = 9;
 constexpr int kCocclPipelineMaxTemps = 8;
 constexpr int kCocclPipelineMaxDepth = 16;
 constexpr int kCocclPipelineRawRingSlots = 2;
@@ -20,6 +20,7 @@ struct cocclPipelineEdge {
   size_t totalElements;
   ncclDataType_t datatype;
   size_t logicalChunks;
+  void* compressor;
   cocclCompressorFrameMetadata* frameMetadata;
   size_t frameStrideBytes;
 };
@@ -44,9 +45,7 @@ struct cocclPipelineStageContext {
   size_t rawSliceBytes;
   size_t rawChunkBytes;
   ncclDataType_t rawDatatype;
-  cocclPolicyKey compressorPolicy;
   ncclComm_t ownerComm;
-  void* compressor;
   cocclPipelineFrameResources* frameResources;
   cocclPipelineInputLayout inputLayout;
   int nNodes;
@@ -60,6 +59,7 @@ enum cocclPipelineTempRole {
   cocclPipelineTempAllGatherOutput,
   cocclPipelineTempDecompReduceCompOutput,
   cocclPipelineTempDecompressReduceOutput,
+  cocclPipelineTempReduceScatterOutput,
   cocclPipelineTempOutputStaging,
 };
 

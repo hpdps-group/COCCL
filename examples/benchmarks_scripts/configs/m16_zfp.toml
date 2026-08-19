@@ -1,4 +1,4 @@
-schema_version = 2
+schema_version = 3
 
 [runtime]
 mode = "normal"
@@ -8,38 +8,54 @@ compression_threshold_bytes = 1048576
 compressors = ["zfp"]
 library_path = "../../../build/obj/device/compress/libcompress"
 
-[normal.all_to_all]
+[normal.all_to_all.default]
 compressor = "zfp"
 
-[normal.all_to_all.config.default]
+[normal.all_to_all.default.config]
 rate = 4
 
-[normal.all_gather]
+[normal.all_gather.default]
 compressor = "zfp"
 
-[normal.all_gather.config.default]
+[normal.all_gather.default.config]
 rate = 8
 
-[normal.all_reduce]
+[normal.all_reduce.default]
 compressor = "zfp"
 
-[normal.all_reduce.config.default]
+[normal.all_reduce.default.config]
 rate = 8
 
-[normal.all_reduce.config.hierarchical]
-rate = 8
-
-[normal.reduce_scatter]
+[normal.all_reduce.intra]
 compressor = "zfp"
 
-[normal.reduce_scatter.config.default]
+[normal.all_reduce.intra.config]
 rate = 8
 
-[normal.reduce_scatter.config.hierarchical]
-rate = 8
-
-[normal.sendrecv]
+[normal.all_reduce.inter]
 compressor = "zfp"
 
-[normal.sendrecv.config.default]
+[normal.all_reduce.inter.config]
+rate = 8
+[normal.reduce_scatter.default]
+compressor = "zfp"
+
+[normal.reduce_scatter.default.config]
+rate = 8
+
+[normal.reduce_scatter.intra]
+compressor = "zfp"
+
+[normal.reduce_scatter.intra.config]
+rate = 8
+
+[normal.reduce_scatter.inter]
+compressor = "zfp"
+
+[normal.reduce_scatter.inter.config]
+rate = 8
+[normal.sendrecv.default]
+compressor = "zfp"
+
+[normal.sendrecv.default.config]
 rate = 8

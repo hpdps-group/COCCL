@@ -214,6 +214,7 @@ void launch_dequant_reduce(T* reduced_data,
                            quantize::Type quant_type,
                            int64_t elems_per_in_tensor,
                            int elems_per_in_group,
+                           int64_t elements_per_output_chunk,
                            cudaStream_t stream);
 
 void launch_dequant_reduce_quant(int8_t* reduced_data,
@@ -241,6 +242,7 @@ void launch_dequant_reduce_ht(T* reduced_data,
                               quantize::Type quant_type,
                               int64_t elems_per_in_tensor,
                               int elems_per_in_group,
+                              int64_t elements_per_output_chunk,
                               cudaStream_t stream);
 
 template <typename T>

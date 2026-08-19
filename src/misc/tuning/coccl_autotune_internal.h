@@ -44,7 +44,6 @@ enum class cocclAutotuneScoreSlot : uint8_t {
 struct cocclAutotuneCandidateSpec {
   cocclOperation operation;
   cocclAlgorithmKind algorithm;
-  cocclPolicyVariant policyVariant;
   uint32_t requirements;
   cocclAlgorithmKind unavailableFallback;
   int heuristicPriority;
@@ -59,7 +58,6 @@ inline constexpr std::array<cocclAutotuneCandidateSpec, 5>
     kCocclAutotuneCandidateSpecs = {{
         {cocclOperation::ReduceScatter,
          cocclAlgorithmReduceScatterOneShot,
-         cocclPolicyVariant::Default,
          cocclAutotuneRequiresNone,
          cocclAlgorithmReduceScatterOneShot,
          1,
@@ -68,7 +66,6 @@ inline constexpr std::array<cocclAutotuneCandidateSpec, 5>
          "oneshot"},
         {cocclOperation::ReduceScatter,
          cocclAlgorithmReduceScatterTwoShot,
-         cocclPolicyVariant::Hierarchical,
          cocclAutotuneRequiresHierarchical,
          cocclAlgorithmReduceScatterOneShot,
          0,
@@ -77,7 +74,6 @@ inline constexpr std::array<cocclAutotuneCandidateSpec, 5>
          "twoshot"},
         {cocclOperation::AllReduce,
          cocclAlgorithmAllReduceOneShot,
-         cocclPolicyVariant::Default,
          cocclAutotuneRequiresDivisibleByRanks,
          cocclAlgorithmAllReduceOneShot,
          1,
@@ -86,7 +82,6 @@ inline constexpr std::array<cocclAutotuneCandidateSpec, 5>
          "oneshot"},
         {cocclOperation::AllReduce,
          cocclAlgorithmAllReduceTwoShot,
-         cocclPolicyVariant::Default,
          cocclAutotuneRequiresDivisibleByRanks,
          cocclAlgorithmAllReduceTwoShot,
          0,
@@ -95,7 +90,6 @@ inline constexpr std::array<cocclAutotuneCandidateSpec, 5>
          "twoshot"},
         {cocclOperation::AllReduce,
          cocclAlgorithmAllReduceTripleShot,
-         cocclPolicyVariant::Hierarchical,
          cocclAutotuneRequiresHierarchical |
              cocclAutotuneRequiresDivisibleByRanks,
          cocclAlgorithmAllReduceTwoShot,
@@ -124,6 +118,17 @@ struct cocclAutotuneDecision {
   const cocclAutotuneCandidateSpec* candidate = nullptr;
   bool usedModel = false;
   bool forcedFallback = false;
+};
+
+struct cocclAutotunePhaseCodec {
+  bool compressed = false;
+  const cocclCodecModel* model = nullptr;
+};
+
+struct cocclAutotuneCodecSet {
+  cocclAutotunePhaseCodec defaultScope;
+  cocclAutotunePhaseCodec intra;
+  cocclAutotunePhaseCodec inter;
 };
 
 inline const cocclAutotuneCandidateSpec* cocclAutotuneFindCandidateSpec(
@@ -252,11 +257,12 @@ double cocclAutotunePredict(const cocclLinearModel& model, double bytes);
 double cocclAutotuneEvaluateCost(
     cocclAutotuneCostKind costKind,
     const cocclSelectionPerformanceModel& model,
-    const cocclCodecModel* codec, double messageBytes, int localRanks,
+    const cocclAutotuneCodecSet& codecs, double messageBytes, int localRanks,
     int nodes);
 
 cocclSelectionPerformanceModel cocclAutotuneSnapshotPerformanceModel(
-    void* primary, void* secondary, cocclCodecModel* primaryModel,
-    cocclCodecModel* secondaryModel);
+    void* defaultCompressor, void* intraCompressor, void* interCompressor,
+    cocclCodecModel* defaultModel, cocclCodecModel* intraModel,
+    cocclCodecModel* interModel);
 
 #endif

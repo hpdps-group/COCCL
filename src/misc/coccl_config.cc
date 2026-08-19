@@ -199,60 +199,69 @@ bool parseOptionValues(const toml::table& table, cocclConfigValues* values,
   return true;
 }
 
+bool parseCompressorScope(const toml::table* table,
+                          cocclCompressorScopeEntry* scope,
+                          const std::string& path, std::string* error) {
+  *scope = {};
+  if (table == nullptr) return true;
+  scope->configured = true;
+  scope->enabled = true;
+  if (!validateKeys(*table, {"enabled", "compressor", "config"}, path,
+                    error) ||
+      !readBool(*table, "enabled", &scope->enabled, path, error) ||
+      !readString(*table, "compressor", &scope->name, scope->enabled, path,
+                  error)) {
+    return false;
+  }
+  if (!scope->enabled) {
+    if (!scope->name.empty() || table->get("config") != nullptr) {
+      return fail(error, path +
+                             " disabled scope cannot configure a compressor");
+    }
+    return true;
+  }
+  if (!validCompressorName(scope->name)) {
+    return fail(error, path + ".compressor contains invalid compressor name '" +
+                           scope->name + "'");
+  }
+  const toml::table* config = optionalTable(*table, "config", path, error);
+  if (config == nullptr) return error == nullptr || error->empty();
+  return parseOptionValues(*config, &scope->values, path + ".config", error);
+}
+
 bool parsePrimitivePolicy(const toml::table* table,
                           cocclPrimitivePolicy* policy,
                           size_t defaultThreshold, const std::string& path,
                           std::string* error) {
-  policy->compressor = {};
+  policy->scopes = {};
   policy->thresholdBytes = defaultThreshold;
   if (table == nullptr) return true;
-  if (!validateKeys(*table, {"compressor", "threshold_bytes", "config"},
+  if (!validateKeys(*table,
+                    {"threshold_bytes", "default", "intra", "inter"},
                     path, error) ||
-      !readString(*table, "compressor", &policy->compressor.name, false, path,
-                  error) ||
       !readSize(*table, "threshold_bytes", &policy->thresholdBytes, path,
                 error)) {
     return false;
   }
-  if (!policy->compressor.name.empty() &&
-      !validCompressorName(policy->compressor.name)) {
-    return fail(error, path + ".compressor contains invalid compressor name '" +
-                           policy->compressor.name + "'");
-  }
-
-  const toml::table* configTable = optionalTable(*table, "config", path, error);
-  if (configTable == nullptr) {
-    return error == nullptr || error->empty();
-  }
-  if (policy->compressor.name.empty()) {
-    return fail(error, path + ".config requires a configured compressor");
-  }
-  if (!validateKeys(*configTable, {"default", "hierarchical"},
-                    path + ".config", error)) {
-    return false;
-  }
-
-  if (const toml::table* defaults =
-          optionalTable(*configTable, "default", path + ".config", error)) {
-    if (!parseOptionValues(*defaults, &policy->compressor.defaultValues,
-                           path + ".config.default", error)) {
-      return false;
-    }
-  } else if (error != nullptr && !error->empty()) {
-    return false;
-  }
-  if (const toml::table* hierarchical = optionalTable(
-          *configTable, "hierarchical", path + ".config", error)) {
-    if (!parseOptionValues(*hierarchical,
-                           &policy->compressor.hierarchicalValues,
-                           path + ".config.hierarchical", error)) {
-      return false;
-    }
-    policy->compressor.hasHierarchicalConfig = true;
-  } else if (error != nullptr && !error->empty()) {
-    return false;
-  }
-  return true;
+  const toml::table* defaults = optionalTable(*table, "default", path, error);
+  const toml::table* intra = optionalTable(*table, "intra", path, error);
+  const toml::table* inter = optionalTable(*table, "inter", path, error);
+  if (error != nullptr && !error->empty()) return false;
+  return parseCompressorScope(
+             defaults,
+             &policy->scopes[static_cast<size_t>(
+                 cocclCompressionScope::Default)],
+             path + ".default", error) &&
+         parseCompressorScope(
+             intra,
+             &policy->scopes[static_cast<size_t>(
+                 cocclCompressionScope::Intra)],
+             path + ".intra", error) &&
+         parseCompressorScope(
+             inter,
+             &policy->scopes[static_cast<size_t>(
+                 cocclCompressionScope::Inter)],
+             path + ".inter", error);
 }
 
 bool parseCollectiveChildren(const toml::table* table,
@@ -513,11 +522,12 @@ bool validateCatalogReferences(const cocclConfig& config, std::string* error) {
                                       config.plugins.compressors.end());
   for (const cocclConfigPolicyView& configuredPolicy :
        cocclEnumeratePolicies(config)) {
-    const std::string& compressor =
-        configuredPolicy.policy->compressor.name;
-    if (!compressor.empty() && catalog.count(compressor) == 0) {
-      return fail(error, "compressor '" + compressor +
-                             "' is used by a policy but missing from compressor_plugins.compressors");
+    for (const cocclCompressorScopeEntry& scope :
+         configuredPolicy.policy->scopes) {
+      if (scope.enabled && catalog.count(scope.name) == 0) {
+        return fail(error, "compressor '" + scope.name +
+                               "' is used by a policy but missing from compressor_plugins.compressors");
+      }
     }
   }
   return true;
@@ -565,63 +575,82 @@ bool parseConfigFileImpl(const std::string& path, cocclConfig* config,
 
 }  // namespace
 
+const cocclCompressorScopeEntry& cocclConfiguredCompressorScope(
+    const cocclPrimitivePolicy& policy, cocclCompressionScope scope) {
+  return policy.scopes[static_cast<size_t>(scope)];
+}
+
+cocclEffectiveCompressorScope cocclEffectiveCompressorScopeFor(
+    const cocclPrimitivePolicy& policy, cocclCompressionScope scope) {
+  const cocclCompressorScopeEntry& configured =
+      cocclConfiguredCompressorScope(policy, scope);
+  if (configured.configured) return {&configured, scope};
+  const cocclCompressorScopeEntry& defaults =
+      cocclConfiguredCompressorScope(
+          policy, cocclCompressionScope::Default);
+  return defaults.configured
+      ? cocclEffectiveCompressorScope{
+            &defaults, cocclCompressionScope::Default}
+      : cocclEffectiveCompressorScope{};
+}
+
 cocclConfigPolicyList cocclEnumeratePolicies(const cocclConfig& config) {
   return {{
       {cocclConfigPolicyId::NormalAllGather, "normal.all_gather",
        cocclRuntimeMode::Normal, cocclPolicyScope::Normal,
-       cocclDefaultPolicy(cocclOperation::AllGather), false,
+       cocclDefaultPolicy(cocclOperation::AllGather),
        &config.normal.allGather},
       {cocclConfigPolicyId::NormalReduceScatter, "normal.reduce_scatter",
        cocclRuntimeMode::Normal, cocclPolicyScope::Normal,
-       cocclDefaultPolicy(cocclOperation::ReduceScatter), true,
+       cocclDefaultPolicy(cocclOperation::ReduceScatter),
        &config.normal.reduceScatter},
       {cocclConfigPolicyId::NormalAllReduce, "normal.all_reduce",
        cocclRuntimeMode::Normal, cocclPolicyScope::Normal,
-       cocclDefaultPolicy(cocclOperation::AllReduce), true,
+       cocclDefaultPolicy(cocclOperation::AllReduce),
        &config.normal.allReduce},
       {cocclConfigPolicyId::NormalAllToAll, "normal.all_to_all",
        cocclRuntimeMode::Normal, cocclPolicyScope::Normal,
-       cocclDefaultPolicy(cocclOperation::AllToAll), false,
+       cocclDefaultPolicy(cocclOperation::AllToAll),
        &config.normal.allToAll},
       {cocclConfigPolicyId::NormalSendRecv, "normal.sendrecv",
        cocclRuntimeMode::Normal, cocclPolicyScope::Normal,
-       cocclDefaultPolicy(cocclOperation::SendRecv), false,
+       cocclDefaultPolicy(cocclOperation::SendRecv),
        &config.normal.sendRecv},
       {cocclConfigPolicyId::TrainingDpAllGather, "training.dp.all_gather",
        cocclRuntimeMode::Training, cocclPolicyScope::DataParallel,
-       cocclDefaultPolicy(cocclOperation::AllGather), false,
+       cocclDefaultPolicy(cocclOperation::AllGather),
        &config.trainingPolicies.dataParallel.allGather},
       {cocclConfigPolicyId::TrainingDpReduceScatter,
        "training.dp.reduce_scatter", cocclRuntimeMode::Training,
        cocclPolicyScope::DataParallel,
-       cocclDefaultPolicy(cocclOperation::ReduceScatter), true,
+       cocclDefaultPolicy(cocclOperation::ReduceScatter),
        &config.trainingPolicies.dataParallel.reduceScatter},
       {cocclConfigPolicyId::TrainingDpAllReduce, "training.dp.all_reduce",
        cocclRuntimeMode::Training, cocclPolicyScope::DataParallel,
-       cocclDefaultPolicy(cocclOperation::AllReduce), true,
+       cocclDefaultPolicy(cocclOperation::AllReduce),
        &config.trainingPolicies.dataParallel.allReduce},
       {cocclConfigPolicyId::TrainingTpAllGather, "training.tp.all_gather",
        cocclRuntimeMode::Training, cocclPolicyScope::TensorParallel,
-       cocclDefaultPolicy(cocclOperation::AllGather), false,
+       cocclDefaultPolicy(cocclOperation::AllGather),
        &config.trainingPolicies.tensorParallel.allGather},
       {cocclConfigPolicyId::TrainingTpReduceScatter,
        "training.tp.reduce_scatter", cocclRuntimeMode::Training,
        cocclPolicyScope::TensorParallel,
-       cocclDefaultPolicy(cocclOperation::ReduceScatter), true,
+       cocclDefaultPolicy(cocclOperation::ReduceScatter),
        &config.trainingPolicies.tensorParallel.reduceScatter},
       {cocclConfigPolicyId::TrainingTpAllReduce, "training.tp.all_reduce",
        cocclRuntimeMode::Training, cocclPolicyScope::TensorParallel,
-       cocclDefaultPolicy(cocclOperation::AllReduce), true,
+       cocclDefaultPolicy(cocclOperation::AllReduce),
        &config.trainingPolicies.tensorParallel.allReduce},
       {cocclConfigPolicyId::TrainingPpSendRecvForward,
        "training.pp.sendrecv.forward", cocclRuntimeMode::Training,
        cocclPolicyScope::PipelineParallel,
-       cocclDirectionalPolicy(cocclOperation::SendRecv, true), false,
+       cocclDirectionalPolicy(cocclOperation::SendRecv, true),
        &config.trainingPolicies.pipelineSendRecvForward},
       {cocclConfigPolicyId::TrainingPpSendRecvBackward,
        "training.pp.sendrecv.backward", cocclRuntimeMode::Training,
        cocclPolicyScope::PipelineParallel,
-       cocclDirectionalPolicy(cocclOperation::SendRecv, false), false,
+       cocclDirectionalPolicy(cocclOperation::SendRecv, false),
        &config.trainingPolicies.pipelineSendRecvBackward},
   }};
 }

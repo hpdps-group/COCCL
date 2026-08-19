@@ -73,7 +73,7 @@ endif
 	m7-host-tests m8-host-tests m9-host-tests m10-host-tests m11-host-tests \
 	m12-host-tests m13-host-tests m14-host-tests m14-codec-build \
 	m15-host-tests m15-layout-test m16-correctness-build \
-	dietgpu-integer-build
+	m19-host-tests dietgpu-integer-build
 
 BUILDDIR ?= ../build
 ifneq ($(NCCL_HOME), "")
@@ -146,9 +146,16 @@ M18_AUTOTUNE_TEST := $(DST_DIR)/coccl_m18_autotune_test
 M18_MODEL_SELECTOR := $(DST_DIR)/coccl_m18_model_selector
 M18_COST_MODEL_SRC := $(COCCL_SRC)/misc/tuning/coccl_autotune_cost_model.cc
 M18_AUTOTUNE_INTERNAL := $(COCCL_SRC)/misc/tuning/coccl_autotune_internal.h
+M19_SCOPE_CONFIG_TEST := $(DST_DIR)/coccl_m19_scope_config_test
+M19_HIERARCHICAL_GRAPH_TEST := $(DST_DIR)/coccl_m19_hierarchical_graph_test
+M19_CODEC_FLOW_TEST := $(DST_DIR)/coccl_m19_codec_flow_test
+M19_SELECTOR_SCOPE_TEST := $(DST_DIR)/coccl_m19_selector_scope_test
 DIETGPU_INTEGER_TEST := $(DST_DIR)/coccl_dietgpu_integer_test
 
 dietgpu-integer-build: $(DIETGPU_INTEGER_TEST)
+
+m19-host-tests: $(M19_SCOPE_CONFIG_TEST) $(M19_HIERARCHICAL_GRAPH_TEST) \
+		$(M19_CODEC_FLOW_TEST) $(M19_SELECTOR_SCOPE_TEST)
 
 m16-correctness-build: $(M16_CORRECTNESS_TEST)
 
@@ -310,7 +317,8 @@ $(M15_SWIZZLE_PLAN_TEST): coccl_m15_swizzle_plan_test.cc \
 	$(CXX) $(M1_CXXFLAGS) $(COCCL_INC) -I$(COCCL_SRC) -o $@ $^
 
 $(M15_REDUCESCATTER_RECIPE_TEST): coccl_m15_reducescatter_recipe_test.cc \
-		$(COCCL_SRC)/misc/coccl_reducescatter.cc
+		$(COCCL_SRC)/misc/coccl_reducescatter.cc \
+		$(COCCL_SRC)/misc/coccl_hierarchical_reduction.cc
 	@printf "Linking  %-35s > %s\n" $< $@
 	@mkdir -p $(DST_DIR)
 	$(CXX) $(M1_CXXFLAGS) $(COCCL_INC) -I$(COCCL_SRC) -o $@ $^
@@ -334,13 +342,45 @@ $(M18_MODEL_SELECTOR): coccl_m18_model_selector.cc \
 	$(CXX) $(M1_CXXFLAGS) $(COCCL_INC) -I$(COCCL_SRC) \
 		-o $@ $< $(M18_COST_MODEL_SRC)
 
+$(M19_SCOPE_CONFIG_TEST): coccl_m19_scope_config_test.cc \
+		$(COCCL_SRC)/misc/coccl_config.cc \
+		$(COCCL_SRC)/misc/coccl_config_format.cc \
+		$(COCCL_SRC)/misc/coccl_operation.cc
+	@printf "Linking  %-35s > %s\n" $< $@
+	@mkdir -p $(DST_DIR)
+	$(CXX) $(M1_CXXFLAGS) -DCOCCL_CONFIG_PARSER_ONLY $(COCCL_INC) \
+		-o $@ $^
+
+$(M19_HIERARCHICAL_GRAPH_TEST): coccl_m19_hierarchical_graph_test.cc \
+		$(COCCL_SRC)/misc/coccl_hierarchical_reduction.cc \
+		$(COCCL_SRC)/misc/coccl_pipeline_plan.cc $(M11_SIZE_QUERY_STUB)
+	@printf "Linking  %-35s > %s\n" $< $@
+	@mkdir -p $(DST_DIR)
+	$(CXX) $(M1_CXXFLAGS) $(COCCL_INC) -I$(COCCL_SRC) -o $@ $^
+
+$(M19_CODEC_FLOW_TEST): coccl_m19_codec_flow_test.cc \
+		$(COCCL_SRC)/misc/coccl_pipeline_stage.cc
+	@printf "Linking  %-35s > %s\n" $< $@
+	@mkdir -p $(DST_DIR)
+	$(CXX) $(M1_CXXFLAGS) $(COCCL_INC) -I$(COCCL_SRC) -o $@ $^ \
+		-L$(CUDA_LIB) -lcudart
+
+$(M19_SELECTOR_SCOPE_TEST): coccl_m19_selector_scope_test.cc \
+		$(COCCL_SRC)/misc/tuning/coccl_autotune_selector.cc \
+		$(COCCL_SRC)/misc/tuning/coccl_autotune_cost_model.cc \
+		$(COCCL_SRC)/misc/coccl_prepared_call.cc
+	@printf "Linking  %-35s > %s\n" $< $@
+	@mkdir -p $(DST_DIR)
+	$(CXX) $(M1_CXXFLAGS) $(COCCL_INC) -I$(COCCL_SRC) -o $@ $^
+
 $(DIETGPU_INTEGER_TEST): coccl_dietgpu_integer_test.cu
 	@printf "Linking  %-35s > %s\n" $< $@
 	@mkdir -p $(DST_DIR)
 	$(NVCC) -o $@ $(NVCUFLAGS) $< $(NVLDFLAGS)
 
 $(M2_RUNTIME_TEST): coccl_m2_runtime_test.cc \
-		$(COCCL_SRC)/misc/coccl_runtime.cc
+		$(COCCL_SRC)/misc/coccl_runtime.cc \
+		$(COCCL_SRC)/misc/coccl_prepared_call.cc
 	@printf "Linking  %-35s > %s\n" $< $@
 	@mkdir -p $(DST_DIR)
 	$(CXX) $(M1_CXXFLAGS) $(COCCL_INC) -I$(COCCL_SRC) -o $@ $^
@@ -420,7 +460,8 @@ $(M8_ALLREDUCE_PLAN_TEST): coccl_m8_allreduce_plan_test.cc \
 	$(CXX) $(M1_CXXFLAGS) $(COCCL_INC) -I$(COCCL_SRC) -o $@ $^
 
 $(M8_ALLREDUCE_RECIPE_TEST): coccl_m8_allreduce_recipe_test.cc \
-		$(COCCL_SRC)/misc/coccl_allreduce.cc
+		$(COCCL_SRC)/misc/coccl_allreduce.cc \
+		$(COCCL_SRC)/misc/coccl_hierarchical_reduction.cc
 	@printf "Linking  %-35s > %s\n" $< $@
 	@mkdir -p $(DST_DIR)
 	$(CXX) $(M1_CXXFLAGS) $(COCCL_INC) -I$(COCCL_SRC) -o $@ $^

@@ -161,8 +161,21 @@ cocclPipelineEdge inputEdge(const cocclPipelineContext& context,
       context.spec->datatype,
       context.spec->inputChunks,
       nullptr,
+      nullptr,
       0,
   };
+}
+
+bool pipelineUsesFramedCompressor(const cocclPipelineSpec* spec) {
+  for (int stage = 0; stage < spec->stageCount; ++stage) {
+    if (spec->stages[stage].compressor != nullptr &&
+        cocclCompressorSupports(
+            spec->stages[stage].compressor,
+            cocclCompressorCapabilityFramed)) {
+      return true;
+    }
+  }
+  return false;
 }
 
 cocclPipelineStageOutput stageOutput(const cocclPipelineContext& context,
@@ -469,9 +482,7 @@ static ncclResult_t cocclRunPipelineWithDepth(
       registeredWorkspace.ptr, rawWorkspace.ptr};
 
   ncclResult_t result = ncclSuccess;
-  const bool framed = cocclCompressorSupports(
-      context.stageContext.compressor,
-      cocclCompressorCapabilityFramed);
+  const bool framed = pipelineUsesFramedCompressor(spec);
   if (context.depth == 1 && !framed) {
     result = runSerial(context, workspace);
   } else {

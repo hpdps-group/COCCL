@@ -22,7 +22,8 @@ void fail(const char* expression, int line) {
 cocclPreparedCall call(cocclOperation operation) {
   cocclPreparedCall prepared;
   prepared.info.operation = operation;
-  prepared.compressor = reinterpret_cast<void*>(0x1);
+  prepared.compressors.handles[static_cast<size_t>(
+      cocclCompressionScope::Default)] = reinterpret_cast<void*>(0x1);
   return prepared;
 }
 

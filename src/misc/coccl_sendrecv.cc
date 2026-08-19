@@ -59,19 +59,6 @@ cocclCompressorFrameMetadata* deviceMetadata(
       static_cast<char*>(state.buffer.ptr) + state.metadataOffset);
 }
 
-bool sendRecvForward(const cocclInfo& info) {
-  return info.func == ncclFuncSend
-      ? info.comm->rank < info.peer
-      : info.comm->rank > info.peer;
-}
-
-cocclPolicyKey directPolicy(const cocclInfo& info) {
-  return cocclGetConfig().runtime.mode == cocclRuntimeMode::Training
-      ? cocclDirectionalPolicy(cocclOperation::SendRecv,
-                               sendRecvForward(info))
-      : cocclDefaultPolicy(cocclOperation::SendRecv);
-}
-
 cocclPreparedCall directCall(
     const void* sendbuff, void* recvbuff, size_t count,
     ncclDataType_t datatype, int peer, ncclFunc_t func, ncclComm_t comm,
@@ -97,11 +84,17 @@ ncclResult_t submitDirect(cocclPreparedCall* prepared) {
         ? cocclGroupEnqueueNative(&prepared->info)
         : cocclReplayNativeCall(prepared->info);
   }
-  prepared->policy = directPolicy(prepared->info);
-  cocclResolvedCompressorPolicy resolved = {};
-  NCCLCHECK(cocclResolveCompressorPolicy(prepared->policy, &resolved));
-  prepared->compressor = resolved.compressor;
-  return cocclEnqueuePreparedCall(prepared);
+  return cocclEnqueueExplicitCall(
+      &prepared->info, cocclAlgorithmNone);
+}
+
+void* sendRecvCompressor(const cocclPreparedCall& prepared) {
+  const cocclInfo& info = prepared.info;
+  const cocclCompressionScope scope =
+      info.comm->rankToNode[info.peer] == info.comm->node
+      ? cocclCompressionScope::Intra
+      : cocclCompressionScope::Inter;
+  return prepared.compressors.get(scope);
 }
 
 }  // namespace
@@ -118,6 +111,7 @@ ncclResult_t cocclExecuteSendRecvBatch(
     const cocclPreparedCall& prepared = calls[i];
     const cocclInfo& info = prepared.info;
     cocclSendRecvCallState& state = states[i];
+    void* const compressor = sendRecvCompressor(prepared);
     size_t allocationBytes = 0;
     if (!sendRecvLayout(info.count, info.datatype, &state.rawBytes,
                         &state.metadataOffset, &allocationBytes)) {
@@ -131,7 +125,7 @@ ncclResult_t cocclExecuteSendRecvBatch(
 
     cocclCompressorFrameMetadata* metadata = deviceMetadata(state);
     state.framed = cocclCompressorSupports(
-        prepared.compressor, cocclCompressorCapabilityFramed);
+        compressor, cocclCompressorCapabilityFramed);
     if (info.func == ncclFuncSend) {
       const cocclCompressorView input = {
           const_cast<void*>(info.sendbuff), state.rawBytes, state.rawBytes,
@@ -141,7 +135,7 @@ ncclResult_t cocclExecuteSendRecvBatch(
           state.framed ? metadata : nullptr,
           state.framed ? state.rawBytes : 0};
       NCCLCHECKGOTO(ncclCompress(
-                        prepared.compressor, input, &state.encoded,
+                        compressor, input, &state.encoded,
                         info.comm->rank, info.stream),
                     ret, exit);
 
@@ -217,6 +211,7 @@ ncclResult_t cocclExecuteSendRecvBatch(
     const cocclPreparedCall& prepared = calls[i];
     const cocclInfo& info = prepared.info;
     cocclSendRecvCallState& state = states[i];
+    void* const compressor = sendRecvCompressor(prepared);
     if (info.func != ncclFuncRecv) continue;
 
     cocclCompressorView input = {};
@@ -242,7 +237,7 @@ ncclResult_t cocclExecuteSendRecvBatch(
         info.recvbuff, state.rawBytes, 0, info.count, 1,
         info.datatype, nullptr, 0};
     NCCLCHECKGOTO(ncclDecompress(
-                      prepared.compressor, input, &output, info.stream),
+                      compressor, input, &output, info.stream),
                   ret, exit);
   }
 

@@ -4,6 +4,7 @@
 #include <dlfcn.h>
 #include <stdint.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 #include <vector>
@@ -13,6 +14,18 @@ namespace {
 constexpr size_t kGuardBytes = 64;
 constexpr unsigned char kEncodedGuard = 0xa5;
 constexpr unsigned char kDecodedGuard = 0x5a;
+
+enum class InputPattern {
+  Mixed,
+  Compressible,
+  Random,
+};
+
+enum class FrameExpectation {
+  Any,
+  Mixed,
+  RawOnly,
+};
 
 struct ScratchAllocations {
   std::vector<void*> buffers;
@@ -66,7 +79,8 @@ bool guardsEqual(const std::vector<unsigned char>& bytes,
 }
 
 int runRoundTrip(const cocclCompressorPlugin* plugin, int probBits,
-                 size_t frameBytes, size_t frames, bool expectMixed) {
+                 size_t frameBytes, size_t frames, InputPattern pattern,
+                 FrameExpectation expectation, bool printProbe) {
   size_t rawBytes = frameBytes * frames;
   if (frameBytes == 0 || frames == 0 || rawBytes / frames != frameBytes) {
     return 1;
@@ -74,7 +88,11 @@ int runRoundTrip(const cocclCompressorPlugin* plugin, int probBits,
 
   std::vector<unsigned char> input(rawBytes, 0);
   uint32_t randomState = 0x6d2b79f5u;
-  for (size_t frame = 1; frame < frames; frame += 2) {
+  for (size_t frame = 0; frame < frames; ++frame) {
+    if (pattern == InputPattern::Compressible ||
+        (pattern == InputPattern::Mixed && frame % 2 == 0)) {
+      continue;
+    }
     for (size_t offset = 0; offset < frameBytes; ++offset) {
       input[frame * frameBytes + offset] =
           static_cast<unsigned char>(nextRandom(&randomState));
@@ -100,6 +118,10 @@ int runRoundTrip(const cocclCompressorPlugin* plugin, int probBits,
   unsigned char* deviceDecodedStorage = nullptr;
   cocclCompressorFrameMetadata* deviceMetadataStorage = nullptr;
   cudaStream_t stream = nullptr;
+  cudaEvent_t compressBegin = nullptr;
+  cudaEvent_t compressEnd = nullptr;
+  cudaEvent_t decompressBegin = nullptr;
+  cudaEvent_t decompressEnd = nullptr;
   ScratchAllocations scratch;
   int result = 1;
 
@@ -112,7 +134,11 @@ int runRoundTrip(const cocclCompressorPlugin* plugin, int probBits,
                  (frames + 2) * sizeof(cocclCompressorFrameMetadata)) !=
           cudaSuccess ||
       cudaStreamCreateWithFlags(&stream, cudaStreamNonBlocking) !=
-          cudaSuccess) {
+          cudaSuccess ||
+      cudaEventCreate(&compressBegin) != cudaSuccess ||
+      cudaEventCreate(&compressEnd) != cudaSuccess ||
+      cudaEventCreate(&decompressBegin) != cudaSuccess ||
+      cudaEventCreate(&decompressEnd) != cudaSuccess) {
     fprintf(stderr, "CUDA allocation failed\n");
     goto exit;
   }
@@ -151,7 +177,9 @@ int runRoundTrip(const cocclCompressorPlugin* plugin, int probBits,
     cocclCompressorCall compressCall = {
         sizeof(cocclCompressorCall), cocclCompressorOperationCompress,
         raw, &encoded, 0, 0, ncclUint8, rawBytes, config, &execution};
+    cudaEventRecord(compressBegin, stream);
     const ncclResult_t compressResult = plugin->execute(&compressCall);
+    cudaEventRecord(compressEnd, stream);
     if (compressResult != ncclSuccess) {
       fprintf(stderr, "probBits=%d compression failed: %d\n",
               probBits, (int)compressResult);
@@ -169,7 +197,9 @@ int runRoundTrip(const cocclCompressorPlugin* plugin, int probBits,
         sizeof(cocclCompressorCall), cocclCompressorOperationDecompress,
         compressed, &decoded, 0, 0, ncclUint8, rawBytes, config,
         &execution};
+    cudaEventRecord(decompressBegin, stream);
     const ncclResult_t decompressResult = plugin->execute(&decompressCall);
+    cudaEventRecord(decompressEnd, stream);
     if (decompressResult != ncclSuccess ||
         cudaStreamSynchronize(stream) != cudaSuccess) {
       fprintf(stderr, "probBits=%d decompression failed: %d\n",
@@ -225,6 +255,7 @@ int runRoundTrip(const cocclCompressorPlugin* plugin, int probBits,
 
     bool sawEncoded = false;
     bool sawRaw = false;
+    uint64_t payloadBytes = 0;
     for (const auto& frame : metadata) {
       if (frame.reserved != 0 || frame.payloadBytes == 0 ||
           frame.payloadBytes > frameBytes) {
@@ -242,15 +273,32 @@ int runRoundTrip(const cocclCompressorPlugin* plugin, int probBits,
                 probBits);
         goto exit;
       }
+      payloadBytes += frame.payloadBytes;
     }
-    if (expectMixed && (!sawEncoded || !sawRaw)) {
+    if (expectation == FrameExpectation::Mixed &&
+        (!sawEncoded || !sawRaw)) {
       fprintf(stderr, "probBits=%d did not produce mixed ANS/Raw frames\n",
               probBits);
       goto exit;
     }
-    if (!expectMixed && sawEncoded) {
+    if (expectation == FrameExpectation::RawOnly && sawEncoded) {
       fprintf(stderr, "unaligned input did not use Raw frames\n");
       goto exit;
+    }
+    if (printProbe) {
+      float encodeMs = 0.0f;
+      float decodeMs = 0.0f;
+      cudaEventElapsedTime(&encodeMs, compressBegin, compressEnd);
+      cudaEventElapsedTime(&decodeMs, decompressBegin, decompressEnd);
+      const char* patternName = pattern == InputPattern::Compressible
+          ? "compressible" : "random";
+      printf("COCCL_DIETGPU_PROBE pattern=%s prob_bits=%d raw_bytes=%zu "
+             "frames=%zu payload_bytes=%llu ratio=%.9f encode_us=%.3f "
+             "decode_us=%.3f\n",
+             patternName, probBits, rawBytes, frames,
+             (unsigned long long)payloadBytes,
+             static_cast<double>(payloadBytes) / rawBytes,
+             encodeMs * 1000.0f, decodeMs * 1000.0f);
     }
   }
   result = 0;
@@ -258,6 +306,10 @@ int runRoundTrip(const cocclCompressorPlugin* plugin, int probBits,
 exit:
   if (stream != nullptr) cudaStreamSynchronize(stream);
   releaseScratch(&scratch);
+  if (decompressEnd != nullptr) cudaEventDestroy(decompressEnd);
+  if (decompressBegin != nullptr) cudaEventDestroy(decompressBegin);
+  if (compressEnd != nullptr) cudaEventDestroy(compressEnd);
+  if (compressBegin != nullptr) cudaEventDestroy(compressBegin);
   if (stream != nullptr) cudaStreamDestroy(stream);
   if (deviceMetadataStorage != nullptr) cudaFree(deviceMetadataStorage);
   if (deviceDecodedStorage != nullptr) cudaFree(deviceDecodedStorage);
@@ -270,8 +322,12 @@ exit:
 }  // namespace
 
 int main(int argc, char** argv) {
-  if (argc != 2) {
-    fprintf(stderr, "usage: %s /path/to/libdietgpu.so\n", argv[0]);
+  const bool probe = argc == 7 && strcmp(argv[2], "--probe") == 0;
+  if (argc != 2 && !probe) {
+    fprintf(stderr,
+            "usage: %s /path/to/libdietgpu.so "
+            "[--probe compressible|random FRAME_BYTES FRAMES PROB_BITS]\n",
+            argv[0]);
     return 2;
   }
   void* library = dlopen(argv[1], RTLD_NOW | RTLD_LOCAL);
@@ -295,14 +351,26 @@ int main(int argc, char** argv) {
   }
 
   int result = 0;
+  if (probe) {
+    const InputPattern pattern = strcmp(argv[3], "compressible") == 0
+        ? InputPattern::Compressible : InputPattern::Random;
+    result = runRoundTrip(
+        plugin, atoi(argv[6]), strtoull(argv[4], nullptr, 10),
+        strtoull(argv[5], nullptr, 10), pattern, FrameExpectation::Any, true);
+    dlclose(library);
+    return result;
+  }
   for (int probBits = 9; probBits <= 11 && result == 0; ++probBits) {
-    result = runRoundTrip(plugin, probBits, 4096, 4, true);
+    result = runRoundTrip(plugin, probBits, 4096, 4, InputPattern::Mixed,
+                          FrameExpectation::Mixed, false);
   }
   if (result == 0) {
-    result = runRoundTrip(plugin, 10, 4095, 3, false);
+    result = runRoundTrip(plugin, 10, 4095, 3, InputPattern::Mixed,
+                          FrameExpectation::RawOnly, false);
   }
   if (result == 0) {
-    result = runRoundTrip(plugin, 10, 4, 65536, false);
+    result = runRoundTrip(plugin, 10, 4, 65536, InputPattern::Mixed,
+                          FrameExpectation::RawOnly, false);
   }
   dlclose(library);
   if (result == 0) printf("COCCL dietGPU codec tests passed\n");

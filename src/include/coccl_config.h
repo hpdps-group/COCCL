@@ -31,20 +31,30 @@ enum class cocclAllReduceAlgorithmPolicy {
 
 using cocclConfigValues = std::map<std::string, std::string>;
 
-// One policy selects one compressor. The two parameter sets are independent;
-// hierarchical does not inherit from default.
-struct cocclCompressorPolicyEntry {
+struct cocclCompressorScopeEntry {
+  bool configured = false;
+  bool enabled = false;
   std::string name;
-  cocclConfigValues defaultValues;
-  cocclConfigValues hierarchicalValues;
-  bool hasHierarchicalConfig = false;
+  cocclConfigValues values;
 };
 
-// A primitive is enabled only when compressor.name is non-empty.
 struct cocclPrimitivePolicy {
-  cocclCompressorPolicyEntry compressor;
+  std::array<cocclCompressorScopeEntry,
+             static_cast<size_t>(cocclCompressionScope::Count)> scopes;
   size_t thresholdBytes = 8ULL * 1024 * 1024;
 };
+
+struct cocclEffectiveCompressorScope {
+  const cocclCompressorScopeEntry* entry = nullptr;
+  cocclCompressionScope source = cocclCompressionScope::Default;
+
+  bool enabled() const { return entry != nullptr && entry->enabled; }
+};
+
+const cocclCompressorScopeEntry& cocclConfiguredCompressorScope(
+    const cocclPrimitivePolicy& policy, cocclCompressionScope scope);
+cocclEffectiveCompressorScope cocclEffectiveCompressorScopeFor(
+    const cocclPrimitivePolicy& policy, cocclCompressionScope scope);
 
 struct cocclCollectivePolicies {
   cocclPrimitivePolicy allGather;
@@ -113,7 +123,7 @@ struct cocclConfig {
   cocclTrainingPolicies trainingPolicies;
 };
 
-constexpr int kCocclConfigSchemaVersion = 2;
+constexpr int kCocclConfigSchemaVersion = 3;
 constexpr int kCocclMinPipelineDepth = 1;
 constexpr int kCocclMaxPipelineDepth = 16;
 
@@ -150,7 +160,6 @@ struct cocclConfigPolicyView {
   cocclRuntimeMode mode;
   cocclPolicyScope scope;
   cocclPolicyKey key;
-  bool usesHierarchicalConfig;
   const cocclPrimitivePolicy* policy;
 };
 

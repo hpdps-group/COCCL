@@ -14,9 +14,15 @@ enum class cocclOperation : uint8_t {
 
 enum class cocclPolicyVariant : uint8_t {
   Default = 0,
-  Hierarchical,
   Forward,
   Backward,
+};
+
+enum class cocclCompressionScope : uint8_t {
+  Default = 0,
+  Intra,
+  Inter,
+  Count,
 };
 
 enum cocclOperationTrait : uint32_t {
@@ -32,11 +38,13 @@ enum cocclOperationTrait : uint32_t {
 struct cocclPolicyKey {
   cocclOperation operation = cocclOperation::Count;
   cocclPolicyVariant variant = cocclPolicyVariant::Default;
+  cocclCompressionScope scope = cocclCompressionScope::Default;
 };
 
 inline bool operator==(const cocclPolicyKey& lhs,
                        const cocclPolicyKey& rhs) {
-  return lhs.operation == rhs.operation && lhs.variant == rhs.variant;
+  return lhs.operation == rhs.operation && lhs.variant == rhs.variant &&
+      lhs.scope == rhs.scope;
 }
 
 inline bool operator<(const cocclPolicyKey& lhs,
@@ -45,22 +53,33 @@ inline bool operator<(const cocclPolicyKey& lhs,
     return static_cast<uint8_t>(lhs.operation) <
            static_cast<uint8_t>(rhs.operation);
   }
-  return static_cast<uint8_t>(lhs.variant) <
-         static_cast<uint8_t>(rhs.variant);
+  if (lhs.variant != rhs.variant) {
+    return static_cast<uint8_t>(lhs.variant) <
+           static_cast<uint8_t>(rhs.variant);
+  }
+  return static_cast<uint8_t>(lhs.scope) <
+         static_cast<uint8_t>(rhs.scope);
 }
 
-constexpr cocclPolicyKey cocclDefaultPolicy(cocclOperation operation) {
-  return {operation, cocclPolicyVariant::Default};
-}
-
-constexpr cocclPolicyKey cocclHierarchicalPolicy(cocclOperation operation) {
-  return {operation, cocclPolicyVariant::Hierarchical};
+constexpr cocclPolicyKey cocclDefaultPolicy(
+    cocclOperation operation,
+    cocclCompressionScope scope = cocclCompressionScope::Default) {
+  return {operation, cocclPolicyVariant::Default, scope};
 }
 
 constexpr cocclPolicyKey cocclDirectionalPolicy(cocclOperation operation,
-                                                 bool forward) {
+                                                 bool forward,
+                                                 cocclCompressionScope scope =
+                                                     cocclCompressionScope::Default) {
   return {operation, forward ? cocclPolicyVariant::Forward
-                             : cocclPolicyVariant::Backward};
+                             : cocclPolicyVariant::Backward,
+          scope};
+}
+
+constexpr cocclPolicyKey cocclPolicyForScope(
+    cocclPolicyKey key, cocclCompressionScope scope) {
+  key.scope = scope;
+  return key;
 }
 
 // One descriptor is the authoritative runtime contract for each operation.

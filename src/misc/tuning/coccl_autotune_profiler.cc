@@ -464,9 +464,14 @@ const char* operationName(cocclOperation operation) {
       ? "reducescatter" : "allreduce";
 }
 
-const char* variantName(cocclPolicyVariant variant) {
-  return variant == cocclPolicyVariant::Hierarchical
-      ? "hierarchical" : "default";
+const char* scopeName(cocclCompressionScope scope) {
+  switch (scope) {
+    case cocclCompressionScope::Default: return "default";
+    case cocclCompressionScope::Intra: return "intra";
+    case cocclCompressionScope::Inter: return "inter";
+    case cocclCompressionScope::Count: return "unknown";
+  }
+  return "unknown";
 }
 
 void publishP2pModel(bool interNode, const cocclLinearModel& model, int rank) {
@@ -510,7 +515,7 @@ void publishCompressorModel(const cocclProfiledCompressor& profiled,
     INFO(NCCL_TUNING,
          "COCCL compressor %s policy=%s-%s model: time_us=%g+%g*bytes ratio=%g",
          compressorName(compressor), operationName(profiled.policy.operation),
-         variantName(profiled.policy.variant), model.time.alphaUs,
+         scopeName(profiled.policy.scope), model.time.alphaUs,
          model.time.betaUsPerByte, model.compressionRatio);
   }
 }
@@ -526,19 +531,17 @@ void copyCompressorModelLocked(void* compressor, cocclCodecModel* model) {
 }  // namespace
 
 cocclSelectionPerformanceModel cocclAutotuneSnapshotPerformanceModel(
-    void* primary, void* secondary, cocclCodecModel* primaryModel,
-    cocclCodecModel* secondaryModel) {
+    void* defaultCompressor, void* intraCompressor, void* interCompressor,
+    cocclCodecModel* defaultModel, cocclCodecModel* intraModel,
+    cocclCodecModel* interModel) {
   pthread_mutex_lock(&cocclAutotuneLock);
   const cocclSelectionPerformanceModel snapshot = {
       cocclPerformanceModel.intraP2p,
       cocclPerformanceModel.interP2p,
   };
-  copyCompressorModelLocked(primary, primaryModel);
-  if (secondary != nullptr) {
-    copyCompressorModelLocked(secondary, secondaryModel);
-  } else {
-    *secondaryModel = {};
-  }
+  copyCompressorModelLocked(defaultCompressor, defaultModel);
+  copyCompressorModelLocked(intraCompressor, intraModel);
+  copyCompressorModelLocked(interCompressor, interModel);
   pthread_mutex_unlock(&cocclAutotuneLock);
   return snapshot;
 }

@@ -43,26 +43,6 @@ cocclAlgorithmKind configuredAlgorithm(cocclOperation operation) {
   return cocclAlgorithmNone;
 }
 
-bool hasHierarchicalCandidate(
-    const cocclAutotuneCandidateSet& candidates) {
-  for (size_t i = 0; i < candidates.count; ++i) {
-    if (candidates.candidates[i].spec->policyVariant ==
-        cocclPolicyVariant::Hierarchical) {
-      return true;
-    }
-  }
-  return false;
-}
-
-ncclResult_t resolveHierarchicalCompressor(
-    const cocclPreparedCall* prepared, void** compressor) {
-  cocclResolvedCompressorPolicy resolved;
-  NCCLCHECK(cocclResolveCompressorPolicy(
-      cocclHierarchicalPolicy(prepared->info.operation), &resolved));
-  *compressor = resolved.compressor;
-  return ncclSuccess;
-}
-
 void setCandidateScore(cocclPreparedCall* prepared,
                        cocclAutotuneCandidate* candidate, double scoreUs) {
   candidate->scoreUs = scoreUs;
@@ -105,41 +85,48 @@ ncclResult_t selectCandidate(cocclPreparedCall* prepared) {
   };
   cocclAutotuneCandidateSet candidates =
       cocclAutotuneBuildCandidates(info.operation, eligibility);
+  cocclAutotuneCandidateSet usable;
+  for (size_t i = 0; i < candidates.count; ++i) {
+    if (cocclPreparedAlgorithmSupported(
+            prepared, candidates.candidates[i].spec->algorithm)) {
+      usable.candidates[usable.count++] = candidates.candidates[i];
+    }
+  }
+  candidates = usable;
   if (candidates.count == 0) return ncclInvalidArgument;
 
   const cocclAutotuneConfig& config = cocclGetConfig().autotune;
   const cocclAlgorithmKind requested = configuredAlgorithm(info.operation);
   const bool scoreCandidates =
       requested == cocclAlgorithmNone && config.enabled;
-  void* const baseCompressor = prepared->compressor;
-  void* hierarchicalCompressor = nullptr;
 
   if (scoreCandidates) {
-    const bool needHierarchical = hasHierarchicalCandidate(candidates);
-    if (needHierarchical) {
-      NCCLCHECK(resolveHierarchicalCompressor(
-          prepared, &hierarchicalCompressor));
-    }
-
-    cocclCodecModel baseCodecModel;
-    cocclCodecModel hierarchicalCodecModel;
+    cocclCodecModel defaultCodecModel;
+    cocclCodecModel intraCodecModel;
+    cocclCodecModel interCodecModel;
     const cocclSelectionPerformanceModel performance =
         cocclAutotuneSnapshotPerformanceModel(
-            baseCompressor, hierarchicalCompressor,
-            &baseCodecModel, &hierarchicalCodecModel);
+            prepared->compressors.get(cocclCompressionScope::Default),
+            prepared->compressors.get(cocclCompressionScope::Intra),
+            prepared->compressors.get(cocclCompressionScope::Inter),
+            &defaultCodecModel, &intraCodecModel, &interCodecModel);
+    const cocclAutotuneCodecSet codecs = {
+        {prepared->compressors.get(cocclCompressionScope::Default) !=
+             nullptr,
+         &defaultCodecModel},
+        {prepared->compressors.get(cocclCompressionScope::Intra) != nullptr,
+         &intraCodecModel},
+        {prepared->compressors.get(cocclCompressionScope::Inter) != nullptr,
+         &interCodecModel},
+    };
     const double bytes = messageBytes(*prepared);
     for (size_t i = 0; i < candidates.count; ++i) {
       cocclAutotuneCandidate* candidate = &candidates.candidates[i];
-      const cocclCodecModel* codec =
-          candidate->spec->policyVariant ==
-                  cocclPolicyVariant::Hierarchical
-              ? &hierarchicalCodecModel
-              : &baseCodecModel;
       setCandidateScore(
           prepared, candidate,
           cocclAutotuneEvaluateCost(
               candidate->spec->costKind, performance,
-              codec->valid ? codec : nullptr, bytes,
+              codecs, bytes,
               comm->localRanks, comm->nNodes));
     }
   }
@@ -149,21 +136,7 @@ ncclResult_t selectCandidate(cocclPreparedCall* prepared) {
   if (decision.candidate == nullptr) return ncclInvalidArgument;
   if (decision.forcedFallback) warnForcedFallback(info.operation);
 
-  if (decision.candidate->policyVariant ==
-          cocclPolicyVariant::Hierarchical &&
-      hierarchicalCompressor == nullptr) {
-    NCCLCHECK(resolveHierarchicalCompressor(
-        prepared, &hierarchicalCompressor));
-  }
   prepared->algorithm = decision.candidate->algorithm;
-  prepared->policy = {
-      decision.candidate->operation,
-      decision.candidate->policyVariant,
-  };
-  prepared->compressor =
-      decision.candidate->policyVariant == cocclPolicyVariant::Hierarchical
-          ? hierarchicalCompressor
-          : baseCompressor;
   prepared->usedModel = decision.usedModel;
   return ncclSuccess;
 }

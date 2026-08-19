@@ -77,11 +77,6 @@ bool totalBytes(const cocclInfo& info,
   return true;
 }
 
-bool hierarchicalAlgorithm(cocclAlgorithmKind algorithm) {
-  return algorithm == cocclAlgorithmReduceScatterTwoShot ||
-      algorithm == cocclAlgorithmAllReduceTripleShot;
-}
-
 bool tunableReduction(cocclOperation operation) {
   return operation == cocclOperation::ReduceScatter ||
       operation == cocclOperation::AllReduce;
@@ -99,17 +94,31 @@ cocclPolicyKey preparedPolicy(const cocclPreparedCall& prepared) {
     return cocclDirectionalPolicy(cocclOperation::SendRecv,
                                   sendRecvForward(prepared.info));
   }
-  return hierarchicalAlgorithm(prepared.algorithm)
-      ? cocclHierarchicalPolicy(prepared.info.operation)
-      : cocclDefaultPolicy(prepared.info.operation);
+  return cocclDefaultPolicy(prepared.info.operation);
 }
 
-ncclResult_t resolvePreparedCompressor(
-    cocclPreparedCall* prepared, cocclResolvedCompressorPolicy* resolved) {
+ncclResult_t resolvePreparedCompressors(cocclPreparedCall* prepared) {
   prepared->policy = preparedPolicy(*prepared);
-  NCCLCHECK(cocclResolveCompressorPolicy(prepared->policy, resolved));
-  prepared->compressor = resolved->compressor;
-  return ncclSuccess;
+  prepared->compressors = {};
+  for (cocclCompressionScope scope : {
+           cocclCompressionScope::Default,
+           cocclCompressionScope::Intra,
+           cocclCompressionScope::Inter}) {
+    cocclResolvedCompressorPolicy resolved = {};
+    if (cocclResolveCompressorPolicy(
+            cocclPolicyForScope(prepared->policy, scope),
+            &resolved) != ncclSuccess) {
+      continue;
+    }
+    const size_t index = static_cast<size_t>(scope);
+    prepared->compressors.handles[index] = resolved.compressor;
+    prepared->compressors.datatypeSupported[index] =
+        compressorDatatypeSupported(
+            prepared->info.datatype, resolved.compressor);
+    prepared->compressors.thresholdBytes = resolved.thresholdBytes;
+  }
+  return prepared->compressors.anyEnabled()
+      ? ncclSuccess : ncclInvalidUsage;
 }
 
 bool callSupported(const cocclInfo& info,
@@ -157,18 +166,19 @@ ncclResult_t cocclEnqueueCheck(const cocclInfo* info, bool* isEnqueued) {
   cocclPreparedCall prepared;
   prepared.info = *info;
   prepared.descriptor = descriptor;
-  cocclResolvedCompressorPolicy resolved;
-  if (resolvePreparedCompressor(&prepared, &resolved) != ncclSuccess) {
+  if (resolvePreparedCompressors(&prepared) != ncclSuccess) {
     return routeNativeGroupedSendRecv(*info, isEnqueued);
   }
-  if (!compressorDatatypeSupported(info->datatype, prepared.compressor)) {
-    return routeNativeGroupedSendRecv(*info, isEnqueued);
-  }
-  if (bytes <= resolved.thresholdBytes) {
+  if (bytes <= prepared.compressors.thresholdBytes) {
     return routeNativeGroupedSendRecv(*info, isEnqueued);
   }
   if (tunableReduction(info->operation)) {
-    NCCLCHECK(cocclSelectAlgorithm(&prepared));
+    if (cocclSelectAlgorithm(&prepared) != ncclSuccess) {
+      return routeNativeGroupedSendRecv(*info, isEnqueued);
+    }
+  } else if (!cocclPreparedAlgorithmSupported(
+                 &prepared, cocclAlgorithmNone)) {
+    return routeNativeGroupedSendRecv(*info, isEnqueued);
   }
 
   NCCLCHECK(cocclEnqueuePreparedCall(&prepared));
@@ -192,13 +202,17 @@ ncclResult_t cocclEnqueueExplicitCall(
   prepared.info = *info;
   prepared.descriptor = descriptor;
   prepared.algorithm = algorithm;
-  cocclResolvedCompressorPolicy resolved;
-  NCCLCHECK(resolvePreparedCompressor(&prepared, &resolved));
+  NCCLCHECK(resolvePreparedCompressors(&prepared));
   if (algorithm == cocclAlgorithmNone &&
       tunableReduction(info->operation)) {
     NCCLCHECK(cocclSelectAlgorithm(&prepared));
   }
-  if (!compressorDatatypeSupported(info->datatype, prepared.compressor)) {
+  if (!cocclPreparedAlgorithmHasCompression(
+          &prepared, prepared.algorithm)) {
+    return ncclInvalidUsage;
+  }
+  if (!cocclPreparedAlgorithmSupported(
+          &prepared, prepared.algorithm)) {
     return cocclReplayNativeCall(*info);
   }
   return cocclEnqueuePreparedCall(&prepared);
@@ -249,7 +263,7 @@ ncclResult_t cocclReplayNativeCall(const cocclInfo& info) {
 
 ncclResult_t cocclExecutePreparedCall(const cocclPreparedCall* prepared) {
   if (prepared == nullptr || prepared->descriptor == nullptr ||
-      prepared->compressor == nullptr) {
+      !prepared->compressors.anyEnabled()) {
     return ncclInvalidArgument;
   }
 

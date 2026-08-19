@@ -31,7 +31,7 @@ ncclResult_t ncclCompress(
     void* compressor, const cocclCompressorView& input,
     cocclCompressorView* output, int, cudaStream_t) {
   ++compressCalls;
-  EXPECT(compressor == reinterpret_cast<void*>(0x700000));
+  EXPECT(compressor == reinterpret_cast<void*>(0x1));
   EXPECT(input.elements == 256 && input.chunks == 4 &&
          input.datatype == ncclFloat32);
   output->bytes = 128;
@@ -52,12 +52,14 @@ ncclResult_t ncclAllToAll(const void*, void*, size_t count,
 }
 
 ncclResult_t ncclDecompReduceComp(
-    void* compressor, ncclComm_t, const cocclCompressorView& input,
+    void* decoder, void* encoder, ncclComm_t,
+    const cocclCompressorView& input,
     cocclCompressorView* output, size_t reduceChunks,
     ncclDataType_t originalDatatype, size_t originalElements,
     cudaStream_t) {
   ++drcCalls;
-  EXPECT(compressor == reinterpret_cast<void*>(0x700000));
+  EXPECT(decoder == reinterpret_cast<void*>(0x1));
+  EXPECT(encoder == reinterpret_cast<void*>(0x1));
   EXPECT(originalElements == 128 && originalDatatype == ncclFloat32);
   EXPECT(input.elements == 128 && input.datatype == ncclInt8);
   EXPECT(input.chunks == 4 && reduceChunks == 2);
@@ -72,7 +74,7 @@ ncclResult_t ncclDecompressReduce(
     void* compressor, ncclComm_t, const cocclCompressorView& input,
     cocclCompressorView* output, size_t reduceChunks, cudaStream_t) {
   ++drCalls;
-  EXPECT(compressor == reinterpret_cast<void*>(0x700000));
+  EXPECT(compressor == reinterpret_cast<void*>(0x1));
   EXPECT(input.elements == 32 && input.datatype == ncclInt8);
   EXPECT(output->elements == 64 && output->datatype == ncclFloat32);
   EXPECT(input.chunks == 2 && reduceChunks == 2);
@@ -110,16 +112,15 @@ int main() {
   ncclComm inter = {};
   inter.nRanks = 2;
   const cocclPipelineStageContext context = {
-      64, 256, 1024, ncclFloat32,
-      cocclHierarchicalPolicy(cocclOperation::ReduceScatter), &owner,
-      reinterpret_cast<void*>(0x700000), nullptr};
+      64, 256, 1024, ncclFloat32, &owner, nullptr,
+      cocclPipelineInputHierarchicalSwizzle, 2, 2};
   cocclPipelineEdge edge = {
       reinterpret_cast<void*>(0x100000), 1024, 256, ncclFloat32, 4,
-      nullptr, 0};
+      nullptr, nullptr, 0};
   cocclPipelineStageOutput output = {
       reinterpret_cast<void*>(0x200000), 1024};
 
-  const cocclPipelineStage compress = cocclPipelineCompress();
+  const cocclPipelineStage compress = cocclPipelineCompress(reinterpret_cast<void*>(0x1));
   EXPECT(cocclExecutePipelineStage(
              &context, &compress, &edge, &output, nullptr) == ncclSuccess);
   EXPECT(compressCalls == 1 && edge.bytes == 128 &&
@@ -131,7 +132,8 @@ int main() {
              &context, &intraAllToAll, &edge, &output, nullptr) ==
          ncclSuccess);
 
-  const cocclPipelineStage drc = cocclPipelineDecompReduceComp(2);
+  const cocclPipelineStage drc = cocclPipelineDecompReduceComp(
+      2, reinterpret_cast<void*>(0x1));
   output = {reinterpret_cast<void*>(0x400000), 512};
   EXPECT(cocclExecutePipelineStage(
              &context, &drc, &edge, &output, nullptr) == ncclSuccess);

@@ -6,57 +6,72 @@
 
 namespace {
 
-double pccaCost(const cocclLinearModel& p2p, const cocclCodecModel* codec,
-                double messageBytes, int ranks) {
-  if (codec == nullptr || !codec->valid || codec->compressionRatio <= 0.0 ||
-      messageBytes < 0.0) {
+double codecTime(const cocclAutotunePhaseCodec& codec,
+                 double messageBytes) {
+  if (!codec.compressed) return 0.0;
+  if (codec.model == nullptr || !codec.model->valid ||
+      codec.model->compressionRatio <= 0.0) {
     return std::numeric_limits<double>::infinity();
   }
-  const double codecUs = cocclAutotunePredict(codec->time, messageBytes);
+  return cocclAutotunePredict(codec.model->time, messageBytes);
+}
+
+double compressionRatio(const cocclAutotunePhaseCodec& codec) {
+  return codec.compressed ? codec.model->compressionRatio : 1.0;
+}
+
+double pccaCost(const cocclLinearModel& p2p,
+                const cocclAutotunePhaseCodec& codec,
+                double messageBytes, int ranks) {
+  const double codecUs = codecTime(codec, messageBytes);
+  if (!std::isfinite(codecUs) || messageBytes < 0.0) {
+    return std::numeric_limits<double>::infinity();
+  }
   if (ranks <= 1) return codecUs;
   const double wireBytes = messageBytes /
-      (codec->compressionRatio * (double)ranks);
+      (compressionRatio(codec) * (double)ranks);
   return codecUs + cocclAutotunePredict(p2p, wireBytes);
 }
 
 double globalPccaCost(const cocclSelectionPerformanceModel& model,
-                      const cocclCodecModel* codec, double messageBytes,
+                      const cocclAutotunePhaseCodec& codec,
+                      double messageBytes,
                       int localRanks, int nodes) {
-  if (codec == nullptr || !codec->valid ||
-      codec->compressionRatio <= 0.0) {
+  const double codecUs = codecTime(codec, messageBytes);
+  if (!std::isfinite(codecUs)) {
     return std::numeric_limits<double>::infinity();
   }
   double communicationUs = 0.0;
   bool hasBranch = false;
   if (localRanks > 1) {
     const double wireBytes = messageBytes /
-        ((double)nodes * (double)localRanks * codec->compressionRatio);
+        ((double)nodes * (double)localRanks * compressionRatio(codec));
     communicationUs = cocclAutotunePredict(model.intraP2p, wireBytes);
     hasBranch = true;
   }
   if (nodes > 1) {
     const double wireBytes = messageBytes * (double)(nodes - 1) /
-        ((double)nodes * codec->compressionRatio);
+        ((double)nodes * compressionRatio(codec));
     const double interUs = cocclAutotunePredict(model.interP2p, wireBytes);
     communicationUs = hasBranch
         ? std::max(communicationUs, interUs) : interUs;
     hasBranch = true;
   }
-  return cocclAutotunePredict(codec->time, messageBytes) +
-      (hasBranch ? communicationUs : 0.0);
+  return codecUs + (hasBranch ? communicationUs : 0.0);
 }
 
 double reduceScatterTwoShotCost(
     const cocclSelectionPerformanceModel& model,
-    const cocclCodecModel* codec, double messageBytes, int localRanks,
-    int nodes) {
-  return pccaCost(model.intraP2p, codec, messageBytes, localRanks) +
-         pccaCost(model.interP2p, codec,
+    const cocclAutotuneCodecSet& codecs, double messageBytes,
+    int localRanks, int nodes) {
+  return pccaCost(model.intraP2p, codecs.intra,
+                  messageBytes, localRanks) +
+         pccaCost(model.interP2p, codecs.inter,
                   messageBytes / (double)localRanks, nodes);
 }
 
 double allReduceOneShotCost(const cocclSelectionPerformanceModel& model,
-                            const cocclCodecModel* codec,
+                            const cocclAutotunePhaseCodec& codec,
                             double messageBytes, int localRanks, int nodes) {
   double cost = 0.0;
   bool hasBranch = false;
@@ -125,25 +140,28 @@ double cocclAutotunePredict(const cocclLinearModel& model, double bytes) {
 double cocclAutotuneEvaluateCost(
     cocclAutotuneCostKind costKind,
     const cocclSelectionPerformanceModel& model,
-    const cocclCodecModel* codec, double messageBytes, int localRanks,
+    const cocclAutotuneCodecSet& codecs, double messageBytes, int localRanks,
     int nodes) {
+  const cocclAutotunePhaseCodec& flat =
+      nodes == 1 ? codecs.intra : codecs.defaultScope;
   switch (costKind) {
     case cocclAutotuneCostKind::ReduceScatterOneShot:
-      return globalPccaCost(model, codec, messageBytes, localRanks, nodes);
+      return globalPccaCost(model, flat, messageBytes, localRanks, nodes);
     case cocclAutotuneCostKind::ReduceScatterTwoShot:
       return reduceScatterTwoShotCost(
-          model, codec, messageBytes, localRanks, nodes);
+          model, codecs, messageBytes, localRanks, nodes);
     case cocclAutotuneCostKind::AllReduceOneShot:
       return allReduceOneShotCost(
-          model, codec, messageBytes, localRanks, nodes);
+          model, flat, messageBytes, localRanks, nodes);
     case cocclAutotuneCostKind::AllReduceTwoShot:
       return 2.0 * globalPccaCost(
-                       model, codec, messageBytes, localRanks, nodes);
+                       model, flat, messageBytes, localRanks, nodes);
     case cocclAutotuneCostKind::AllReduceTripleShot:
       return reduceScatterTwoShotCost(
-                 model, codec, messageBytes, localRanks, nodes) +
+                 model, codecs, messageBytes, localRanks, nodes) +
              globalPccaCost(
-                 model, codec, messageBytes, localRanks, nodes);
+                 model, codecs.defaultScope, messageBytes,
+                 localRanks, nodes);
   }
   return std::numeric_limits<double>::infinity();
 }
