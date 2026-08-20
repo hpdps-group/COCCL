@@ -14,6 +14,7 @@ constexpr int kLayoutThreads = 256;
 constexpr unsigned int kMaxLayoutBlocks = 32 * 1024;
 constexpr size_t kTargetBytesPerBlock = 32 * 1024;
 constexpr unsigned int kMaxGridY = 65535;
+constexpr size_t kLayoutKernelCrossoverBytes = 128ULL << 20;
 
 template <typename CopyType, int Unroll>
 struct LayoutRowCopier {
@@ -182,6 +183,35 @@ ncclResult_t launchUnpackTyped(const void* source, void* destination,
                                            : ncclUnhandledCudaError;
 }
 
+ncclResult_t dispatchUnpack(const void* source, void* destination,
+                            size_t destinationPitchBytes,
+                            size_t sliceBytes, size_t chunkCount,
+                            cudaStream_t stream) {
+  switch (layoutVectorBytes(source, sliceBytes, destination,
+                            destinationPitchBytes, sliceBytes)) {
+    case 16:
+      return launchUnpackTyped<uint4>(
+          source, destination, destinationPitchBytes, sliceBytes,
+          chunkCount, stream);
+    case 8:
+      return launchUnpackTyped<unsigned long long>(
+          source, destination, destinationPitchBytes, sliceBytes,
+          chunkCount, stream);
+    case 4:
+      return launchUnpackTyped<unsigned int>(
+          source, destination, destinationPitchBytes, sliceBytes,
+          chunkCount, stream);
+    case 2:
+      return launchUnpackTyped<unsigned short>(
+          source, destination, destinationPitchBytes, sliceBytes,
+          chunkCount, stream);
+    default:
+      return launchUnpackTyped<unsigned char>(
+          source, destination, destinationPitchBytes, sliceBytes,
+          chunkCount, stream);
+  }
+}
+
 size_t layoutVectorBytes(const void* source, size_t sourcePitchBytes,
                          const void* destination,
                          size_t destinationPitchBytes, size_t sliceBytes) {
@@ -207,9 +237,11 @@ ncclResult_t cocclLaunchPackSlice(const void* source,
       chunkCount == 0 || sourcePitchBytes < sliceBytes) {
     return ncclInvalidArgument;
   }
-  if (inputLayout == cocclPipelineInputContiguous &&
-      layoutVectorBytes(source, sourcePitchBytes, destination, sliceBytes,
-                        sliceBytes) < 16) {
+  const size_t vectorBytes = layoutVectorBytes(
+      source, sourcePitchBytes, destination, sliceBytes, sliceBytes);
+  if (inputLayout == cocclPipelineInputContiguous && vectorBytes < 16 &&
+      (vectorBytes > 2 ||
+       sliceBytes * chunkCount < kLayoutKernelCrossoverBytes)) {
     return cudaMemcpy2DAsync(
                destination, sliceBytes, source, sourcePitchBytes,
                sliceBytes, chunkCount, cudaMemcpyDeviceToDevice, stream) ==
@@ -231,14 +263,17 @@ ncclResult_t cocclLaunchUnpackSlice(const void* source, void* destination,
       chunkCount == 0 || destinationPitchBytes < sliceBytes) {
     return ncclInvalidArgument;
   }
-  if (layoutVectorBytes(source, sliceBytes, destination,
-                        destinationPitchBytes, sliceBytes) < 16) {
+  const size_t vectorBytes = layoutVectorBytes(
+      source, sliceBytes, destination, destinationPitchBytes, sliceBytes);
+  if (vectorBytes < 16 &&
+      (vectorBytes > 2 ||
+       sliceBytes * chunkCount < kLayoutKernelCrossoverBytes)) {
     return cudaMemcpy2DAsync(
                destination, destinationPitchBytes, source, sliceBytes,
                sliceBytes, chunkCount, cudaMemcpyDeviceToDevice, stream) ==
             cudaSuccess
         ? ncclSuccess : ncclUnhandledCudaError;
   }
-  return launchUnpackTyped<uint4>(source, destination, destinationPitchBytes,
-                                  sliceBytes, chunkCount, stream);
+  return dispatchUnpack(source, destination, destinationPitchBytes,
+                        sliceBytes, chunkCount, stream);
 }

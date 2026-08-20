@@ -75,15 +75,26 @@ def parse_performance(root):
         suffix = "-max" if maximum else ""
         remainder = row["depth"] - 1 if maximum else 1
         ranks = 4 if row["topology"] == "single-node" else 8
-        control_bytes = row["bytes"] - ranks * 4 * remainder
         base = (
             row["topology"], row["compressor"], row["operation"],
             row["depth"],
         )
-        control = by_key.get((*base, f"control{suffix}", control_bytes,
-                              row["inplace"]))
-        depth1 = by_key.get((*base, f"depth1{suffix}", row["bytes"],
-                             row["inplace"]))
+        new_control_bytes = (
+            row["bytes"] + ranks * 4 * (row["depth"] - remainder)
+        )
+        old_control_bytes = row["bytes"] - ranks * 4 * remainder
+        control = by_key.get(
+            (*base, f"control{suffix}", new_control_bytes, row["inplace"]))
+        if control is None:
+            control = by_key.get(
+                (*base, f"control{suffix}", old_control_bytes,
+                 row["inplace"]))
+        depth1 = by_key.get(
+            (*base, f"depth1-remainder{suffix}", row["bytes"],
+             row["inplace"]))
+        if depth1 is None:
+            depth1 = by_key.get(
+                (*base, f"depth1{suffix}", row["bytes"], row["inplace"]))
         if control is None or depth1 is None:
             raise ValueError(f"missing pair for {row['log']}")
 
@@ -98,7 +109,7 @@ def parse_performance(root):
         comparisons.append({
             **row,
             "remainder": remainder,
-            "control_bytes": control_bytes,
+            "control_bytes": control["bytes"],
             "control_time_us": control["time_us"],
             "control_algbw_gbps": control["algbw_gbps"],
             "bandwidth_ratio": bandwidth_ratio,

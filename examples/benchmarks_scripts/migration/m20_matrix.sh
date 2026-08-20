@@ -197,27 +197,35 @@ run_performance() {
   local compressor=$1 operation=$2 depth=$3 target_bytes=$4 remainder=$5 variant=$6
   local type_bytes=4
   local target_elements=$((target_bytes / ranks / type_bytes))
-  local quotient=$(((target_elements - remainder) / depth))
-  quotient=$((quotient - quotient % (16 / type_bytes)))
-  local raw_count=$((depth * quotient + remainder))
-  [[ "$variant" != control* ]] || raw_count=$((raw_count - remainder))
+  local alignment_elements=$((16 / type_bytes))
+  local count_alignment=$depth
+  (( count_alignment >= alignment_elements )) ||
+    count_alignment=$alignment_elements
+  local control_count=$((target_elements -
+      target_elements % count_alignment))
+  local raw_count=$control_count
+  if [[ "$variant" == remainder* || "$variant" == depth1-remainder* ]]; then
+    raw_count=$((control_count - depth + remainder))
+  fi
   local actual_bytes=$((ranks * type_bytes * raw_count))
   local effective_depth=$depth
-  [[ "$variant" != depth1* ]] || effective_depth=1
+  [[ "$variant" != depth1-* ]] || effective_depth=1
+  local stem="${topology}__${compressor}__${operation}__d${depth}__${variant}__c${raw_count}__b${actual_bytes}"
+  [[ -z ${M20_ONLY_STEM:-} || "$stem" == "$M20_ONLY_STEM" ]] || return 0
   export COCCL_CONFIG_FILE
   COCCL_CONFIG_FILE=$(materialize_config "$compressor" "$effective_depth" \
     "$([[ "$topology" == 2x4 ]] && printf default || printf single)")
   case_launcher
   local binary
   binary=$(perf_binary "$operation" compressed)
-  local stem="${topology}__${compressor}__${operation}__d${depth}__${variant}__c${raw_count}__b${actual_bytes}"
   run_logged "$stem" "${CASE_LAUNCHER[@]}" "$binary" \
     -b "$actual_bytes" -e "$actual_bytes" -f 2 -t 1 -g 1 \
     -d float -o sum -w 20 -n 30 -c 0
   (( target_bytes < 8589934592 )) || sleep 2
 }
 
-correctness_cases=(2:4097 4:4097 4:4099 8:4097 8:4103)
+read -r -a correctness_cases <<< \
+  "${M20_CORRECTNESS_CASES:-2:4097 4:4097 4:4099 8:4097 8:4103}"
 
 case "$mode" in
   correctness-single)
@@ -260,13 +268,15 @@ case "$mode" in
           for target in "${targets[@]}"; do
             run_performance "$compressor" "$operation" "$depth" "$target" 1 remainder
             run_performance "$compressor" "$operation" "$depth" "$target" 1 control
-            run_performance "$compressor" "$operation" "$depth" "$target" 1 depth1
+            run_performance "$compressor" "$operation" "$depth" "$target" 1 depth1-remainder
+            run_performance "$compressor" "$operation" "$depth" "$target" 1 depth1-control
           done
           for target in 33554432 536870912 8589934592; do
             [[ "$topology" != 2x4 ]] || continue
             run_performance "$compressor" "$operation" "$depth" "$target" $((depth - 1)) remainder-max
             run_performance "$compressor" "$operation" "$depth" "$target" $((depth - 1)) control-max
-            run_performance "$compressor" "$operation" "$depth" "$target" $((depth - 1)) depth1-max
+            run_performance "$compressor" "$operation" "$depth" "$target" $((depth - 1)) depth1-remainder-max
+            run_performance "$compressor" "$operation" "$depth" "$target" $((depth - 1)) depth1-control-max
           done
         done
       done

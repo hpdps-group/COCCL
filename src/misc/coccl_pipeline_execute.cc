@@ -253,9 +253,12 @@ ncclResult_t runFramedOverlap(
     cocclPipelineResources* resources) {
   const int finalStagePhase =
       cocclPipelinePhaseFirstStage + context.spec->stageCount - 1;
+  const bool stagesInput = context.plan.inputStagingTemp >= 0;
   CUDACHECK(cudaEventRecord(resources->inputReady, context.spec->stream));
   CUDACHECK(cudaStreamWaitEvent(
-      resources->streams[cocclPipelinePhasePack], resources->inputReady, 0));
+      resources->streams[stagesInput ? cocclPipelinePhasePack
+                                    : cocclPipelinePhaseFirstStage],
+      resources->inputReady, 0));
   const bool reusesInputRaw =
       context.plan.workspaceKind == cocclPipelineWorkspaceSplit &&
       context.plan.inputStagingTemp >= 0;
@@ -269,7 +272,7 @@ ncclResult_t runFramedOverlap(
     const int rawSlot = slice % kCocclPipelineRawRingSlots;
     cocclPipelineEdge& edge = resources->edges[slice];
     edge = inputEdge(context, slice);
-    if (context.plan.inputStagingTemp >= 0) {
+    if (stagesInput) {
       if (reusesInputRaw && slice >= kCocclPipelineRawRingSlots) {
         CUDACHECK(cudaStreamWaitEvent(
             resources->streams[cocclPipelinePhasePack],
@@ -283,13 +286,15 @@ ncclResult_t runFramedOverlap(
       NCCLCHECK(cocclExecutePipelineStage(
           &stageContext, &pack, &edge, &packOutput,
           resources->streams[cocclPipelinePhasePack]));
+      NCCLCHECK(recordPhase(
+          resources, cocclPipelinePhasePack, slice));
     }
-    NCCLCHECK(recordPhase(
-        resources, cocclPipelinePhasePack, slice));
 
     const int phase = cocclPipelinePhaseFirstStage;
-    NCCLCHECK(waitForPhase(
-        resources, phase, cocclPipelinePhasePack, slice));
+    if (stagesInput) {
+      NCCLCHECK(waitForPhase(
+          resources, phase, cocclPipelinePhasePack, slice));
+    }
     const cocclPipelineStageOutput output =
         stageOutput(context, workspace, 0, slice);
     NCCLCHECK(cocclExecutePipelineStage(
@@ -392,9 +397,12 @@ ncclResult_t runOverlap(const cocclPipelineContext& context,
                         cocclPipelineResources* resources) {
   const int finalStagePhase =
       cocclPipelinePhaseFirstStage + context.spec->stageCount - 1;
+  const bool stagesInput = context.plan.inputStagingTemp >= 0;
   CUDACHECK(cudaEventRecord(resources->inputReady, context.spec->stream));
   CUDACHECK(cudaStreamWaitEvent(
-      resources->streams[cocclPipelinePhasePack], resources->inputReady, 0));
+      resources->streams[stagesInput ? cocclPipelinePhasePack
+                                    : cocclPipelinePhaseFirstStage],
+      resources->inputReady, 0));
   const bool reusesInputRaw =
       context.plan.workspaceKind == cocclPipelineWorkspaceSplit &&
       context.plan.inputStagingTemp >= 0;
@@ -408,7 +416,7 @@ ncclResult_t runOverlap(const cocclPipelineContext& context,
     const int rawSlot = slice % kCocclPipelineRawRingSlots;
     cocclPipelineEdge edge = inputEdge(context, slice);
 
-    if (context.plan.inputStagingTemp >= 0) {
+    if (stagesInput) {
       if (reusesInputRaw && slice >= kCocclPipelineRawRingSlots) {
         CUDACHECK(cudaStreamWaitEvent(
             resources->streams[cocclPipelinePhasePack],
@@ -422,12 +430,14 @@ ncclResult_t runOverlap(const cocclPipelineContext& context,
       NCCLCHECK(cocclExecutePipelineStage(
           &stageContext, &pack, &edge, &packOutput,
           resources->streams[cocclPipelinePhasePack]));
+      NCCLCHECK(recordPhase(resources, cocclPipelinePhasePack, slice));
     }
-    NCCLCHECK(recordPhase(resources, cocclPipelinePhasePack, slice));
 
     for (int stage = 0; stage < context.spec->stageCount; ++stage) {
       const int phase = cocclPipelinePhaseFirstStage + stage;
-      NCCLCHECK(waitForPhase(resources, phase, phase - 1, slice));
+      if (stage != 0 || stagesInput) {
+        NCCLCHECK(waitForPhase(resources, phase, phase - 1, slice));
+      }
       const bool finalStage = stage + 1 == context.spec->stageCount;
       if (reusesOutputRaw && finalStage &&
           slice >= kCocclPipelineRawRingSlots) {
@@ -532,7 +542,12 @@ static ncclResult_t cocclRunPipelineWithDepth(
 }
 
 ncclResult_t cocclRunPipeline(const cocclPipelineSpec* spec) {
-  return cocclRunPipelineWithDepth(spec, cocclGetConfig().pipeline.depth);
+  const bool singleNode = spec->ownerComm->localRanks ==
+      spec->ownerComm->nRanks;
+  // Raw boundary copies cost more than slice overlap recovers on one node.
+  const int depth = singleNode && !pipelineUsesFramedCompressor(spec)
+      ? 1 : cocclGetConfig().pipeline.depth;
+  return cocclRunPipelineWithDepth(spec, depth);
 }
 
 ncclResult_t cocclRunPipelineSerial(const cocclPipelineSpec* spec) {
