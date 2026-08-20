@@ -4,6 +4,7 @@
 #include "coccl_hierarchical_reduction.h"
 #include "coccl_pipeline.h"
 #include "coccl_prepared_call.h"
+#include "coccl_training_assist.h"
 #include "comm.h"
 
 extern __thread ncclComm_t InterSubComm;
@@ -61,8 +62,10 @@ ncclResult_t runTripleShot(const cocclPreparedCall* prepared) {
   if (IntraSubComm == nullptr) {
     NCCLCHECK(ncclCommSplit(
         comm, comm->rank / localRanks, comm->rank, &IntraSubComm, nullptr));
+    cocclTrainingAssistUnregister(IntraSubComm);
     NCCLCHECK(ncclCommSplit(
         comm, comm->rank % localRanks, comm->rank, &InterSubComm, nullptr));
+    cocclTrainingAssistUnregister(InterSubComm);
   }
 
   const size_t chunkCount = info.count / (size_t)comm->nRanks;

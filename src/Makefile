@@ -49,6 +49,8 @@ LDFLAGS    += -L${CUDA_LIB} -l$(CUDARTLIB) -lpthread -lrt -ldl
 $(OBJDIR)/misc/coccl_config.o \
 $(OBJDIR)/misc/coccl_config_format.o \
 $(OBJDIR)/misc/coccl_config_log.o \
+$(OBJDIR)/misc/coccl_training_assist.o \
+$(OBJDIR)/misc/coccl_training_classifier.o \
 $(OBJDIR)/misc/compress.o: CXXFLAGS += -std=c++17
 
 $(patsubst %.cc,$(OBJDIR)/%.o,$(wildcard misc/tuning/*.cc)): \

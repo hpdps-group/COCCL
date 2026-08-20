@@ -1,0 +1,91 @@
+schema_version = 3
+
+[runtime]
+mode = "training"
+compression_threshold_bytes = 0
+
+[compressor_plugins]
+compressors = ["sdp4bit", "zfp"]
+library_path = "../../../build/obj/device/compress/libcompress"
+
+[training]
+observation_iterations = 5
+max_events = 65536
+
+[training.classifier]
+data_parallel_size = 2
+tensor_parallel_size = 2
+pipeline_parallel_size = 2
+dp_strategy = "sdp"
+sequence_parallel = true
+context_parallel = false
+
+[training.dp.all_gather.default]
+compressor = "sdp4bit"
+
+[training.dp.all_gather.default.config]
+groupCount = 2048
+quantBits = 4
+quantType = "Symmetric"
+
+[training.dp.reduce_scatter.default]
+compressor = "sdp4bit"
+
+[training.dp.reduce_scatter.default.config]
+groupCount = 128
+quantBits = 4
+quantType = "Symmetric"
+hadamard = false
+pipelineSize = 1
+
+[training.dp.all_reduce.default]
+compressor = "sdp4bit"
+
+[training.dp.all_reduce.default.config]
+groupCount = 128
+quantBits = 4
+quantType = "Symmetric"
+hadamard = false
+pipelineSize = 1
+
+[training.tp.all_gather.default]
+compressor = "zfp"
+
+[training.tp.all_gather.default.config]
+rate = 8
+
+[training.tp.reduce_scatter.default]
+compressor = "zfp"
+
+[training.tp.reduce_scatter.default.config]
+rate = 8
+
+[training.tp.all_reduce.default]
+compressor = "zfp"
+
+[training.tp.all_reduce.default.config]
+rate = 8
+
+[training.pp.sendrecv.forward.default]
+compressor = "sdp4bit"
+
+[training.pp.sendrecv.forward.default.config]
+groupCount = 128
+quantBits = 4
+quantType = "Symmetric"
+hadamard = false
+pipelineSize = 1
+
+[training.pp.sendrecv.backward.default]
+compressor = "zfp"
+
+[training.pp.sendrecv.backward.default.config]
+rate = 8
+
+[pipeline]
+depth = 1
+
+[autotune]
+enabled = false
+reduce_scatter_algorithm = "oneshot"
+all_reduce_algorithm = "oneshot"

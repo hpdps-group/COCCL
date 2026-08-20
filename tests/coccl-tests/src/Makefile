@@ -73,7 +73,8 @@ endif
 	m7-host-tests m8-host-tests m9-host-tests m10-host-tests m11-host-tests \
 	m12-host-tests m13-host-tests m14-host-tests m14-codec-build \
 	m15-host-tests m15-layout-test m16-correctness-build \
-	m19-host-tests m20-host-tests dietgpu-integer-build
+	m19-host-tests m20-host-tests m22-host-tests m22-mpi-build \
+	dietgpu-integer-build
 
 BUILDDIR ?= ../build
 ifneq ($(NCCL_HOME), "")
@@ -151,6 +152,9 @@ M19_HIERARCHICAL_GRAPH_TEST := $(DST_DIR)/coccl_m19_hierarchical_graph_test
 M19_CODEC_FLOW_TEST := $(DST_DIR)/coccl_m19_codec_flow_test
 M19_SELECTOR_SCOPE_TEST := $(DST_DIR)/coccl_m19_selector_scope_test
 M20_REMAINDER_PLAN_TEST := $(DST_DIR)/coccl_m20_remainder_plan_test
+M22_TRAINING_TEST := $(DST_DIR)/coccl_m22_training_test
+M22_KNOWN_ROLES_TEST := $(DST_DIR)/coccl_m22_known_roles
+M22_TRAINING_CONFIG := ../../../examples/benchmarks_scripts/configs/m22_training.toml
 DIETGPU_INTEGER_TEST := $(DST_DIR)/coccl_dietgpu_integer_test
 
 dietgpu-integer-build: $(DIETGPU_INTEGER_TEST)
@@ -161,6 +165,11 @@ m19-host-tests: $(M19_SCOPE_CONFIG_TEST) $(M19_HIERARCHICAL_GRAPH_TEST) \
 m20-host-tests: $(M20_REMAINDER_PLAN_TEST) $(M5_PIPELINE_PLAN_TEST)
 	$(M20_REMAINDER_PLAN_TEST)
 	$(M5_PIPELINE_PLAN_TEST)
+
+m22-host-tests: $(M22_TRAINING_TEST)
+	$(M22_TRAINING_TEST)
+
+m22-mpi-build: $(M22_KNOWN_ROLES_TEST)
 
 m16-correctness-build: $(M16_CORRECTNESS_TEST)
 
@@ -422,6 +431,29 @@ $(M20_REMAINDER_PLAN_TEST): coccl_m20_remainder_plan_test.cc \
 	@printf "Linking  %-35s > %s\n" $< $@
 	@mkdir -p $(DST_DIR)
 	$(CXX) $(M1_CXXFLAGS) $(COCCL_INC) -I$(COCCL_SRC) -o $@ $^
+
+$(M22_TRAINING_TEST): coccl_m22_training_test.cc \
+		$(COCCL_SRC)/misc/coccl_training_classifier.cc \
+		$(COCCL_SRC)/misc/coccl_training_assist.cc \
+		$(COCCL_SRC)/misc/coccl_runtime.cc \
+		$(COCCL_SRC)/misc/coccl_prepared_call.cc \
+		$(COCCL_SRC)/misc/coccl_config.cc \
+		$(COCCL_SRC)/misc/coccl_operation.cc
+	@printf "Linking  %-35s > %s\n" $< $@
+	@mkdir -p $(DST_DIR)
+	$(CXX) $(M1_CXXFLAGS) -DCOCCL_CONFIG_PARSER_ONLY \
+		-DCOCCL_M22_CONFIG_FILE='"$(M22_TRAINING_CONFIG)"' \
+		-DCOCCL_M22_TMP_CONFIG='"$(DST_DIR)/m22-required-fields.toml"' \
+		$(COCCL_INC) -I$(COCCL_SRC) \
+		-ffunction-sections -fdata-sections -Wl,--gc-sections \
+		-pthread -o $@ $^
+
+$(M22_KNOWN_ROLES_TEST): coccl_m22_known_roles.cc
+	@printf "Linking  %-35s > %s\n" $< $@
+	@mkdir -p $(DST_DIR)
+	$(MPI_HOME)/bin/mpicxx $(M1_CXXFLAGS) $(COCCL_INC) -I$(COCCL_SRC) \
+		-o $@ $< -L$(NCCL_HOME)/lib -lnccl \
+		-L$(CUDA_LIB) -lcudart -lpthread
 
 $(M5_PIPELINE_STAGE_TEST): coccl_m5_pipeline_stage_test.cc \
 		$(COCCL_SRC)/misc/coccl_pipeline_stage.cc $(M14_FRAME_STAGE_STUB)

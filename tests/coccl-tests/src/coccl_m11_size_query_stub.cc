@@ -73,7 +73,8 @@ const cocclM11SizeQueryObservation& cocclM11DrcQueryObservation() {
 }
 
 ncclResult_t cocclGetCompressorEncodedSizeBound(
-    cocclPolicyKey, cocclCompressorOperation operation,
+    cocclTrainingRole, cocclPolicyKey,
+    cocclCompressorOperation operation,
     size_t elements, size_t chunks, ncclDataType_t datatype,
     size_t* encodedBytes) {
   const bool drc =
@@ -111,12 +112,14 @@ ncclResult_t cocclGetCompressorEncodedSizeBound(
     size_t elements, size_t chunks, ncclDataType_t datatype,
     size_t* encodedBytes) {
   return cocclGetCompressorEncodedSizeBound(
-      cocclPolicyKey{}, operation, elements, chunks, datatype,
+      cocclTrainingRoleUnknown, cocclPolicyKey{}, operation,
+      elements, chunks, datatype,
       encodedBytes);
 }
 
 bool cocclCompressorPolicySupports(
-    cocclPolicyKey, cocclCompressorCapability capability) {
+    cocclTrainingRole, cocclPolicyKey,
+    cocclCompressorCapability capability) {
   if (capability == cocclCompressorCapabilityFramed) return state.framed;
   if (capability ==
       cocclCompressorCapabilityFusedHierarchicalSwizzle) {
@@ -129,11 +132,13 @@ bool cocclCompressorPolicySupports(
 
 bool cocclCompressorSupports(
     void*, cocclCompressorCapability capability) {
-  return cocclCompressorPolicySupports({}, capability);
+  return cocclCompressorPolicySupports(
+      cocclTrainingRoleUnknown, {}, capability);
 }
 
 ncclResult_t cocclResolveCompressorPolicy(
-    cocclPolicyKey, cocclResolvedCompressorPolicy* resolved) {
+    cocclTrainingRole, cocclPolicyKey,
+    cocclResolvedCompressorPolicy* resolved) {
   static int compressor;
   resolved->compressor = &compressor;
   resolved->thresholdBytes = 0;

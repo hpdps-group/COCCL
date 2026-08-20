@@ -9,9 +9,11 @@
 #include "coccl_prepared_call.h"
 #include "coccl_reducescatter.h"
 #include "coccl_sendrecv.h"
+#include "coccl_training_assist.h"
 #include "collectives.h"
 #include "comm.h"
 #include "compress.h"
+#include "debug.h"
 #include "group.h"
 
 #include <limits>
@@ -88,13 +90,39 @@ bool sendRecvForward(const cocclInfo& info) {
       : info.comm->rank > info.peer;
 }
 
+cocclTrainingRole trainingRole(ncclComm_t comm) {
+  if (!cocclTrainingAssistEnabled()) return cocclTrainingRoleUnknown;
+  cocclTrainingClassification classification;
+  return cocclTrainingAssistQuery(comm, &classification)
+      ? classification.role : cocclTrainingRoleUnknown;
+}
+
 cocclPolicyKey preparedPolicy(const cocclPreparedCall& prepared) {
   if (prepared.info.operation == cocclOperation::SendRecv &&
-      cocclGetConfig().runtime.mode == cocclRuntimeMode::Training) {
+      prepared.trainingRole == cocclTrainingRolePipelineParallel) {
     return cocclDirectionalPolicy(cocclOperation::SendRecv,
                                   sendRecvForward(prepared.info));
   }
   return cocclDefaultPolicy(prepared.info.operation);
+}
+
+const char* compressionScopeName(cocclCompressionScope scope) {
+  switch (scope) {
+    case cocclCompressionScope::Default: return "default";
+    case cocclCompressionScope::Intra: return "intra";
+    case cocclCompressionScope::Inter: return "inter";
+    case cocclCompressionScope::Count: break;
+  }
+  return "unknown";
+}
+
+const char* policyVariantName(cocclPolicyVariant variant) {
+  switch (variant) {
+    case cocclPolicyVariant::Default: return "default";
+    case cocclPolicyVariant::Forward: return "forward";
+    case cocclPolicyVariant::Backward: return "backward";
+  }
+  return "unknown";
 }
 
 ncclResult_t resolvePreparedCompressors(cocclPreparedCall* prepared) {
@@ -106,6 +134,7 @@ ncclResult_t resolvePreparedCompressors(cocclPreparedCall* prepared) {
            cocclCompressionScope::Inter}) {
     cocclResolvedCompressorPolicy resolved = {};
     if (cocclResolveCompressorPolicy(
+            prepared->trainingRole,
             cocclPolicyForScope(prepared->policy, scope),
             &resolved) != ncclSuccess) {
       continue;
@@ -116,6 +145,16 @@ ncclResult_t resolvePreparedCompressors(cocclPreparedCall* prepared) {
         compressorDatatypeSupported(
             prepared->info.datatype, resolved.compressor);
     prepared->compressors.thresholdBytes = resolved.thresholdBytes;
+    INFO(NCCL_TUNING,
+         "COCCL route comm=%p hash=%llu role=%s operation=%s policy=%s "
+         "scope=%s compressor=%s",
+         prepared->info.comm,
+         (unsigned long long)prepared->info.comm->commHash,
+         cocclTrainingRoleName(prepared->trainingRole),
+         prepared->descriptor->name,
+         policyVariantName(prepared->policy.variant),
+         compressionScopeName(scope),
+         cocclCompressorDescriptor(resolved.compressor)->name);
   }
   return prepared->compressors.anyEnabled()
       ? ncclSuccess : ncclInvalidUsage;
@@ -152,6 +191,8 @@ ncclResult_t cocclEnqueueCheck(const cocclInfo* info, bool* isEnqueued) {
   if (callerGuardActive) return ncclSuccess;
   if (info->comm == nullptr) return ncclSuccess;
 
+  cocclTrainingAssistObserve(info, ncclGroupDepth);
+
   const cocclOperationDescriptor* descriptor =
       cocclGetOperationDescriptor(info->operation);
   if (descriptor == nullptr || !callSupported(*info, *descriptor)) {
@@ -166,6 +207,11 @@ ncclResult_t cocclEnqueueCheck(const cocclInfo* info, bool* isEnqueued) {
   cocclPreparedCall prepared;
   prepared.info = *info;
   prepared.descriptor = descriptor;
+  prepared.trainingRole = trainingRole(info->comm);
+  if (cocclTrainingAssistEnabled() &&
+      prepared.trainingRole == cocclTrainingRoleUnknown) {
+    return routeNativeGroupedSendRecv(*info, isEnqueued);
+  }
   if (resolvePreparedCompressors(&prepared) != ncclSuccess) {
     return routeNativeGroupedSendRecv(*info, isEnqueued);
   }
@@ -201,6 +247,11 @@ ncclResult_t cocclEnqueueExplicitCall(
   cocclPreparedCall prepared;
   prepared.info = *info;
   prepared.descriptor = descriptor;
+  prepared.trainingRole = trainingRole(info->comm);
+  if (cocclTrainingAssistEnabled() &&
+      prepared.trainingRole == cocclTrainingRoleUnknown) {
+    return ncclInvalidUsage;
+  }
   prepared.algorithm = algorithm;
   NCCLCHECK(resolvePreparedCompressors(&prepared));
   if (algorithm == cocclAlgorithmNone &&

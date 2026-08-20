@@ -4,6 +4,7 @@
 #include <array>
 
 #include "coccl_runtime.h"
+#include "coccl_training_assist.h"
 
 enum cocclAlgorithmKind {
   cocclAlgorithmNone = 0,
@@ -42,6 +43,7 @@ struct cocclPreparedCompressorSet {
 struct cocclPreparedCall {
   cocclInfo info;
   const cocclOperationDescriptor* descriptor = nullptr;
+  cocclTrainingRole trainingRole = cocclTrainingRoleUnknown;
   cocclPolicyKey policy;
   cocclAlgorithmKind algorithm = cocclAlgorithmNone;
   cocclPreparedCompressorSet compressors;

@@ -16,6 +16,12 @@ enum class cocclRuntimeMode {
   Training,
 };
 
+enum class cocclDataParallelStrategy {
+  Ddp,
+  Sdp,
+  Fsdp,
+};
+
 enum class cocclReduceScatterAlgorithmPolicy {
   Auto,
   OneShot,
@@ -108,8 +114,15 @@ struct cocclAutotuneConfig {
 };
 
 struct cocclTrainingConfig {
-  int observationIterations = 10;
+  int observationIterations = 5;
   size_t maxEvents = 65536;
+  int dataParallelSize = 1;
+  int tensorParallelSize = 1;
+  int pipelineParallelSize = 1;
+  cocclDataParallelStrategy dataParallelStrategy =
+      cocclDataParallelStrategy::Sdp;
+  bool sequenceParallel = false;
+  bool contextParallel = false;
 };
 
 struct cocclConfig {

@@ -6,6 +6,15 @@ const char* runtimeModeName(cocclRuntimeMode mode) {
   return mode == cocclRuntimeMode::Training ? "training" : "normal";
 }
 
+const char* dataParallelStrategyName(cocclDataParallelStrategy strategy) {
+  switch (strategy) {
+    case cocclDataParallelStrategy::Ddp: return "ddp";
+    case cocclDataParallelStrategy::Sdp: return "sdp";
+    case cocclDataParallelStrategy::Fsdp: return "fsdp";
+  }
+  return "sdp";
+}
+
 const char* reduceScatterAlgorithmName(
     cocclReduceScatterAlgorithmPolicy algorithm) {
   switch (algorithm) {
@@ -150,6 +159,21 @@ std::vector<std::string> cocclFormatEffectiveConfig(
                   std::to_string(config.training.observationIterations));
   lines.push_back("training.max_events = " +
                   std::to_string(config.training.maxEvents));
+  lines.push_back("training.classifier.data_parallel_size = " +
+                  std::to_string(config.training.dataParallelSize));
+  lines.push_back("training.classifier.tensor_parallel_size = " +
+                  std::to_string(config.training.tensorParallelSize));
+  lines.push_back("training.classifier.pipeline_parallel_size = " +
+                  std::to_string(config.training.pipelineParallelSize));
+  lines.push_back("training.classifier.dp_strategy = " +
+                  quote(dataParallelStrategyName(
+                      config.training.dataParallelStrategy)));
+  lines.push_back("training.classifier.sequence_parallel = " +
+                  std::string(config.training.sequenceParallel
+                                  ? "true" : "false"));
+  lines.push_back("training.classifier.context_parallel = " +
+                  std::string(config.training.contextParallel
+                                  ? "true" : "false"));
 
   for (const cocclConfigPolicyView& policy :
        cocclEnumeratePolicies(config)) {

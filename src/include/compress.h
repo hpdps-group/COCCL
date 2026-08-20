@@ -5,6 +5,7 @@
 #include "core.h"
 #include "argcheck.h"
 #include "coccl_operation.h"
+#include "coccl_training_assist.h"
 #include "compressor_plugin/detail/coccl_compressor_abi.h"
 
 enum ncclCommOp{AlltoAll = 0, AlltoAll_Inter = 1, AllReduce = 2, AllReduce_Inter = 3, AllGather = 4, AllGather_Inter = 5, ReduceScatter = 6, ReduceScatter_Inter = 7, SendRecv = 8, SendRecv_BWD = 9};
@@ -18,13 +19,15 @@ struct cocclResolvedCompressorPolicy {
 
 bool cocclCompressionEnabled();
 ncclResult_t cocclResolveCompressorPolicy(
-    cocclPolicyKey key, cocclResolvedCompressorPolicy* resolved);
+    cocclTrainingRole role, cocclPolicyKey key,
+    cocclResolvedCompressorPolicy* resolved);
 ncclResult_t cocclQueryCompressorEncodedSizeBound(
     const cocclCompressorPlugin* plugin, const void* config,
     cocclCompressorOperation operation, size_t elements, size_t chunks,
     ncclDataType_t datatype, size_t* encodedBytes);
 ncclResult_t cocclGetCompressorEncodedSizeBound(
-    cocclPolicyKey key, cocclCompressorOperation operation,
+    cocclTrainingRole role, cocclPolicyKey key,
+    cocclCompressorOperation operation,
     size_t elements, size_t chunks, ncclDataType_t datatype,
     size_t* encodedBytes);
 ncclResult_t cocclGetCompressorEncodedSizeBound(
@@ -32,7 +35,8 @@ ncclResult_t cocclGetCompressorEncodedSizeBound(
     size_t elements, size_t chunks, ncclDataType_t datatype,
     size_t* encodedBytes);
 bool cocclCompressorPolicySupports(
-    cocclPolicyKey key, cocclCompressorCapability capability);
+    cocclTrainingRole role, cocclPolicyKey key,
+    cocclCompressorCapability capability);
 bool cocclCompressorSupports(
     void* compressor, cocclCompressorCapability capability);
 const cocclCompressorPlugin* cocclCompressorDescriptor(void* compressor);

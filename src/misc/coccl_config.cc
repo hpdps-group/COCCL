@@ -111,6 +111,15 @@ bool readInt(const toml::table& table, const char* key, int* value, int min,
   return true;
 }
 
+bool readRequiredInt(const toml::table& table, const char* key, int* value,
+                     int min, int max, const std::string& path,
+                     std::string* error) {
+  if (table.get(key) == nullptr) {
+    return fail(error, path + "." + key + " is required");
+  }
+  return readInt(table, key, value, min, max, path, error);
+}
+
 bool readStringArray(const toml::table& table, const char* key,
                      std::vector<std::string>* values,
                      const std::string& path, std::string* error) {
@@ -324,9 +333,14 @@ bool parseNormal(const toml::table* table, cocclConfig* config,
 bool parseTraining(const toml::table* table, cocclConfig* config,
                    std::string* error) {
   const std::string path = "training";
+  const bool required =
+      config->runtime.mode == cocclRuntimeMode::Training;
+  if (required && table == nullptr) {
+    return fail(error, "training is required in training mode");
+  }
   if (table != nullptr &&
-      !validateKeys(*table, {"observation_iterations", "max_events", "dp",
-                             "tp", "pp"},
+      !validateKeys(*table, {"observation_iterations", "max_events",
+                             "classifier", "dp", "tp", "pp"},
                     path, error)) {
     return false;
   }
@@ -337,6 +351,59 @@ bool parseTraining(const toml::table* table, cocclConfig* config,
       !readSize(parent, "max_events", &config->training.maxEvents, path,
                 error)) {
     return false;
+  }
+
+  const toml::table* classifier =
+      optionalTable(parent, "classifier", path, error);
+  if (required && classifier == nullptr) {
+    return fail(error, "training.classifier is required in training mode");
+  }
+  if (classifier != nullptr) {
+    std::string dpStrategy = "sdp";
+    const std::string classifierPath = path + ".classifier";
+    auto readParallelSize = [&](const char* key, int* value) {
+      return required
+          ? readRequiredInt(*classifier, key, value, 1,
+                            std::numeric_limits<int>::max(), classifierPath,
+                            error)
+          : readInt(*classifier, key, value, 1,
+                    std::numeric_limits<int>::max(), classifierPath, error);
+    };
+    if (!validateKeys(*classifier,
+                      {"data_parallel_size", "tensor_parallel_size",
+                       "pipeline_parallel_size", "dp_strategy",
+                       "sequence_parallel", "context_parallel"},
+                      classifierPath, error) ||
+        !readParallelSize("data_parallel_size",
+                          &config->training.dataParallelSize) ||
+        !readParallelSize("tensor_parallel_size",
+                          &config->training.tensorParallelSize) ||
+        !readParallelSize("pipeline_parallel_size",
+                          &config->training.pipelineParallelSize) ||
+        !readString(*classifier, "dp_strategy", &dpStrategy, false,
+                    classifierPath, error) ||
+        !readBool(*classifier, "sequence_parallel",
+                  &config->training.sequenceParallel, classifierPath,
+                  error) ||
+        !readBool(*classifier, "context_parallel",
+                  &config->training.contextParallel, classifierPath,
+                  error)) {
+      return false;
+    }
+    if (dpStrategy == "ddp") {
+      config->training.dataParallelStrategy =
+          cocclDataParallelStrategy::Ddp;
+    } else if (dpStrategy == "sdp") {
+      config->training.dataParallelStrategy =
+          cocclDataParallelStrategy::Sdp;
+    } else if (dpStrategy == "fsdp") {
+      config->training.dataParallelStrategy =
+          cocclDataParallelStrategy::Fsdp;
+    } else {
+      return fail(error,
+                  classifierPath +
+                      ".dp_strategy must be 'ddp', 'sdp', or 'fsdp'");
+    }
   }
 
   const toml::table* dp = optionalTable(parent, "dp", path, error);

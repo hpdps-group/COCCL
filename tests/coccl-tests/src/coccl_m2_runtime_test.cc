@@ -129,7 +129,8 @@ bool cocclCompressorSupports(
 }
 
 ncclResult_t cocclResolveCompressorPolicy(
-    cocclPolicyKey key, cocclResolvedCompressorPolicy* resolved) {
+    cocclTrainingRole, cocclPolicyKey key,
+    cocclResolvedCompressorPolicy* resolved) {
   ++policyQueries;
   queriedPolicies.push_back(key);
   if (resolverResult != ncclSuccess) return resolverResult;
@@ -137,6 +138,27 @@ ncclResult_t cocclResolveCompressorPolicy(
   if (resolved->compressor == nullptr) return ncclInvalidUsage;
   resolved->thresholdBytes = thresholdBytes;
   return ncclSuccess;
+}
+
+const cocclCompressorPlugin* cocclCompressorDescriptor(void*) {
+  static cocclCompressorPlugin plugin = {};
+  plugin.name = "test";
+  return &plugin;
+}
+
+bool cocclTrainingAssistEnabled() {
+  return false;
+}
+
+void cocclTrainingAssistObserve(const cocclInfo*, int) {}
+
+bool cocclTrainingAssistQuery(
+    ncclComm_t, cocclTrainingClassification*) {
+  return false;
+}
+
+const char* cocclTrainingRoleName(cocclTrainingRole) {
+  return "Unknown";
 }
 
 const cocclOperationDescriptor* cocclGetOperationDescriptor(
