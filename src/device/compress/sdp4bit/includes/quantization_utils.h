@@ -11,6 +11,7 @@
 #include "reduction_utils.h"
 #include <cuda_runtime.h>
 #include <curand_kernel.h>
+#include <stdint.h>
 
 #pragma once
 
@@ -26,6 +27,71 @@ constexpr int max_threads = 1024;
 constexpr int bf_per_load = granularity / sizeof(__nv_bfloat16);
 constexpr int bf2_per_load = granularity / sizeof(__nv_bfloat162);
 #endif
+
+template <typename T, int values>
+DS_D_INLINE void load_values(T* local, const T* global)
+{
+    constexpr size_t bytes = values * sizeof(T);
+    if (((reinterpret_cast<uintptr_t>(local) |
+          reinterpret_cast<uintptr_t>(global)) & (bytes - 1)) == 0) {
+        mem_access::load_global<bytes>(local, global);
+        return;
+    }
+#pragma unroll
+    for (int i = 0; i < values; ++i) local[i] = global[i];
+}
+
+template <typename T>
+DS_D_INLINE void load_chunk_values(T* local, const T* global,
+                                   int valid_values)
+{
+    constexpr int values_per_load = granularity / sizeof(T);
+    if (valid_values == values_per_load &&
+        (reinterpret_cast<uintptr_t>(global) & (granularity - 1)) == 0) {
+        mem_access::load_global<granularity>(local, global);
+        return;
+    }
+
+#pragma unroll
+    for (int i = 0; i < values_per_load; ++i) {
+        local[i] = i < valid_values ? global[i] : T(0.0f);
+    }
+}
+
+template <typename T>
+DS_D_INLINE void store_chunk_values(T* global, const T* local,
+                                    int valid_values)
+{
+    constexpr int values_per_store = granularity / sizeof(T);
+    if (valid_values == values_per_store &&
+        (reinterpret_cast<uintptr_t>(global) & (granularity - 1)) == 0) {
+        mem_access::store_global<granularity>(global, local);
+        return;
+    }
+
+#pragma unroll
+    for (int i = 0; i < values_per_store; ++i) {
+        if (i < valid_values) global[i] = local[i];
+    }
+}
+
+DS_D_INLINE int valid_chunk_values(bool valid_group,
+                                   int64_t group_offset,
+                                   int64_t chunk_offset,
+                                   int64_t elements_per_group,
+                                   int64_t elements_per_chunk,
+                                   int values_per_load)
+{
+    if (!valid_group || group_offset >= elements_per_group ||
+        chunk_offset >= elements_per_chunk) {
+        return 0;
+    }
+    int64_t remaining = elements_per_group - group_offset;
+    const int64_t chunk_remaining = elements_per_chunk - chunk_offset;
+    if (chunk_remaining < remaining) remaining = chunk_remaining;
+    return remaining < values_per_load ? static_cast<int>(remaining)
+                                       : values_per_load;
+}
 /*
 Class to hold the quantization parameters for a given tensor.
 Holds the implementation of the quantization operation.

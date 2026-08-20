@@ -94,7 +94,7 @@ __device__ __inline__ void load_to_local(
                     // model_params+ param_offset [idx + j - start_idx: idx + vec_size] -> local_buffer[j: vec_size]
                     if constexpr (vec_size >= 8) {
                         if (vec_size - j >= 8) {
-                            mem_access::load_global<8*sizeof(scalar_t)>(
+                            quantize::load_values<scalar_t, 8>(
                                 local_buffer + j,
                                 model_params + param_offset +idx + j - start_idx);
                             j += 8;
@@ -102,19 +102,19 @@ __device__ __inline__ void load_to_local(
                         }
                     }
                     if (vec_size - j >= 4) {
-                        mem_access::load_global<4*sizeof(scalar_t)>(
+                        quantize::load_values<scalar_t, 4>(
                             local_buffer + j,
                             model_params+ param_offset +idx + j - start_idx);
                         j += 4;
                         break;
                     } else if (vec_size - j >= 2) {
-                        mem_access::load_global<2*sizeof(scalar_t)>(
+                        quantize::load_values<scalar_t, 2>(
                             local_buffer + j,
                             model_params+ param_offset +idx + j - start_idx);
                         j += 2;
                         break;
                     } else if (vec_size - j >= 1) {
-                        mem_access::load_global<1*sizeof(scalar_t)>(
+                        quantize::load_values<scalar_t, 1>(
                             local_buffer + j,
                             model_params+ param_offset +idx + j - start_idx);
                         j += 1;
@@ -126,7 +126,7 @@ __device__ __inline__ void load_to_local(
                     // IF [idx+j, idx+vec_size) is not contiguous, only load [idx+j, end_idx)
                     if constexpr (vec_size >= 8) {
                         if (end_idx - idx - j >= 8) {
-                            mem_access::load_global<8*sizeof(scalar_t)>(
+                            quantize::load_values<scalar_t, 8>(
                                 local_buffer + j,
                                 model_params+ param_offset +idx + j - start_idx);
                             j += 8;
@@ -134,19 +134,19 @@ __device__ __inline__ void load_to_local(
                         }
                     }
                     if (end_idx - idx - j >= 4) {
-                        mem_access::load_global<4*sizeof(scalar_t)>(
+                        quantize::load_values<scalar_t, 4>(
                             local_buffer + j,
                             model_params+ param_offset +idx + j - start_idx);
                         j += 4;
                         break;
                     } else if (end_idx - idx - j >= 2) {
-                        mem_access::load_global<2*sizeof(scalar_t)>(
+                        quantize::load_values<scalar_t, 2>(
                             local_buffer + j,
                             model_params+ param_offset +idx + j - start_idx);
                         j += 2;
                         break;
                     } else if (end_idx - idx - j >= 1) {
-                        mem_access::load_global<1*sizeof(scalar_t)>(
+                        quantize::load_values<scalar_t, 1>(
                             local_buffer + j,
                             model_params+ param_offset +idx + j - start_idx);
                         j += 1;
@@ -193,9 +193,10 @@ __global__ void cached_quantization(
     cg::thread_block_tile<hw_warp_size> warp = cg::tiled_partition<hw_warp_size>(tb);
 
     // Indexing offsets
-    const int64_t block_offset =
-        (static_cast<int64_t>(tb.group_index().x) * (max_threads / threads_per_group) * elems_per_group) +
-        (tb.thread_index().y * elems_per_group);
+    const int64_t block_num =
+        static_cast<int64_t>(tb.group_index().x) *
+            (max_threads / threads_per_group) + tb.thread_index().y;
+    const int64_t block_offset = block_num * elems_per_group;
     const int elem_offset_in_group =
         tb.thread_index().x * values_per_load;
     const int64_t padding_offset = block_offset + elem_offset_in_group;
@@ -205,7 +206,8 @@ __global__ void cached_quantization(
 
     const int stride = tb.size() * values_per_load;
 
-    const T* input_base = shard_params_buffer + base_offset;
+    const T* input_base = block_num < groups
+        ? shard_params_buffer + base_offset : shard_params_buffer;
     // printf("base_offset %ld elem_offset %d\n", base_offset, elem_offset);
     Storage local_buffer[UNROLL * internal_unroll * storage_per_load];
     // int64_t param_offset = d_block_start_param_offset[tb.group_index().x];
@@ -221,19 +223,28 @@ __global__ void cached_quantization(
             T* data_cast = reinterpret_cast<T*>(
                 iteration_buffer + j * storage_per_load);
             T temp_param_model[values_per_load];
-            mem_access::load_global<quantize::granularity>(
-                iteration_buffer + j * storage_per_load,
-                input_base + iteration * stride,
-                (elem_offset_in_group + iteration * stride < elems_per_group) &&
-                (elem_offset_in_chunk + iteration * stride < elems_per_chunk));            
-            load_to_local<T, values_per_load>(
-                temp_param_model, model_params, num_params, total_elems,
-                base_offset + iteration * stride + dp_param_offset);
+            const int group_offset = elem_offset_in_group + iteration * stride;
+            const int64_t chunk_element_offset =
+                elem_offset_in_chunk + iteration * stride;
+            const int valid_values = quantize::valid_chunk_values(
+                block_num < groups, group_offset, chunk_element_offset,
+                elems_per_group, elems_per_chunk, values_per_load);
+            quantize::load_chunk_values(
+                data_cast, input_base + iteration * stride, valid_values);
+            if (valid_values != 0) {
+                load_to_local<T, values_per_load>(
+                    temp_param_model, model_params, num_params, total_elems,
+                    base_offset + iteration * stride + dp_param_offset);
+            } else {
+#pragma unroll
+                for (int k = 0; k < values_per_load; ++k) {
+                    temp_param_model[k] = T(0.0f);
+                }
+            }
 
 #pragma unroll
             for (int k = 0; k < values_per_load; k++) {
-                data_cast[k] = ((elem_offset_in_group + iteration * stride + k < elems_per_group) &&
-                                (elem_offset_in_chunk + iteration * stride + k < elems_per_chunk))
+                data_cast[k] = k < valid_values
                     ? reduce::element<reduce::ROpType::Sub>(
                           data_cast[k], temp_param_model[k])
                     : reduce::init<reduce::ROpType::Add, T>();

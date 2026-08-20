@@ -188,8 +188,12 @@ DS_D_INLINE void _to_global(T* global_output,
             chunk<T, numBits, qType>(local_dequant_buffer + i * T_per_chunk,
                                      local_load_buffer + i * load_granularity,
                                      q_params);
-            mem_access::store_global<granularity>(global_output + elem_id_iter_true,
-                                                  local_dequant_buffer + i * T_per_chunk);
+            const int valid_values = static_cast<int>(min(
+                static_cast<int64_t>(T_per_chunk),
+                elems_per_chunk - elem_id_iter_chunk));
+            quantize::store_chunk_values(
+                global_output + elem_id_iter_true,
+                local_dequant_buffer + i * T_per_chunk, valid_values);
         }
     }
 }
@@ -313,8 +317,12 @@ DS_D_INLINE void _to_global_ht(T* global_output,
             hadamard_mult_thread_quant<kLogNElts, kNChunks>(iteration_cast);
             hadamard_mult_warp_quant<kLogWarpSize, 0, kNChunks, kNElts>(iteration_cast);
             hadamard_inverse_scale_32(iteration_cast, T_per_chunk);
-            mem_access::store_global<granularity>(global_output + elem_id_iter_true,
-                                                  local_dequant_buffer + i * T_per_chunk);
+            const int valid_values = static_cast<int>(min(
+                static_cast<int64_t>(T_per_chunk),
+                elems_per_chunk - elem_id_iter_chunk));
+            quantize::store_chunk_values(
+                global_output + elem_id_iter_true,
+                local_dequant_buffer + i * T_per_chunk, valid_values);
         }
     }
 }

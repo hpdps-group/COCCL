@@ -33,7 +33,10 @@ struct Options {
   std::string compressor;
   std::string datatype;
   std::string topology;
+  std::string operation;
+  std::string algorithm;
   int depth = 1;
+  size_t rawChunkElements = 0;
 };
 
 void fail(const char* expression, const char* detail, int rank,
@@ -79,7 +82,12 @@ Options parseOptions(int argc, char** argv, int worldRank) {
     else if (key == "--compressor") options.compressor = value;
     else if (key == "--datatype") options.datatype = value;
     else if (key == "--topology") options.topology = value;
+    else if (key == "--operation") options.operation = value;
+    else if (key == "--algorithm") options.algorithm = value;
     else if (key == "--depth") options.depth = std::atoi(value.c_str());
+    else if (key == "--raw-chunk-elements") {
+      options.rawChunkElements = std::strtoull(value.c_str(), nullptr, 10);
+    }
     else fail("command line", "unknown option", worldRank, __FILE__, __LINE__);
   }
   if (options.suite.empty() || options.compressor.empty() ||
@@ -116,12 +124,41 @@ const char* algorithmName(Operation operation, bool subAdd) {
   }
 }
 
-size_t outputElements(Operation operation, int ranks) {
+bool selectedOperation(const Options& options, Operation operation,
+                       bool subAdd) {
+  const auto listed = [](const std::string& list, const char* value) {
+    if (list.empty()) return true;
+    size_t begin = 0;
+    do {
+      const size_t end = list.find(',', begin);
+      if (list.compare(begin, end - begin, value) == 0) return true;
+      if (end == std::string::npos) break;
+      begin = end + 1;
+    } while (begin < list.size());
+    return false;
+  };
+  return listed(options.operation, operationName(operation)) &&
+      listed(options.algorithm, algorithmName(operation, subAdd));
+}
+
+size_t inputElements(Operation operation, int ranks,
+                     size_t rawChunkElements) {
+  if (rawChunkElements == 0) return kElementsPerRank;
   switch (operation) {
-    case Operation::AllGather: return kElementsPerRank * ranks;
+    case Operation::AllGather:
+    case Operation::SendRecv:
+      return rawChunkElements;
+    default:
+      return rawChunkElements * (size_t)ranks;
+  }
+}
+
+size_t outputElements(Operation operation, int ranks, size_t inputCount) {
+  switch (operation) {
+    case Operation::AllGather: return inputCount * ranks;
     case Operation::ReduceScatterOneShot:
-    case Operation::ReduceScatterTwoShot: return kElementsPerRank / ranks;
-    default: return kElementsPerRank;
+    case Operation::ReduceScatterTwoShot: return inputCount / ranks;
+    default: return inputCount;
   }
 }
 
@@ -162,13 +199,13 @@ float toFloat<__nv_bfloat16>(__nv_bfloat16 value) {
 }
 
 template <typename T>
-std::vector<T> makeInput(int rank, int phase) {
-  std::vector<T> values(kElementsPerRank);
-  const size_t phaseOffset = static_cast<size_t>(phase) * kElementsPerRank;
+std::vector<T> makeInput(int rank, int phase, size_t count) {
+  std::vector<T> values(count);
+  const size_t phaseOffset = static_cast<size_t>(phase) * count;
   for (size_t index = 0; index < values.size(); ++index) {
     float value = static_cast<float>(
-        static_cast<size_t>(rank) * kElementsPerRank + phaseOffset + index);
-    if (std::is_same<T, __half>::value) value /= 10.0f;
+        static_cast<size_t>(rank) * count + phaseOffset + index);
+    if (std::is_same<T, __half>::value) value /= 100.0f;
     values[index] = fromFloat<T>(value);
   }
   return values;
@@ -176,34 +213,35 @@ std::vector<T> makeInput(int rank, int phase) {
 
 void runNative(Operation operation, const void* input, void* output,
                ncclDataType_t datatype, ncclComm_t comm,
-               cudaStream_t stream, int rank, int ranks) {
+               cudaStream_t stream, int rank, int ranks,
+               size_t inputCount) {
   switch (operation) {
     case Operation::AllToAll:
-      NCCLCHECK(ncclAllToAll(input, output, kElementsPerRank / ranks,
+      NCCLCHECK(ncclAllToAll(input, output, inputCount / ranks,
                              datatype, comm, stream));
       return;
     case Operation::AllGather:
-      NCCLCHECK(ncclAllGather(input, output, kElementsPerRank, datatype,
+      NCCLCHECK(ncclAllGather(input, output, inputCount, datatype,
                               comm, stream));
       return;
     case Operation::ReduceScatterOneShot:
     case Operation::ReduceScatterTwoShot:
-      NCCLCHECK(ncclReduceScatter(input, output, kElementsPerRank / ranks,
+      NCCLCHECK(ncclReduceScatter(input, output, inputCount / ranks,
                                   datatype, ncclSum, comm, stream));
       return;
     case Operation::AllReduceOneShot:
     case Operation::AllReduceTwoShot:
     case Operation::AllReduceTripleShot:
-      NCCLCHECK(ncclAllReduce(input, output, kElementsPerRank, datatype,
+      NCCLCHECK(ncclAllReduce(input, output, inputCount, datatype,
                               ncclSum, comm, stream));
       return;
     case Operation::SendRecv: {
       const int previous = (rank + ranks - 1) % ranks;
       const int next = (rank + 1) % ranks;
       NCCLCHECK(ncclGroupStart());
-      NCCLCHECK(ncclRecv(output, kElementsPerRank, datatype, previous, comm,
+      NCCLCHECK(ncclRecv(output, inputCount, datatype, previous, comm,
                          stream));
-      NCCLCHECK(ncclSend(input, kElementsPerRank, datatype, next, comm,
+      NCCLCHECK(ncclSend(input, inputCount, datatype, next, comm,
                          stream));
       NCCLCHECK(ncclGroupEnd());
       return;
@@ -213,46 +251,47 @@ void runNative(Operation operation, const void* input, void* output,
 
 void runCompressed(Operation operation, const void* input, void* output,
                    ncclDataType_t datatype, ncclComm_t comm,
-                   cudaStream_t stream, int rank, int ranks) {
+                   cudaStream_t stream, int rank, int ranks,
+                   size_t inputCount) {
 #ifdef COCCL_M16_LEGACY_API
   switch (operation) {
     case Operation::AllToAll:
       NCCLCHECK(ncclAlltoAllCompOverlap(
-          input, output, kElementsPerRank / ranks, datatype, comm, stream));
+          input, output, inputCount / ranks, datatype, comm, stream));
       return;
     case Operation::AllGather:
       NCCLCHECK(ncclAllGatherCompOverlap(
-          input, output, kElementsPerRank, datatype, comm, stream));
+          input, output, inputCount, datatype, comm, stream));
       return;
     case Operation::ReduceScatterOneShot:
       NCCLCHECK(ncclReduceScatterCompOneShotOverlap(
-          input, output, kElementsPerRank / ranks, datatype, ncclSum, comm,
+          input, output, inputCount / ranks, datatype, ncclSum, comm,
           stream));
       return;
     case Operation::ReduceScatterTwoShot:
       NCCLCHECK(ncclReduceScatterCompTwoShotTLOverlap(
-          input, output, kElementsPerRank / ranks, datatype, ncclSum, comm,
+          input, output, inputCount / ranks, datatype, ncclSum, comm,
           stream));
       return;
     case Operation::AllReduceOneShot:
       NCCLCHECK(ncclAllReduceCompOneShot(
-          input, output, kElementsPerRank, datatype, ncclSum, comm, stream));
+          input, output, inputCount, datatype, ncclSum, comm, stream));
       return;
     case Operation::AllReduceTwoShot:
       NCCLCHECK(ncclAllReduceCompTwoShotOverlap(
-          input, output, kElementsPerRank, datatype, ncclSum, comm, stream));
+          input, output, inputCount, datatype, ncclSum, comm, stream));
       return;
     case Operation::AllReduceTripleShot:
       NCCLCHECK(ncclAllReduceCompTripleShotTLOverlap(
-          input, output, kElementsPerRank, datatype, ncclSum, comm, stream));
+          input, output, inputCount, datatype, ncclSum, comm, stream));
       return;
     case Operation::SendRecv: {
       const int previous = (rank + ranks - 1) % ranks;
       const int next = (rank + 1) % ranks;
       NCCLCHECK(ncclGroupStart());
-      NCCLCHECK(ncclRecvDecomp(output, kElementsPerRank, datatype, previous,
+      NCCLCHECK(ncclRecvDecomp(output, inputCount, datatype, previous,
                                comm, stream));
-      NCCLCHECK(ncclSendComp(input, kElementsPerRank, datatype, next, comm,
+      NCCLCHECK(ncclSendComp(input, inputCount, datatype, next, comm,
                              stream));
       NCCLCHECK(ncclGroupEnd());
       return;
@@ -261,42 +300,42 @@ void runCompressed(Operation operation, const void* input, void* output,
 #else
   switch (operation) {
     case Operation::AllToAll:
-      NCCLCHECK(cocclAllToAllComp(input, output, kElementsPerRank / ranks,
+      NCCLCHECK(cocclAllToAllComp(input, output, inputCount / ranks,
                                   datatype, comm, stream));
       return;
     case Operation::AllGather:
-      NCCLCHECK(cocclAllGatherComp(input, output, kElementsPerRank, datatype,
+      NCCLCHECK(cocclAllGatherComp(input, output, inputCount, datatype,
                                    comm, stream));
       return;
     case Operation::ReduceScatterOneShot:
       NCCLCHECK(cocclReduceScatterCompOneShot(
-          input, output, kElementsPerRank / ranks, datatype, ncclSum, comm,
+          input, output, inputCount / ranks, datatype, ncclSum, comm,
           stream));
       return;
     case Operation::ReduceScatterTwoShot:
       NCCLCHECK(cocclReduceScatterCompTwoShot(
-          input, output, kElementsPerRank / ranks, datatype, ncclSum, comm,
+          input, output, inputCount / ranks, datatype, ncclSum, comm,
           stream));
       return;
     case Operation::AllReduceOneShot:
       NCCLCHECK(cocclAllReduceCompOneShot(
-          input, output, kElementsPerRank, datatype, ncclSum, comm, stream));
+          input, output, inputCount, datatype, ncclSum, comm, stream));
       return;
     case Operation::AllReduceTwoShot:
       NCCLCHECK(cocclAllReduceCompTwoShot(
-          input, output, kElementsPerRank, datatype, ncclSum, comm, stream));
+          input, output, inputCount, datatype, ncclSum, comm, stream));
       return;
     case Operation::AllReduceTripleShot:
       NCCLCHECK(cocclAllReduceCompTripleShot(
-          input, output, kElementsPerRank, datatype, ncclSum, comm, stream));
+          input, output, inputCount, datatype, ncclSum, comm, stream));
       return;
     case Operation::SendRecv: {
       const int previous = (rank + ranks - 1) % ranks;
       const int next = (rank + 1) % ranks;
       NCCLCHECK(ncclGroupStart());
-      NCCLCHECK(cocclRecvDecomp(output, kElementsPerRank, datatype, previous,
+      NCCLCHECK(cocclRecvDecomp(output, inputCount, datatype, previous,
                                 comm, stream));
-      NCCLCHECK(cocclSendComp(input, kElementsPerRank, datatype, next, comm,
+      NCCLCHECK(cocclSendComp(input, inputCount, datatype, next, comm,
                               stream));
       NCCLCHECK(ncclGroupEnd());
       return;
@@ -310,8 +349,10 @@ void runCase(Operation operation, bool subAdd, ncclDataType_t datatype,
              const Options& options, ncclComm_t nativeComm,
              ncclComm_t compressedComm, cudaStream_t nativeStream,
              cudaStream_t compressedStream, int worldRank, int worldSize) {
-  const size_t outputCount = outputElements(operation, worldSize);
-  const size_t inputBytes = kElementsPerRank * sizeof(T);
+  const size_t inputCount = inputElements(
+      operation, worldSize, options.rawChunkElements);
+  const size_t outputCount = outputElements(operation, worldSize, inputCount);
+  const size_t inputBytes = inputCount * sizeof(T);
   const size_t outputBytes = outputCount * sizeof(T);
   T* deviceInput = nullptr;
   T* nativeOutput = nullptr;
@@ -321,28 +362,33 @@ void runCase(Operation operation, bool subAdd, ncclDataType_t datatype,
   CUDACHECK(cudaMalloc(&compressedOutput, outputBytes));
 
   if (subAdd) {
-    const std::vector<T> initial = makeInput<T>(worldRank, 0);
-    CUDACHECK(cudaMemcpy(deviceInput, initial.data(), inputBytes,
-                         cudaMemcpyHostToDevice));
+    const std::vector<T> initial = makeInput<T>(worldRank, 0, inputCount);
+    CUDACHECK(cudaMemcpyAsync(deviceInput, initial.data(), inputBytes,
+                              cudaMemcpyHostToDevice, compressedStream));
     MPICHECK(MPI_Barrier(MPI_COMM_WORLD));
     runCompressed(operation, deviceInput, compressedOutput, datatype,
-                  compressedComm, compressedStream, worldRank, worldSize);
+                  compressedComm, compressedStream, worldRank, worldSize,
+                  inputCount);
     CUDACHECK(cudaStreamSynchronize(compressedStream));
   }
 
-  const std::vector<T> input = makeInput<T>(worldRank, subAdd ? 1 : 0);
-  CUDACHECK(cudaMemcpy(deviceInput, input.data(), inputBytes,
-                       cudaMemcpyHostToDevice));
-  CUDACHECK(cudaMemset(nativeOutput, 0, outputBytes));
-  CUDACHECK(cudaMemset(compressedOutput, 0, outputBytes));
+  const std::vector<T> input = makeInput<T>(
+      worldRank, subAdd ? 1 : 0, inputCount);
+  CUDACHECK(cudaMemcpyAsync(deviceInput, input.data(), inputBytes,
+                            cudaMemcpyHostToDevice, nativeStream));
+  CUDACHECK(cudaMemsetAsync(
+      nativeOutput, 0, outputBytes, nativeStream));
+  CUDACHECK(cudaMemsetAsync(
+      compressedOutput, 0, outputBytes, compressedStream));
 
   MPICHECK(MPI_Barrier(MPI_COMM_WORLD));
   runNative(operation, deviceInput, nativeOutput, datatype, nativeComm,
-            nativeStream, worldRank, worldSize);
+            nativeStream, worldRank, worldSize, inputCount);
   CUDACHECK(cudaStreamSynchronize(nativeStream));
   MPICHECK(MPI_Barrier(MPI_COMM_WORLD));
   runCompressed(operation, deviceInput, compressedOutput, datatype,
-                compressedComm, compressedStream, worldRank, worldSize);
+                compressedComm, compressedStream, worldRank, worldSize,
+                inputCount);
   CUDACHECK(cudaStreamSynchronize(compressedStream));
 
   std::vector<T> nativeHost(outputCount);
@@ -368,10 +414,14 @@ void runCase(Operation operation, bool subAdd, ncclDataType_t datatype,
     std::printf(
         "COCCL_CORRECTNESS topology=%s rank_count=%d operation=%s "
         "algorithm=%s compressor=%s dtype=%s depth=%d "
-        "output_elements=%zu mean_relative_error=%.12e\n",
+        "raw_chunk_elements=%zu output_elements=%zu "
+        "mean_relative_error=%.12e\n",
         options.topology.c_str(), worldSize, operationName(operation),
         algorithmName(operation, subAdd), options.compressor.c_str(),
-        options.datatype.c_str(), options.depth, outputCount, mean);
+        options.datatype.c_str(), options.depth,
+        operation == Operation::AllGather || operation == Operation::SendRecv
+            ? inputCount : inputCount / (size_t)worldSize,
+        outputCount, mean);
     std::fflush(stdout);
   }
 
@@ -405,6 +455,7 @@ void runSuite(const Options& options, ncclDataType_t datatype,
     fail("suite", "unknown suite", worldRank, __FILE__, __LINE__);
   }
   for (Operation operation : operations) {
+    if (!selectedOperation(options, operation, subAdd)) continue;
     runCase<T>(operation, subAdd, datatype, options, nativeComm,
                compressedComm, nativeStream, compressedStream, worldRank,
                worldSize);

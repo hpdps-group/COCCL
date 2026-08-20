@@ -151,13 +151,22 @@ void* tempPtr(const cocclPipelineContext& context,
       (size_t)slice * context.plan.registeredSliceBytes + temp.offset;
 }
 
+cocclPipelineStageContext stageContextForSlice(
+    const cocclPipelineContext& context, int slice) {
+  cocclPipelineStageContext stageContext = context.stageContext;
+  stageContext.rawSliceCount = context.slices[slice].elementCount;
+  stageContext.rawSliceBytes = context.slices[slice].bytes;
+  return stageContext;
+}
+
 cocclPipelineEdge inputEdge(const cocclPipelineContext& context,
                             int slice) {
+  const cocclPipelineSliceShape& shape = context.slices[slice];
   return {
       static_cast<char*>(const_cast<void*>(context.spec->input)) +
-          (size_t)slice * context.stageContext.rawSliceBytes,
-      context.stageContext.rawSliceBytes * context.spec->inputChunks,
-      context.stageContext.rawSliceCount * context.spec->inputChunks,
+          shape.byteOffset,
+      shape.bytes * context.spec->inputChunks,
+      shape.elementCount * context.spec->inputChunks,
       context.spec->datatype,
       context.spec->inputChunks,
       nullptr,
@@ -187,36 +196,38 @@ cocclPipelineStageOutput stageOutput(const cocclPipelineContext& context,
     const cocclPipelineTempPlan& temp = context.plan.temps[tempIndex];
     return {
         payload,
-        context.plan.stageOutputCapacityBytes[stage],
+        context.sliceStageOutputBytes[slice][stage],
         temp.frameMetadataBytes == 0
             ? nullptr
             : reinterpret_cast<cocclCompressorFrameMetadata*>(
                   static_cast<char*>(payload) +
                   temp.frameMetadataOffset),
-        temp.frameStrideBytes};
+        context.sliceStageFrameStrideBytes[slice][stage]};
   }
   return {static_cast<char*>(context.spec->output) +
-              (size_t)slice * context.stageContext.rawSliceBytes,
-          context.plan.stageOutputCapacityBytes[stage], nullptr, 0};
+              context.slices[slice].byteOffset,
+          context.sliceStageOutputBytes[slice][stage], nullptr, 0};
 }
 
 ncclResult_t runSerial(const cocclPipelineContext& context,
                        const cocclPipelineWorkspace& workspace) {
   cocclPipelineEdge edge = inputEdge(context, 0);
+  const cocclPipelineStageContext stageContext =
+      stageContextForSlice(context, 0);
   if (context.plan.inputStagingTemp >= 0) {
     const cocclPipelineStage pack = cocclPipelinePack();
     const cocclPipelineStageOutput output = {
         tempPtr(context, workspace, 0, context.plan.inputStagingTemp),
         edge.bytes, nullptr, 0};
     NCCLCHECK(cocclExecutePipelineStage(
-        &context.stageContext, &pack, &edge, &output,
+        &stageContext, &pack, &edge, &output,
         context.spec->stream));
   }
   for (int stage = 0; stage < context.spec->stageCount; ++stage) {
     const cocclPipelineStageOutput output =
         stageOutput(context, workspace, stage, 0);
     NCCLCHECK(cocclExecutePipelineStage(
-        &context.stageContext, context.spec->stages + stage, &edge,
+        &stageContext, context.spec->stages + stage, &edge,
         &output, context.spec->stream));
   }
   return ncclSuccess;
@@ -253,6 +264,8 @@ ncclResult_t runFramedOverlap(
       context.plan.outputStagingTemp >= 0;
 
   for (int slice = 0; slice < context.depth; ++slice) {
+    const cocclPipelineStageContext stageContext =
+        stageContextForSlice(context, slice);
     const int rawSlot = slice % kCocclPipelineRawRingSlots;
     cocclPipelineEdge& edge = resources->edges[slice];
     edge = inputEdge(context, slice);
@@ -268,7 +281,7 @@ ncclResult_t runFramedOverlap(
                   context.plan.inputStagingTemp),
           edge.bytes, nullptr, 0};
       NCCLCHECK(cocclExecutePipelineStage(
-          &context.stageContext, &pack, &edge, &packOutput,
+          &stageContext, &pack, &edge, &packOutput,
           resources->streams[cocclPipelinePhasePack]));
     }
     NCCLCHECK(recordPhase(
@@ -280,7 +293,7 @@ ncclResult_t runFramedOverlap(
     const cocclPipelineStageOutput output =
         stageOutput(context, workspace, 0, slice);
     NCCLCHECK(cocclExecutePipelineStage(
-        &context.stageContext, context.spec->stages, &edge, &output,
+        &stageContext, context.spec->stages, &edge, &output,
         resources->streams[phase]));
     if (reusesInputRaw) {
       CUDACHECK(cudaEventRecord(
@@ -299,18 +312,22 @@ ncclResult_t runFramedOverlap(
 
     if (variable) {
       for (int slice = 0; slice < context.depth; ++slice) {
+        const cocclPipelineStageContext stageContext =
+            stageContextForSlice(context, slice);
         NCCLCHECK(waitForPhase(
             resources, phase, previousPhase, slice));
         resources->stageOutputs[slice] =
             stageOutput(context, workspace, stage, slice);
         NCCLCHECK(cocclPreparePipelineFrameExchange(
-            &context.stageContext, context.spec->stages + stage,
+            &stageContext, context.spec->stages + stage,
             resources->edges + slice, resources->stageOutputs + slice,
             resources->streams[phase]));
       }
       for (int slice = 0; slice < context.depth; ++slice) {
+        const cocclPipelineStageContext stageContext =
+            stageContextForSlice(context, slice);
         NCCLCHECK(cocclCommitPipelineFrameExchange(
-            &context.stageContext, context.spec->stages + stage,
+            &stageContext, context.spec->stages + stage,
             resources->edges + slice, resources->stageOutputs + slice,
             resources->streams[phase]));
         NCCLCHECK(recordPhase(resources, phase, slice));
@@ -319,6 +336,8 @@ ncclResult_t runFramedOverlap(
     }
 
     for (int slice = 0; slice < context.depth; ++slice) {
+      const cocclPipelineStageContext stageContext =
+          stageContextForSlice(context, slice);
       const int rawSlot = slice % kCocclPipelineRawRingSlots;
       NCCLCHECK(waitForPhase(
           resources, phase, previousPhase, slice));
@@ -332,7 +351,7 @@ ncclResult_t runFramedOverlap(
       const cocclPipelineStageOutput output =
           stageOutput(context, workspace, stage, slice);
       NCCLCHECK(cocclExecutePipelineStage(
-          &context.stageContext, context.spec->stages + stage,
+          &stageContext, context.spec->stages + stage,
           &edge, &output, resources->streams[phase]));
       NCCLCHECK(recordPhase(resources, phase, slice));
 
@@ -342,10 +361,10 @@ ncclResult_t runFramedOverlap(
         const cocclPipelineStage unpack = cocclPipelineUnpack();
         const cocclPipelineStageOutput unpackOutput = {
             static_cast<char*>(context.spec->output) +
-                (size_t)slice * context.stageContext.rawSliceBytes,
+                context.slices[slice].byteOffset,
             edge.bytes, nullptr, 0};
         NCCLCHECK(cocclExecutePipelineStage(
-            &context.stageContext, &unpack, &edge, &unpackOutput,
+            &stageContext, &unpack, &edge, &unpackOutput,
             resources->streams[cocclPipelinePhaseUnpack]));
         if (reusesOutputRaw) {
           CUDACHECK(cudaEventRecord(
@@ -384,6 +403,8 @@ ncclResult_t runOverlap(const cocclPipelineContext& context,
       context.plan.outputStagingTemp >= 0;
 
   for (int slice = 0; slice < context.depth; ++slice) {
+    const cocclPipelineStageContext stageContext =
+        stageContextForSlice(context, slice);
     const int rawSlot = slice % kCocclPipelineRawRingSlots;
     cocclPipelineEdge edge = inputEdge(context, slice);
 
@@ -399,7 +420,7 @@ ncclResult_t runOverlap(const cocclPipelineContext& context,
                   context.plan.inputStagingTemp),
           edge.bytes, nullptr, 0};
       NCCLCHECK(cocclExecutePipelineStage(
-          &context.stageContext, &pack, &edge, &packOutput,
+          &stageContext, &pack, &edge, &packOutput,
           resources->streams[cocclPipelinePhasePack]));
     }
     NCCLCHECK(recordPhase(resources, cocclPipelinePhasePack, slice));
@@ -417,7 +438,7 @@ ncclResult_t runOverlap(const cocclPipelineContext& context,
       const cocclPipelineStageOutput output =
           stageOutput(context, workspace, stage, slice);
       NCCLCHECK(cocclExecutePipelineStage(
-          &context.stageContext, context.spec->stages + stage, &edge,
+          &stageContext, context.spec->stages + stage, &edge,
           &output, resources->streams[phase]));
       if (reusesInputRaw && stage == 0) {
         CUDACHECK(cudaEventRecord(
@@ -433,10 +454,10 @@ ncclResult_t runOverlap(const cocclPipelineContext& context,
       const cocclPipelineStage unpack = cocclPipelineUnpack();
       const cocclPipelineStageOutput unpackOutput = {
           static_cast<char*>(context.spec->output) +
-              (size_t)slice * context.stageContext.rawSliceBytes,
+              context.slices[slice].byteOffset,
           edge.bytes, nullptr, 0};
       NCCLCHECK(cocclExecutePipelineStage(
-          &context.stageContext, &unpack, &edge, &unpackOutput,
+          &stageContext, &unpack, &edge, &unpackOutput,
           resources->streams[cocclPipelinePhaseUnpack]));
       if (reusesOutputRaw) {
         CUDACHECK(cudaEventRecord(

@@ -163,7 +163,9 @@ int main(int argc, char** argv) {
   cocclPipelineSpec indivisible = makeSpec(&comm, 16 << 20, false, stages);
   indivisible.rawChunkCount += 1;
   EXPECT(cocclPreparePipeline(&indivisible, 8, &context) == ncclSuccess);
-  EXPECT(context.depth == 1);
+  EXPECT(context.depth == 8);
+  EXPECT(context.slices[7].elementCount ==
+         context.slices[0].elementCount + 1);
 
   std::printf("coccl M5 pipeline plan: PASS\n");
   return 0;

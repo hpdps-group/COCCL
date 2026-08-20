@@ -37,8 +37,8 @@ void testMetadata() {
     fail("valid encoded/raw metadata was rejected");
   }
   raw.payloadBytes = 63;
-  if (cocclFrameMetadataValid(raw, 64)) {
-    fail("short raw frame was accepted");
+  if (!cocclFrameMetadataValid(raw, 64)) {
+    fail("raw payload smaller than its physical slot was rejected");
   }
   encoded.payloadBytes = 0;
   if (cocclFrameMetadataValid(encoded, 64)) {

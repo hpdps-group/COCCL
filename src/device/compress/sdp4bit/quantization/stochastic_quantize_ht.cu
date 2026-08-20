@@ -33,9 +33,10 @@ __global__ void cached_quantization_ht(int8_t* __restrict__ output_data,
     cg::thread_block_tile<hw_warp_size> warp = cg::tiled_partition<hw_warp_size>(tb);
 
     // Indexing offsets
-    const int64_t block_offset =
-        (static_cast<int64_t>(tb.group_index().x) * (max_threads / threads_per_group) * elems_per_group) +
-        (tb.thread_index().y * elems_per_group);
+    const int64_t block_num =
+        static_cast<int64_t>(tb.group_index().x) *
+            (max_threads / threads_per_group) + tb.thread_index().y;
+    const int64_t block_offset = block_num * elems_per_group;
 
     // const int elem_offset = tb.thread_index().x * quantize::h_per_load;
     // const int64_t base_offset = block_offset + elem_offset;
@@ -48,7 +49,8 @@ __global__ void cached_quantization_ht(int8_t* __restrict__ output_data,
 
     const int stride = tb.size() * quantize::h_per_load;
 
-    const __half* input_base = input_data + base_offset;  //..
+    const __half* input_base = block_num < groups
+        ? input_data + base_offset : input_data;
 
     __half2 local_buffer[UNROLL * internal_unroll * quantize::h2_per_load];
 
@@ -59,11 +61,16 @@ __global__ void cached_quantization_ht(int8_t* __restrict__ output_data,
 #pragma unroll
         for (int j = 0; j < internal_unroll; j++) {
             const int iteration = i * internal_unroll + j;
-            mem_access::load_global<quantize::granularity>(
-                iteration_buffer + j * quantize::h2_per_load,
-                input_base + iteration * stride,
-                (elem_offset_group + iteration * stride < elems_per_group) &&
-                (elem_offset_chunk + iteration * stride < elems_per_chunk));
+            const int group_offset = elem_offset_group + iteration * stride;
+            const int64_t chunk_element_offset =
+                elem_offset_chunk + iteration * stride;
+            const int valid_values = quantize::valid_chunk_values(
+                block_num < groups, group_offset, chunk_element_offset,
+                elems_per_group, elems_per_chunk, quantize::h_per_load);
+            quantize::load_chunk_values(
+                reinterpret_cast<__half*>(
+                    iteration_buffer + j * quantize::h2_per_load),
+                input_base + iteration * stride, valid_values);
         }
     }
 
@@ -117,9 +124,10 @@ __global__ void cached_quantization_ht(int8_t* __restrict__ output_data,
     cg::thread_block_tile<hw_warp_size> warp = cg::tiled_partition<hw_warp_size>(tb);
 
     // Indexing offsets
-    const int64_t block_offset =
-        (static_cast<int64_t>(tb.group_index().x) * (max_threads / threads_per_group) * elems_per_group) +
-        (tb.thread_index().y * elems_per_group);
+    const int64_t block_num =
+        static_cast<int64_t>(tb.group_index().x) *
+            (max_threads / threads_per_group) + tb.thread_index().y;
+    const int64_t block_offset = block_num * elems_per_group;
     // const int elem_offset = tb.thread_index().x * quantize::bf_per_load;
     // const int64_t base_offset = block_offset + elem_offset;
 
@@ -131,7 +139,8 @@ __global__ void cached_quantization_ht(int8_t* __restrict__ output_data,
     
     const int stride = tb.size() * quantize::bf_per_load;
 
-    const __nv_bfloat16* input_base = input_data + base_offset;
+    const __nv_bfloat16* input_base = block_num < groups
+        ? input_data + base_offset : input_data;
 
     __nv_bfloat162 local_buffer[UNROLL * internal_unroll * quantize::bf2_per_load]; // Updated buffer type
 
@@ -141,11 +150,16 @@ __global__ void cached_quantization_ht(int8_t* __restrict__ output_data,
 #pragma unroll
         for (int j = 0; j < internal_unroll; j++) {
             const int iteration = i * internal_unroll + j;
-            mem_access::load_global<quantize::granularity>(
-                iteration_buffer + j * quantize::bf2_per_load,
-                input_base + iteration * stride,
-                (elem_offset_group + iteration * stride < elems_per_group) &&
-                (elem_offset_chunk + iteration * stride < elems_per_chunk));
+            const int group_offset = elem_offset_group + iteration * stride;
+            const int64_t chunk_element_offset =
+                elem_offset_chunk + iteration * stride;
+            const int valid_values = quantize::valid_chunk_values(
+                block_num < groups, group_offset, chunk_element_offset,
+                elems_per_group, elems_per_chunk, quantize::bf_per_load);
+            quantize::load_chunk_values(
+                reinterpret_cast<__nv_bfloat16*>(
+                    iteration_buffer + j * quantize::bf2_per_load),
+                input_base + iteration * stride, valid_values);
         }
     }
 
@@ -196,9 +210,10 @@ __global__ void cached_quantization_ht(int8_t* __restrict__ output_data,
     cg::thread_block_tile<hw_warp_size> warp = cg::tiled_partition<hw_warp_size>(tb);
 
     // Indexing offsets
-    const int64_t block_offset =
-        (static_cast<int64_t>(tb.group_index().x) * (max_threads / threads_per_group) * elems_per_group) +
-        (tb.thread_index().y * elems_per_group);
+    const int64_t block_num =
+        static_cast<int64_t>(tb.group_index().x) *
+            (max_threads / threads_per_group) + tb.thread_index().y;
+    const int64_t block_offset = block_num * elems_per_group;
     // const int elem_offset = tb.thread_index().x * quantize::f_per_load;
     // const int64_t base_offset = block_offset + elem_offset;
 
@@ -210,7 +225,8 @@ __global__ void cached_quantization_ht(int8_t* __restrict__ output_data,
 
     const int stride = tb.size() * quantize::f_per_load;
 
-    const float* input_base = input_data + base_offset;  //..
+    const float* input_base = block_num < groups
+        ? input_data + base_offset : input_data;
 
     float local_buffer[UNROLL * internal_unroll * quantize::f_per_load];
 
@@ -221,11 +237,15 @@ __global__ void cached_quantization_ht(int8_t* __restrict__ output_data,
 #pragma unroll
         for (int j = 0; j < internal_unroll; j++) {
             const int iteration = i * internal_unroll + j;
-            mem_access::load_global<quantize::granularity>(
+            const int group_offset = elem_offset_group + iteration * stride;
+            const int64_t chunk_element_offset =
+                elem_offset_chunk + iteration * stride;
+            const int valid_values = quantize::valid_chunk_values(
+                block_num < groups, group_offset, chunk_element_offset,
+                elems_per_group, elems_per_chunk, quantize::f_per_load);
+            quantize::load_chunk_values(
                 iteration_buffer + j * quantize::f_per_load,
-                input_base + iteration * stride,
-                (elem_offset_group + iteration * stride < elems_per_group) &&
-                (elem_offset_chunk + iteration * stride < elems_per_chunk));
+                input_base + iteration * stride, valid_values);
         }
     }
 

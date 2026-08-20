@@ -73,7 +73,7 @@ endif
 	m7-host-tests m8-host-tests m9-host-tests m10-host-tests m11-host-tests \
 	m12-host-tests m13-host-tests m14-host-tests m14-codec-build \
 	m15-host-tests m15-layout-test m16-correctness-build \
-	m19-host-tests dietgpu-integer-build
+	m19-host-tests m20-host-tests dietgpu-integer-build
 
 BUILDDIR ?= ../build
 ifneq ($(NCCL_HOME), "")
@@ -150,12 +150,17 @@ M19_SCOPE_CONFIG_TEST := $(DST_DIR)/coccl_m19_scope_config_test
 M19_HIERARCHICAL_GRAPH_TEST := $(DST_DIR)/coccl_m19_hierarchical_graph_test
 M19_CODEC_FLOW_TEST := $(DST_DIR)/coccl_m19_codec_flow_test
 M19_SELECTOR_SCOPE_TEST := $(DST_DIR)/coccl_m19_selector_scope_test
+M20_REMAINDER_PLAN_TEST := $(DST_DIR)/coccl_m20_remainder_plan_test
 DIETGPU_INTEGER_TEST := $(DST_DIR)/coccl_dietgpu_integer_test
 
 dietgpu-integer-build: $(DIETGPU_INTEGER_TEST)
 
 m19-host-tests: $(M19_SCOPE_CONFIG_TEST) $(M19_HIERARCHICAL_GRAPH_TEST) \
 		$(M19_CODEC_FLOW_TEST) $(M19_SELECTOR_SCOPE_TEST)
+
+m20-host-tests: $(M20_REMAINDER_PLAN_TEST) $(M5_PIPELINE_PLAN_TEST)
+	$(M20_REMAINDER_PLAN_TEST)
+	$(M5_PIPELINE_PLAN_TEST)
 
 m16-correctness-build: $(M16_CORRECTNESS_TEST)
 
@@ -407,6 +412,12 @@ $(M4_VMM_TEST): coccl_m4_vmm_test.cc \
 	$(CXX) $(M1_CXXFLAGS) $(COCCL_INC) -I$(COCCL_SRC) -o $@ $^
 
 $(M5_PIPELINE_PLAN_TEST): coccl_m5_pipeline_plan_test.cc \
+		$(COCCL_SRC)/misc/coccl_pipeline_plan.cc $(M11_SIZE_QUERY_STUB)
+	@printf "Linking  %-35s > %s\n" $< $@
+	@mkdir -p $(DST_DIR)
+	$(CXX) $(M1_CXXFLAGS) $(COCCL_INC) -I$(COCCL_SRC) -o $@ $^
+
+$(M20_REMAINDER_PLAN_TEST): coccl_m20_remainder_plan_test.cc \
 		$(COCCL_SRC)/misc/coccl_pipeline_plan.cc $(M11_SIZE_QUERY_STUB)
 	@printf "Linking  %-35s > %s\n" $< $@
 	@mkdir -p $(DST_DIR)

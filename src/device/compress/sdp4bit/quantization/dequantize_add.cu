@@ -10,6 +10,7 @@
 // #include <torch/extension.h>
 
 namespace cg = cooperative_groups;
+
 template <typename scalar_t, int vec_size>
 __device__ __inline__ void load_to_local(
     scalar_t* __restrict__ local_buffer,
@@ -69,7 +70,7 @@ __device__ __inline__ void load_to_local(
                     // model_params+ param_offset [idx + j - start_idx: idx + vec_size] -> local_buffer[j: vec_size]
                     if constexpr (vec_size >= 8) {
                         if (vec_size - j >= 8) {
-                            mem_access::load_global<8*sizeof(scalar_t)>(
+                            quantize::load_values<scalar_t, 8>(
                                 local_buffer + j,
                                 model_params + param_offset +idx + j - start_idx);
                             j += 8;
@@ -77,19 +78,19 @@ __device__ __inline__ void load_to_local(
                         }
                     }
                     if (vec_size - j >= 4) {
-                        mem_access::load_global<4*sizeof(scalar_t)>(
+                        quantize::load_values<scalar_t, 4>(
                             local_buffer + j,
                             model_params+ param_offset +idx + j - start_idx);
                         j += 4;
                         break;
                     } else if (vec_size - j >= 2) {
-                        mem_access::load_global<2*sizeof(scalar_t)>(
+                        quantize::load_values<scalar_t, 2>(
                             local_buffer + j,
                             model_params+ param_offset +idx + j - start_idx);
                         j += 2;
                         break;
                     } else if (vec_size - j >= 1) {
-                        mem_access::load_global<1*sizeof(scalar_t)>(
+                        quantize::load_values<scalar_t, 1>(
                             local_buffer + j,
                             model_params+ param_offset +idx + j - start_idx);
                         j += 1;
@@ -101,7 +102,7 @@ __device__ __inline__ void load_to_local(
                     // IF [idx+j, idx+vec_size) is not contiguous, only load [idx+j, end_idx)
                     if constexpr (vec_size >= 8) {
                         if (end_idx - idx - j >= 8) {
-                            mem_access::load_global<8*sizeof(scalar_t)>(
+                            quantize::load_values<scalar_t, 8>(
                                 local_buffer + j,
                                 model_params+ param_offset +idx + j - start_idx);
                             j += 8;
@@ -109,19 +110,19 @@ __device__ __inline__ void load_to_local(
                         }
                     }
                     if (end_idx - idx - j >= 4) {
-                        mem_access::load_global<4*sizeof(scalar_t)>(
+                        quantize::load_values<scalar_t, 4>(
                             local_buffer + j,
                             model_params+ param_offset +idx + j - start_idx);
                         j += 4;
                         break;
                     } else if (end_idx - idx - j >= 2) {
-                        mem_access::load_global<2*sizeof(scalar_t)>(
+                        quantize::load_values<scalar_t, 2>(
                             local_buffer + j,
                             model_params+ param_offset +idx + j - start_idx);
                         j += 2;
                         break;
                     } else if (end_idx - idx - j >= 1) {
-                        mem_access::load_global<1*sizeof(scalar_t)>(
+                        quantize::load_values<scalar_t, 1>(
                             local_buffer + j,
                             model_params+ param_offset +idx + j - start_idx);
                         j += 1;
@@ -254,8 +255,12 @@ __global__ void dequantize_kernel(
                     data_cast[k] = reduce::element<reduce::ROpType::Add>(
                         data_cast[k], temp_param_model[k]);
                 }
-                mem_access::store_global<dequantize::granularity>(dequant_data + elem_id_iter_true,
-                    local_dequant_buffer + i * T_per_chunk);
+                const int valid_values = static_cast<int>(min(
+                    static_cast<int64_t>(T_per_chunk),
+                    elems_per_chunk - elem_id_iter_chunk));
+                quantize::store_chunk_values(
+                    dequant_data + elem_id_iter_true,
+                    local_dequant_buffer + i * T_per_chunk, valid_values);
             }
         }
     } else if constexpr (numBits == 3) {

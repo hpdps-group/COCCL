@@ -599,7 +599,7 @@ ncclResult_t ncclDecompress(
     cocclCompressorView* output, cudaStream_t stream) {
   if (output == nullptr) return ncclInvalidArgument;
   if (input.datatype == COCCL_COMPRESSOR_RAW_PASSTHROUGH) {
-    if (input.bytes != output->capacityBytes) return ncclInvalidUsage;
+    if (input.bytes > output->capacityBytes) return ncclInvalidUsage;
     CUDACHECK(cudaMemcpyAsync(output->data, input.data, input.bytes,
                               cudaMemcpyDeviceToDevice, stream));
     output->bytes = input.bytes;

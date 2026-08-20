@@ -100,9 +100,23 @@ struct cocclPipelinePlan {
   size_t totalBytes;
 };
 
+struct cocclPipelineSliceShape {
+  size_t elementOffset;
+  size_t elementCount;
+  size_t byteOffset;
+  size_t bytes;
+};
+
 struct cocclPipelineContext {
   const cocclPipelineSpec* spec;
   int depth;
+  cocclPipelineSliceShape slices[kCocclPipelineMaxDepth];
+  size_t maxSliceCount;
+  size_t maxSliceBytes;
+  size_t sliceStageOutputBytes[kCocclPipelineMaxDepth]
+                              [kCocclPipelineExplicitStages];
+  size_t sliceStageFrameStrideBytes[kCocclPipelineMaxDepth]
+                                   [kCocclPipelineExplicitStages];
   cocclPipelineStageContext stageContext;
   cocclPipelinePlan plan;
 };

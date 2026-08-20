@@ -157,6 +157,10 @@ ncclResult_t dispatchPack(const void* source, size_t sourcePitchBytes,
       return launchPackTyped<unsigned int, Swizzle>(
           source, sourcePitchBytes, destination, sliceBytes, chunkCount,
           nNodes, ranksPerNode, stream);
+    case 2:
+      return launchPackTyped<unsigned short, Swizzle>(
+          source, sourcePitchBytes, destination, sliceBytes, chunkCount,
+          nNodes, ranksPerNode, stream);
     default:
       return launchPackTyped<unsigned char, Swizzle>(
           source, sourcePitchBytes, destination, sliceBytes, chunkCount,
@@ -187,6 +191,7 @@ size_t layoutVectorBytes(const void* source, size_t sourcePitchBytes,
   if ((alignment & 15) == 0) return 16;
   if ((alignment & 7) == 0) return 8;
   if ((alignment & 3) == 0) return 4;
+  if ((alignment & 1) == 0) return 2;
   return 1;
 }
 
@@ -201,6 +206,15 @@ ncclResult_t cocclLaunchPackSlice(const void* source,
   if (source == nullptr || destination == nullptr || sliceBytes == 0 ||
       chunkCount == 0 || sourcePitchBytes < sliceBytes) {
     return ncclInvalidArgument;
+  }
+  if (inputLayout == cocclPipelineInputContiguous &&
+      layoutVectorBytes(source, sourcePitchBytes, destination, sliceBytes,
+                        sliceBytes) < 16) {
+    return cudaMemcpy2DAsync(
+               destination, sliceBytes, source, sourcePitchBytes,
+               sliceBytes, chunkCount, cudaMemcpyDeviceToDevice, stream) ==
+            cudaSuccess
+        ? ncclSuccess : ncclUnhandledCudaError;
   }
   return inputLayout == cocclPipelineInputHierarchicalSwizzle
       ? dispatchPack<true>(source, sourcePitchBytes, destination, sliceBytes,
@@ -217,23 +231,14 @@ ncclResult_t cocclLaunchUnpackSlice(const void* source, void* destination,
       chunkCount == 0 || destinationPitchBytes < sliceBytes) {
     return ncclInvalidArgument;
   }
-  switch (layoutVectorBytes(source, sliceBytes, destination,
-                            destinationPitchBytes, sliceBytes)) {
-    case 16:
-      return launchUnpackTyped<uint4>(source, destination,
-                                      destinationPitchBytes, sliceBytes,
-                                      chunkCount, stream);
-    case 8:
-      return launchUnpackTyped<unsigned long long>(
-          source, destination, destinationPitchBytes, sliceBytes, chunkCount,
-          stream);
-    case 4:
-      return launchUnpackTyped<unsigned int>(
-          source, destination, destinationPitchBytes, sliceBytes, chunkCount,
-          stream);
-    default:
-      return launchUnpackTyped<unsigned char>(
-          source, destination, destinationPitchBytes, sliceBytes, chunkCount,
-          stream);
+  if (layoutVectorBytes(source, sliceBytes, destination,
+                        destinationPitchBytes, sliceBytes) < 16) {
+    return cudaMemcpy2DAsync(
+               destination, destinationPitchBytes, source, sliceBytes,
+               sliceBytes, chunkCount, cudaMemcpyDeviceToDevice, stream) ==
+            cudaSuccess
+        ? ncclSuccess : ncclUnhandledCudaError;
   }
+  return launchUnpackTyped<uint4>(source, destination, destinationPitchBytes,
+                                  sliceBytes, chunkCount, stream);
 }

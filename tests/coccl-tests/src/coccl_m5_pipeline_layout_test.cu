@@ -252,6 +252,7 @@ int main(int argc, char** argv) {
       {3, 4, 5, 1, 3, cocclPipelineInputContiguous, 1, 1},
       {16, 4, 16, 0, 0, cocclPipelineInputContiguous, 1, 1},
       {17, 4, 15, 0, 0, cocclPipelineInputContiguous, 1, 1},
+      {18, 4, 14, 0, 0, cocclPipelineInputContiguous, 1, 1},
       {257, 4, 255, 0, 0, cocclPipelineInputContiguous, 1, 1},
       {65535, 4, 65537, 1, 3, cocclPipelineInputContiguous, 1, 1},
       {16, 8, 48, 0, 0, cocclPipelineInputHierarchicalSwizzle, 2, 4},
@@ -271,6 +272,28 @@ int main(int argc, char** argv) {
           cocclPipelineInputHierarchicalSwizzle, 2, 4};
       if (!runCase(test)) return 1;
       ++testedCases;
+    }
+  }
+  for (int depth : {2, 4, 8}) {
+    for (int remainder = 1; remainder < depth; ++remainder) {
+      const size_t rawChunkElements =
+          (size_t)depth * 512 + (size_t)remainder;
+      const size_t quotient = rawChunkElements / (size_t)depth;
+      for (int slice = 0; slice < depth; ++slice) {
+        const size_t elementOffset = (size_t)slice * quotient;
+        const size_t elementCount = quotient +
+            (slice + 1 == depth ? (size_t)remainder : 0);
+        for (cocclPipelineInputLayout layout : {
+                 cocclPipelineInputContiguous,
+                 cocclPipelineInputHierarchicalSwizzle}) {
+          const LayoutCase test = {
+              elementCount * sizeof(float), 8,
+              (rawChunkElements - elementCount) * sizeof(float),
+              elementOffset * sizeof(float), 0, layout, 2, 4};
+          if (!runCase(test)) return 1;
+          ++testedCases;
+        }
+      }
     }
   }
   std::printf("coccl M5 pipeline layout: PASS (%zu cases)\n", testedCases);

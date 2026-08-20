@@ -7,6 +7,7 @@
 #include <cuda_runtime.h>
 #include <stdint.h>
 #include <type_traits>
+#include <vector>
 
 namespace {
 
@@ -25,11 +26,29 @@ struct Sdp4BitConfig {
 };
 
 // Created lazily only when the sub/add algorithm is selected.
-struct Sdp4BitState {
+struct Sdp4BitSlotState {
   void* shardParams = nullptr;
   ncclDataType_t datatype = ncclNumTypes;
   bool initialized = false;
 };
+
+struct Sdp4BitState {
+  std::vector<Sdp4BitSlotState> slots;
+  size_t nextCompress = 0;
+  size_t nextDecompress = 0;
+};
+
+Sdp4BitSlotState& nextSlot(Sdp4BitState* state, int pipelineSize,
+                           bool compress, size_t* slotIndex) {
+  if (state->slots.size() != (size_t)pipelineSize) {
+    state->slots.assign((size_t)pipelineSize, Sdp4BitSlotState{});
+    state->nextCompress = 0;
+    state->nextDecompress = 0;
+  }
+  size_t& next = compress ? state->nextCompress : state->nextDecompress;
+  *slotIndex = next++ % state->slots.size();
+  return state->slots[*slotIndex];
+}
 
 bool validQuantBits(int value, bool allowUnset) {
   return (allowUnset && value == 0) || value == 4 || value == 8;
@@ -261,6 +280,7 @@ struct Sdp4BitCompressor {
                                 coccl::Context& context) {
     const Config& config = context.config<Config>();
     Sdp4BitState* state = nullptr;
+    Sdp4BitSlotState* slot = nullptr;
     bool passthrough = false;
     if (config.subAdd) {
       size_t paramsBytes = 0;
@@ -269,11 +289,13 @@ struct Sdp4BitCompressor {
       }
       coccl::Status result = context.instance(&state);
       if (result != ncclSuccess) return result;
-      if (state->datatype != input.datatype()) {
-        state->datatype = input.datatype();
-        state->initialized = false;
+      size_t slotIndex = 0;
+      slot = &nextSlot(state, config.pipelineSize, true, &slotIndex);
+      if (slot->datatype != input.datatype()) {
+        slot->datatype = input.datatype();
+        slot->initialized = false;
       }
-      passthrough = !state->initialized;
+      passthrough = !slot->initialized;
     }
 
     size_t requiredBytes = input.bytes();
@@ -296,7 +318,7 @@ struct Sdp4BitCompressor {
             decltype(typedInput)>::type>::type;
         launch_fused_sub_quant_cuda(
             output.dataAs<int8_t>(),
-            static_cast<const T*>(state->shardParams) +
+            static_cast<const T*>(slot->shardParams) +
                 context.rank() * input.elementsPerChunk(),
             typedInput, config.quantBits, config.quantType,
             config.kernelGroupCount(),
@@ -340,6 +362,9 @@ struct Sdp4BitCompressor {
       Sdp4BitState* state = nullptr;
       coccl::Status result = context.instance(&state);
       if (result != ncclSuccess) return result;
+      size_t slotIndex = 0;
+      Sdp4BitSlotState& slot =
+          nextSlot(state, config.pipelineSize, false, &slotIndex);
       size_t requiredBytes = 0;
       const size_t datatypeBytes = coccl::dataTypeSize(output.datatype());
       if (datatypeBytes == 0 ||
@@ -348,32 +373,32 @@ struct Sdp4BitCompressor {
         return ncclInvalidArgument;
       }
       coccl::Buffer persistent;
-      result = context.persistent(0, requiredBytes, &persistent);
+      result = context.persistent(slotIndex, requiredBytes, &persistent);
       if (result != ncclSuccess) return result;
-      if (state->shardParams != persistent.data() ||
-          state->datatype != output.datatype()) {
-        state->shardParams = persistent.data();
-        state->datatype = output.datatype();
-        state->initialized = false;
+      if (slot.shardParams != persistent.data() ||
+          slot.datatype != output.datatype()) {
+        slot.shardParams = persistent.data();
+        slot.datatype = output.datatype();
+        slot.initialized = false;
       }
 
       cudaError_t cudaResult = cudaSuccess;
-      if (!state->initialized) {
+      if (!slot.initialized) {
         if (input.bytes() < requiredBytes) return ncclInvalidArgument;
         cudaResult = cudaMemcpyAsync(output.data(), input.data(), requiredBytes,
                                      cudaMemcpyDeviceToDevice,
                                      context.stream());
         if (cudaResult == cudaSuccess) {
           cudaResult = cudaMemcpyAsync(
-              state->shardParams, input.data(), requiredBytes,
+              slot.shardParams, input.data(), requiredBytes,
               cudaMemcpyDeviceToDevice, context.stream());
         }
-        if (cudaResult == cudaSuccess) state->initialized = true;
+        if (cudaResult == cudaSuccess) slot.initialized = true;
       } else {
         auto launch = [&](auto* typedOutput) {
           using T = typename std::remove_pointer<decltype(typedOutput)>::type;
           launch_fused_dequant_add_cuda(
-              typedOutput, static_cast<const T*>(state->shardParams),
+              typedOutput, static_cast<const T*>(slot.shardParams),
               input.dataAs<int8_t>(), config.quantBits, config.quantType,
               config.kernelGroupCount(),
               (int64_t)(output.elements() / output.chunks()),
@@ -388,7 +413,7 @@ struct Sdp4BitCompressor {
         cudaResult = cudaGetLastError();
         if (cudaResult == cudaSuccess) {
           cudaResult = cudaMemcpyAsync(
-              state->shardParams, output.data(), requiredBytes,
+              slot.shardParams, output.data(), requiredBytes,
               cudaMemcpyDeviceToDevice, context.stream());
         }
       }

@@ -41,8 +41,7 @@ bool cocclFrameMetadataValid(
   return metadata.payloadBytes > 0 &&
       metadata.payloadBytes <= frameStrideBytes &&
       (metadata.encoding == cocclCompressorFrameEncoded ||
-       (metadata.encoding == cocclCompressorFrameRaw &&
-        metadata.payloadBytes == frameStrideBytes));
+       metadata.encoding == cocclCompressorFrameRaw);
 }
 
 ncclResult_t cocclBuildAllToAllFrameExchanges(
