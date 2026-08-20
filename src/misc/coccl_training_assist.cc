@@ -25,6 +25,8 @@ struct cocclTrainingAssistCommState {
   ncclComm_t comm = nullptr;
   cocclTrainingTraceComm descriptor;
   cocclTrainingClassification classification;
+  uint64_t observedCalls = 0;
+  uint64_t routingActivationCall = 0;
 };
 
 pthread_mutex_t cocclTrainingAssistLock = PTHREAD_MUTEX_INITIALIZER;
@@ -168,10 +170,17 @@ static void commitTraceLocked(
     auto result = byId.find(state->descriptor.communicatorId);
     if (result != byId.end()) state->classification = result->second;
     state->classification.committed = true;
+    if (state->classification.role != cocclTrainingRoleUnknown) {
+      const uint64_t callsPerIteration = std::max<uint64_t>(
+          1, (uint64_t)state->classification.callsPerIteration);
+      state->routingActivationCall =
+          2ULL * (uint64_t)targetIterations * callsPerIteration;
+    }
     INFO(NCCL_TUNING,
          "COCCL training comm=%p hash=%llu rank=%d nodes=%d ranks=%d role=%s "
          "confidence=%.3f calls=%llu medianBytes=%zu sizeConsistency=%.3f "
-         "cycleSupport=%.3f overlapSupport=%.3f orderSupport=%.3f AG/RS=%.3f",
+         "cycleSupport=%.3f overlapSupport=%.3f orderSupport=%.3f AG/RS=%.3f "
+         "activateCall=%llu",
          state->comm, (unsigned long long)state->descriptor.commHash,
          state->descriptor.rank, state->descriptor.nNodes,
          state->descriptor.nRanks,
@@ -183,7 +192,8 @@ static void commitTraceLocked(
          state->classification.cycleSupport,
          state->classification.overlapPatternSupport,
          state->classification.orderSupport,
-         state->classification.agToRsRatio);
+         state->classification.agToRsRatio,
+         (unsigned long long)state->routingActivationCall);
   }
   if (allCommsCommittedLocked()) releaseTraceLocked();
 }
@@ -296,8 +306,24 @@ void cocclTrainingAssistObserve(
 
   pthread_mutex_lock(&cocclTrainingAssistLock);
   auto state = cocclTrainingAssistComms.find(args->comm);
-  if (state == cocclTrainingAssistComms.end() ||
-      state->second->classification.committed) {
+  if (state == cocclTrainingAssistComms.end()) {
+    pthread_mutex_unlock(&cocclTrainingAssistLock);
+    return;
+  }
+  if (topologyRole == cocclTrainingRoleUnknown) {
+    state->second->observedCalls++;
+  }
+  if (state->second->classification.committed) {
+    if (state->second->routingActivationCall != 0 &&
+        state->second->observedCalls ==
+            state->second->routingActivationCall) {
+      INFO(NCCL_TUNING,
+           "COCCL training comm=%p hash=%llu role=%s routing-ready call=%llu",
+           state->second->comm,
+           (unsigned long long)state->second->descriptor.commHash,
+           cocclTrainingRoleName(state->second->classification.role),
+           (unsigned long long)state->second->observedCalls);
+    }
     pthread_mutex_unlock(&cocclTrainingAssistLock);
     return;
   }
@@ -358,7 +384,10 @@ bool cocclTrainingAssistQuery(
   pthread_mutex_lock(&cocclTrainingAssistLock);
   auto state = cocclTrainingAssistComms.find(comm);
   if (state != cocclTrainingAssistComms.end() &&
-      state->second->classification.committed) {
+      state->second->classification.committed &&
+      (state->second->routingActivationCall == 0 ||
+       state->second->observedCalls >=
+           state->second->routingActivationCall)) {
     *classification = state->second->classification;
     committed = true;
   }

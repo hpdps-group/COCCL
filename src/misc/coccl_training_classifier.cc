@@ -169,6 +169,7 @@ static void buildCommStats(
   std::map<IterationPattern, uint64_t> multiSizePatternCounts;
   uint64_t ratioMatches = 0;
   std::vector<double> matchingRatios;
+  std::vector<uint64_t> callsByIteration;
 
   for (const cocclTrainingTraceEvent& event : events) {
     if (event.communicatorId != descriptor.communicatorId) continue;
@@ -188,8 +189,6 @@ static void buildCommStats(
     collectiveBytes.push_back(event.logicalBytes);
   }
 
-  stats->callsPerIteration = iterations.empty()
-      ? 0.0 : (double)stats->calls / (double)iterations.size();
   stats->p2pShare = stats->calls == 0
       ? 0.0 : (double)stats->p2pCalls / (double)stats->calls;
 
@@ -230,12 +229,12 @@ static void buildCommStats(
     std::map<int, std::set<size_t>> sizesByOperation;
     long double allGatherBytes = 0.0;
     long double reduceScatterBytes = 0.0;
+    uint64_t iterationCalls = 0;
     for (size_t i = iteration.begin; i < iteration.end && i < events.size(); ++i) {
       const cocclTrainingTraceEvent& event = events[i];
-      if (event.communicatorId != descriptor.communicatorId ||
-          !isCollective(event.operation)) {
-        continue;
-      }
+      if (event.communicatorId != descriptor.communicatorId) continue;
+      iterationCalls++;
+      if (!isCollective(event.operation)) continue;
       pattern.push_back({(int)event.operation, event.logicalBytes});
       sizesByOperation[(int)event.operation].insert(event.logicalBytes);
       if (event.operation == ncclFuncAllGather) {
@@ -244,6 +243,7 @@ static void buildCommStats(
         reduceScatterBytes += (long double)event.logicalBytes;
       }
     }
+    callsByIteration.push_back(iterationCalls);
 
     if (!pattern.empty()) {
       patternCounts[pattern]++;
@@ -261,6 +261,8 @@ static void buildCommStats(
       }
     }
   }
+
+  stats->callsPerIteration = (double)median(callsByIteration);
 
   uint64_t bestPatternCount = 0;
   for (const auto& pattern : patternCounts) {

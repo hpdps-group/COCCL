@@ -29,6 +29,7 @@ struct Sdp4BitConfig {
 struct Sdp4BitSlotState {
   void* shardParams = nullptr;
   ncclDataType_t datatype = ncclNumTypes;
+  size_t elementsPerChunk = 0;
   bool initialized = false;
 };
 
@@ -291,8 +292,10 @@ struct Sdp4BitCompressor {
       if (result != ncclSuccess) return result;
       size_t slotIndex = 0;
       slot = &nextSlot(state, config.pipelineSize, true, &slotIndex);
-      if (slot->datatype != input.datatype()) {
+      if (slot->datatype != input.datatype() ||
+          slot->elementsPerChunk != input.elementsPerChunk()) {
         slot->datatype = input.datatype();
+        slot->elementsPerChunk = input.elementsPerChunk();
         slot->initialized = false;
       }
       passthrough = !slot->initialized;
@@ -376,9 +379,11 @@ struct Sdp4BitCompressor {
       result = context.persistent(slotIndex, requiredBytes, &persistent);
       if (result != ncclSuccess) return result;
       if (slot.shardParams != persistent.data() ||
-          slot.datatype != output.datatype()) {
+          slot.datatype != output.datatype() ||
+          slot.elementsPerChunk != output.elements() / output.chunks()) {
         slot.shardParams = persistent.data();
         slot.datatype = output.datatype();
+        slot.elementsPerChunk = output.elements() / output.chunks();
         slot.initialized = false;
       }
 

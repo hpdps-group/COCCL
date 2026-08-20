@@ -10,8 +10,7 @@ struct cocclInfo;
 
 constexpr size_t kCocclTrainingMinimumObservedBytes = 1ULL << 20;
 
-// Training roles are intentionally COCCL-private. The first implementation
-// only observes and reports a role; it never changes the wire protocol.
+// Training roles are COCCL-private and select role-specific compressor policy.
 enum cocclTrainingRole {
   cocclTrainingRoleUnknown = 0,
   cocclTrainingRoleDataParallel,
@@ -44,8 +43,8 @@ void cocclTrainingAssistUnregister(ncclComm_t comm);
 
 // A uniquely matching configured parallel size commits the role on the first
 // corresponding call. Ambiguous user-visible calls of at least 1 MiB are
-// observed before routing so native fallbacks still contribute to the trace
-// without letting small control collectives distort the training schedule.
+// observed before routing. Their role is activated at a common absolute call
+// boundary so asynchronous pipeline stages cannot switch protocol separately.
 void cocclTrainingAssistObserve(const cocclInfo* args, int groupDepth);
 bool cocclTrainingAssistQuery(
     ncclComm_t comm, cocclTrainingClassification* classification);

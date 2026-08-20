@@ -316,6 +316,39 @@ static int testIterationDetection() {
   return 0;
 }
 
+static int testCallsPerIterationIgnoresPartialSuffix() {
+  TraceBuilder trace;
+  for (int iteration = 0; iteration < 5; ++iteration) {
+    trace.beginIteration();
+    trace.add(1, ncclFuncAllGather, 128);
+    trace.add(1, ncclFuncAllGather, 256);
+    trace.add(1, ncclFuncReduceScatter, 512);
+    trace.add(1, ncclFuncReduceScatter, 1024);
+  }
+  trace.finish();
+  trace.add(1, ncclFuncAllGather, 128);
+  trace.add(1, ncclFuncAllGather, 256);
+
+  std::vector<cocclTrainingTraceResult> results;
+  cocclTrainingClassifyTrace({makeComm(1, 2, 1)}, trace.events,
+                             trace.iterations, 5, testConfig.training,
+                             &results);
+  const cocclTrainingClassification* classification =
+      findClassification(1, results);
+  if (classification == nullptr || classification->observedCalls != 22 ||
+      classification->callsPerIteration != 4.0) {
+    fprintf(stderr,
+            "partial suffix changed calls per iteration: calls=%llu cycle=%.3f\n",
+            classification == nullptr
+                ? 0ULL
+                : (unsigned long long)classification->observedCalls,
+            classification == nullptr ? 0.0
+                                      : classification->callsPerIteration);
+    return 1;
+  }
+  return 0;
+}
+
 static int testTensorParallelCommunicationModes() {
   TraceBuilder trace;
   for (int iteration = 0; iteration < 10; ++iteration) {
@@ -737,9 +770,7 @@ static int testRoleSpecificCompressorSelection() {
       buffer, nullptr);
   ppSend.peer = 1;
 
-  // Sixteen identical events form one training iteration. At 256 events the
-  // runtime detector sees sixteen complete iterations and commits all roles.
-  for (int iteration = 0; iteration < 16; ++iteration) {
+  auto observeIteration = [&]() {
     cocclTrainingAssistObserve(&dpAllGather, 0);
     for (int tensorOp = 0; tensorOp < 6; ++tensorOp) {
       cocclTrainingAssistObserve(&tpAllReduce, 0);
@@ -750,6 +781,20 @@ static int testRoleSpecificCompressorSelection() {
     }
     cocclTrainingAssistObserve(&dpReduceScatter, 0);
     usleep(1000);
+  };
+
+  for (int iteration = 0; iteration < 10; ++iteration) {
+    observeIteration();
+  }
+  cocclTrainingClassification activating;
+  if (cocclTrainingAssistQuery(&dp, &activating) ||
+      cocclTrainingAssistQuery(&tp, &activating) ||
+      cocclTrainingAssistQuery(&pp, &activating)) {
+    fprintf(stderr, "training role activated before the common call boundary\n");
+    return 1;
+  }
+  for (int iteration = 10; iteration < 20; ++iteration) {
+    observeIteration();
   }
 
   if (expectCommittedRole(&dp, cocclTrainingRoleDataParallel, "DP") ||
@@ -1095,6 +1140,7 @@ int main() {
       testTrainingConfigRequiresParallelSizes() ||
       testOperationDescriptors() ||
       testIterationDetection() ||
+      testCallsPerIterationIgnoresPartialSuffix() ||
       testTensorParallelCommunicationModes() ||
       testConfiguredDataParallelStrategies() ||
       testConfiguredParallelSizes() ||
