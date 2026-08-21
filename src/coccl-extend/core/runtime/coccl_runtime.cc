@@ -141,7 +141,7 @@ ncclResult_t resolvePreparedCompressors(cocclPreparedCall* prepared) {
         compressorDatatypeSupported(
             prepared->info.datatype, resolved.compressor);
     prepared->compressors.thresholdBytes = resolved.thresholdBytes;
-    INFO(NCCL_TUNING,
+    INFO(COCCL_RUNTIME,
          "COCCL route comm=%p hash=%llu role=%s operation=%s policy=%s "
          "scope=%s compressor=%s",
          prepared->info.comm,

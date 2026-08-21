@@ -73,9 +73,8 @@ export UB_SKIPMC=${UB_SKIPMC:-1}
 export TORCH_FORCE_NO_WEIGHTS_ONLY_LOAD=${TORCH_FORCE_NO_WEIGHTS_ONLY_LOAD:-true}
 
 export NCCL_HOME="$coccl_root/build"
-plugin_root="$coccl_root/build/obj/coccl-extend/compressor_plugin/libcompress"
 export PATH="$CUDA_HOME/bin:$PATH"
-export LD_LIBRARY_PATH="$NCCL_HOME/lib:$plugin_root:$CUDA_HOME/lib64:${LD_LIBRARY_PATH:-}"
+export LD_LIBRARY_PATH="$NCCL_HOME/lib:$CUDA_HOME/lib64:${LD_LIBRARY_PATH:-}"
 export LD_PRELOAD="$NCCL_HOME/lib/libnccl.so.2${LD_PRELOAD:+:$LD_PRELOAD}"
 export NCCL_DEBUG=${NCCL_DEBUG:-WARN}
 export NCCL_BUFFSIZE=${NCCL_BUFFSIZE:-33554432}

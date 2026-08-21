@@ -135,7 +135,7 @@ static void logIterationSequencesLocked(
         sequence += ",...+";
         sequence += std::to_string(matchingEvents - loggedEvents);
       }
-      INFO(NCCL_TUNING,
+      INFO(COCCL_TUNING,
            "COCCL training comm=%p hash=%llu iteration=%zu/%zu sequence=[%s]",
            state->comm,
            (unsigned long long)state->descriptor.commHash,
@@ -176,7 +176,7 @@ static void commitTraceLocked(
       state->routingActivationCall =
           2ULL * (uint64_t)targetIterations * callsPerIteration;
     }
-    INFO(NCCL_TUNING,
+    INFO(COCCL_TUNING,
          "COCCL training comm=%p hash=%llu rank=%d nodes=%d ranks=%d role=%s "
          "confidence=%.3f calls=%llu medianBytes=%zu sizeConsistency=%.3f "
          "cycleSupport=%.3f overlapSupport=%.3f orderSupport=%.3f AG/RS=%.3f "
@@ -202,10 +202,7 @@ static int configuredIterations() {
   return cocclGetConfig().training.observationIterations;
 }
 
-static size_t configuredMaxEvents() {
-  return std::clamp(cocclGetConfig().training.maxEvents,
-                    (size_t)256, (size_t)1024 * 1024);
-}
+constexpr size_t kMaxTrainingEvents = 65536;
 
 static uint64_t monotonicTimeNs() {
   struct timespec now = {};
@@ -255,13 +252,13 @@ void cocclTrainingAssistRegister(ncclComm_t comm) {
     cocclTrainingAssistComms.emplace(comm, std::move(state));
     inserted = true;
     if (cocclTrainingEvents.empty()) {
-      cocclTrainingEvents.reserve(configuredMaxEvents());
+      cocclTrainingEvents.reserve(kMaxTrainingEvents);
     }
   }
   pthread_mutex_unlock(&cocclTrainingAssistLock);
 
   if (inserted) {
-    INFO(NCCL_TUNING,
+    INFO(COCCL_TUNING,
          "COCCL training registered comm=%p id=%llu hash=%llu rank=%d ranks=%d nodes=%d localRanks=%d",
          comm, (unsigned long long)descriptor.communicatorId,
          (unsigned long long)descriptor.commHash, descriptor.rank,
@@ -317,7 +314,7 @@ void cocclTrainingAssistObserve(
     if (state->second->routingActivationCall != 0 &&
         state->second->observedCalls ==
             state->second->routingActivationCall) {
-      INFO(NCCL_TUNING,
+      INFO(COCCL_TUNING,
            "COCCL training comm=%p hash=%llu role=%s routing-ready call=%llu",
            state->second->comm,
            (unsigned long long)state->second->descriptor.commHash,
@@ -333,7 +330,7 @@ void cocclTrainingAssistObserve(
     state->second->classification.candidateRole = topologyRole;
     state->second->classification.confidence = 1.0;
     state->second->classification.committed = true;
-    INFO(NCCL_TUNING,
+    INFO(COCCL_TUNING,
          "COCCL training comm=%p hash=%llu rank=%d nodes=%d ranks=%d "
          "role=%s confidence=1.000 source=configured-size",
          state->second->comm,
@@ -351,8 +348,7 @@ void cocclTrainingAssistObserve(
   cocclTrainingEvents.push_back(event);
 
   int targetIterations = configuredIterations();
-  size_t maxEvents = configuredMaxEvents();
-  bool reachedLimit = cocclTrainingEvents.size() >= maxEvents;
+  bool reachedLimit = cocclTrainingEvents.size() >= kMaxTrainingEvents;
   size_t firstDetectionPoint =
       (size_t)targetIterations * kMinimumCycleEvents;
   bool detectionPoint = cocclTrainingEvents.size() >= firstDetectionPoint;

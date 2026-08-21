@@ -33,11 +33,12 @@ If no NCCL dependency is shown, that PyTorch build embeds NCCL statically and
 cannot be redirected with `LD_LIBRARY_PATH` or `LD_PRELOAD`. Use a dynamically
 linked PyTorch build. Do not overwrite the system NCCL installation.
 
-`train_qwen_coccl.sh` prepends `build/lib/libnccl.so.2` through `LD_PRELOAD`
-and adds the plugin directory to `LD_LIBRARY_PATH`. Its startup output prints
-the selected COCCL config. To inspect the library before a full run, use the
-same environment and repeat the `ldd` command; `libnccl.so.2` should resolve to
-the COCCL build directory.
+`train_qwen_coccl.sh` prepends `build/lib/libnccl.so.2` through `LD_PRELOAD`.
+Compressor DSOs are loaded from `compressor_plugins.library_path` in the TOML
+configuration, so the plugin directory does not belong in `LD_LIBRARY_PATH`.
+The startup output prints the selected COCCL config. To inspect the library
+before a full run, use the same environment and repeat the `ldd` command;
+`libnccl.so.2` should resolve to the COCCL build directory.
 
 ## Configure Paths And Topology
 
@@ -56,8 +57,7 @@ Edit `training_envs.sh` once or export the same variables before launch:
 The job computes `DP = world_size / (TP * PP * CP)`. The selected TOML must
 declare matching values in `training.classifier`. `dp_strategy` must match the
 framework optimizer (`ddp`, sharded distributed optimizer/`sdp`, or `fsdp`),
-and `sequence_parallel` must match the TP communication pattern. The current
-`context_parallel` field records CP use but does not select a separate policy.
+and `sequence_parallel` must match the TP communication pattern.
 
 Machine-specific NCCL settings such as `NCCL_SOCKET_IFNAME`, `NCCL_IB_HCA`,
 and `CUDA_VISIBLE_DEVICES` remain the user's responsibility.
@@ -120,7 +120,7 @@ selected codec for training.
 Use tuning logs to verify the detected role and selected policy:
 
 ```bash
-NCCL_DEBUG=INFO NCCL_DEBUG_SUBSYS=TUNING \
+NCCL_DEBUG=INFO NCCL_DEBUG_SUBSYS=COCCL_TUNING \
 bash train_qwen_coccl.sh qwen3 2 4 0
 ```
 

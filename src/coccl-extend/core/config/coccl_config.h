@@ -115,14 +115,12 @@ struct cocclAutotuneConfig {
 
 struct cocclTrainingConfig {
   int observationIterations = 5;
-  size_t maxEvents = 65536;
   int dataParallelSize = 1;
   int tensorParallelSize = 1;
   int pipelineParallelSize = 1;
   cocclDataParallelStrategy dataParallelStrategy =
       cocclDataParallelStrategy::Sdp;
   bool sequenceParallel = false;
-  bool contextParallel = false;
 };
 
 struct cocclConfig {

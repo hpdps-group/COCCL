@@ -30,14 +30,14 @@ echo "Building COCCL in $coccl_root"
 echo "CUDA_HOME=$CUDA_HOME MPI_HOME=$MPI_HOME CMAKE=$(command -v cmake) CUDA_ARCH=$cuda_arch"
 
 make -C "$coccl_root" -j "$build_jobs" src.build \
-  CUDA_HOME="$CUDA_HOME" NVCC_GENCODE="$nvcc_gencode"
+  DEBUG=0 CUDA_HOME="$CUDA_HOME" NVCC_GENCODE="$nvcc_gencode"
 
 make -C "$coccl_root" -f src/coccl-extend/Makefile coccl-config-check \
   BUILDDIR="$NCCL_HOME" NCCLDIR="$coccl_root" \
   COCCL_ROOT=src/coccl-extend CUDA_HOME="$CUDA_HOME"
 
 make -C "$coccl_root/tests/coccl-tests" -j "$build_jobs" \
-  MPI=1 MPI_HOME="$MPI_HOME" CUDA_HOME="$CUDA_HOME" NCCL_HOME="$NCCL_HOME" \
+  DEBUG=0 MPI=1 MPI_HOME="$MPI_HOME" CUDA_HOME="$CUDA_HOME" NCCL_HOME="$NCCL_HOME" \
   NVCC_GENCODE="$nvcc_gencode"
 
 echo "COCCL library: $NCCL_HOME/lib/libnccl.so.2"

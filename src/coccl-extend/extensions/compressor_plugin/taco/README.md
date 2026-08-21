@@ -1,6 +1,9 @@
-# TACO: Efficient Communication Compression for Tensor-Parallel LLM Training
+# TACO
 
-This repository provides the implementation of **TACO**, a communication compression framework designed for efficient large-scale tensor-parallel LLM training.
+TACO is an FP8 communication compressor for tensor-parallel large-language
+model training. This directory contains its COCCL adapter and CUDA kernels.
+General ABI, build, and integration requirements are documented in the
+[compressor plugin guide](../README.md).
 
 ---
 
@@ -29,15 +32,6 @@ To address this, we propose **TACO (Tensor-parallel Adaptive COmmunication compr
 
 ---
 
-## ⚙️ Build COCCL Communication Library
-
-```bash
-cd coccl-acc
-bash build.sh
-```
-
----
-
 ## 🧩 TACO Compression Operator
 
 Source directory:
@@ -57,26 +51,21 @@ make
 
 ## ⚙️ Compression Configuration
 
-Configuration path:
+TACO accepts `fp8Format = "E4M3"|"E5M2"`, `saturate = true|false`,
+`groupSize = 32|64|128|256|512`, `targetRange`, `lambda`, and an optional
+positive `fp8MaxValue`. A value of `0.0` for `fp8MaxValue` uses the selected
+format's default.
 
-```bash
-src/coccl-extend/extensions/configs
-```
+```toml
+[training.tp.all_reduce.default]
+compressor = "taco"
 
-### Key Parameters
-
-```bash
-fp8_format: 1        # 0=E4M3, 1=E5M2
-saturation: 1        # Enable saturation
-use_scale: 1         # Enable scaling
-group_size: 256      # Group size
-target_range: 57734.0f
-safe_mode: 0         # Disable safe mode
-# Hadamard Transform
-use_as_hadamard: 1   # Enable Hadamard transform
-lambda: 1e-6f
-fp8_max_val: 57734.0f
-pivotSwap: 0
+[training.tp.all_reduce.default.config]
+fp8Format = "E4M3"
+saturate = true
+groupSize = 128
+targetRange = 448.0
+lambda = 1e-6
 ```
 
 ---
@@ -86,22 +75,12 @@ pivotSwap: 0
 | Method   | Val Loss ↓ | Test Loss ↓ | Val Deg. ↓ | Test Deg. ↓ |
 | -------- | ---------- | ----------- | ---------- | ----------- |
 | Baseline | 2.389899   | 2.344701    | –          | –           |
-| TahQuant | 2.458742   | 2.413642    | +2.88%     | +2.94%      |
 | **TACO** | 2.395784   | 2.351210    | **+0.25%** | **+0.28%**  |
 
 ---
 
 ![Ablation](Ablation.png)
 
-
-## 📂 Training Entry
-
-Training scripts for GPT2 and Qwen2.5 are located at:
-
-```bash
-examples\training_scripts\GPT2\train_gpt_coccl.sh
-examples\training_scripts\Qwen2.5\train_qwen_coccl.sh
-```
 
 ## 📈 Comparison Results
 

@@ -157,8 +157,6 @@ std::vector<std::string> cocclFormatEffectiveConfig(
                       config.autotune.allReduceAlgorithm)));
   lines.push_back("training.observation_iterations = " +
                   std::to_string(config.training.observationIterations));
-  lines.push_back("training.max_events = " +
-                  std::to_string(config.training.maxEvents));
   lines.push_back("training.classifier.data_parallel_size = " +
                   std::to_string(config.training.dataParallelSize));
   lines.push_back("training.classifier.tensor_parallel_size = " +
@@ -170,9 +168,6 @@ std::vector<std::string> cocclFormatEffectiveConfig(
                       config.training.dataParallelStrategy)));
   lines.push_back("training.classifier.sequence_parallel = " +
                   std::string(config.training.sequenceParallel
-                                  ? "true" : "false"));
-  lines.push_back("training.classifier.context_parallel = " +
-                  std::string(config.training.contextParallel
                                   ? "true" : "false"));
 
   for (const cocclConfigPolicyView& policy :

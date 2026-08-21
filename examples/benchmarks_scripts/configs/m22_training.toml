@@ -10,7 +10,6 @@ library_path = "../../../build/obj/coccl-extend/compressor_plugin/libcompress"
 
 [training]
 observation_iterations = 5
-max_events = 65536
 
 [training.classifier]
 data_parallel_size = 2
@@ -18,7 +17,6 @@ tensor_parallel_size = 2
 pipeline_parallel_size = 2
 dp_strategy = "sdp"
 sequence_parallel = true
-context_parallel = false
 
 [training.dp.all_gather.default]
 compressor = "sdp4bit"

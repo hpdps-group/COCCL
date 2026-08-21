@@ -327,17 +327,15 @@ bool parseTraining(const toml::table* table, cocclConfig* config,
     return fail(error, "training is required in training mode");
   }
   if (table != nullptr &&
-      !validateKeys(*table, {"observation_iterations", "max_events",
-                             "classifier", "dp", "tp", "pp"},
+      !validateKeys(*table, {"observation_iterations", "classifier", "dp",
+                             "tp", "pp"},
                     path, error)) {
     return false;
   }
   const toml::table empty;
   const toml::table& parent = table == nullptr ? empty : *table;
   if (!readInt(parent, "observation_iterations",
-               &config->training.observationIterations, 2, 100, path, error) ||
-      !readSize(parent, "max_events", &config->training.maxEvents, path,
-                error)) {
+               &config->training.observationIterations, 2, 100, path, error)) {
     return false;
   }
 
@@ -360,7 +358,7 @@ bool parseTraining(const toml::table* table, cocclConfig* config,
     if (!validateKeys(*classifier,
                       {"data_parallel_size", "tensor_parallel_size",
                        "pipeline_parallel_size", "dp_strategy",
-                       "sequence_parallel", "context_parallel"},
+                       "sequence_parallel"},
                       classifierPath, error) ||
         !readParallelSize("data_parallel_size",
                           &config->training.dataParallelSize) ||
@@ -372,9 +370,6 @@ bool parseTraining(const toml::table* table, cocclConfig* config,
                     classifierPath, error) ||
         !readBool(*classifier, "sequence_parallel",
                   &config->training.sequenceParallel, classifierPath,
-                  error) ||
-        !readBool(*classifier, "context_parallel",
-                  &config->training.contextParallel, classifierPath,
                   error)) {
       return false;
     }

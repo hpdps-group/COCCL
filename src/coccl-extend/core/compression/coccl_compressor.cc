@@ -124,7 +124,7 @@ ncclResult_t acquirePersistent(void* opaque, size_t slot, size_t bytes,
     cudaError_t result = cudaMalloc(&persistent.data, bytes);
     if (result != cudaSuccess) return ncclUnhandledCudaError;
     persistent.bytes = bytes;
-    INFO(NCCL_INIT,
+    INFO(COCCL_COMPRESS,
          "COCCL compressor %s persistent device %d slot %zu bytes %zu",
          policy->plugin->name, execution->cudaDev, slot, bytes);
   }
@@ -342,7 +342,7 @@ ncclResult_t execute(CompressorPolicy* policy, cocclCompressorCall* call,
     DeviceResources& device = policy->resources[cudaDev];
     if (resources.scratchBytes > device.scratchPeakBytes) {
       device.scratchPeakBytes = resources.scratchBytes;
-      INFO(NCCL_INIT, "COCCL compressor %s scratch device %d peak %zu",
+      INFO(COCCL_COMPRESS, "COCCL compressor %s scratch device %d peak %zu",
            policy->plugin->name, cudaDev, device.scratchPeakBytes);
     }
   }
@@ -506,7 +506,7 @@ ncclResult_t cocclCompressorRuntimeDestroy(const ncclComm_t comm) {
         result = ncclUnhandledCudaError;
       }
     }
-    INFO(NCCL_INIT,
+    INFO(COCCL_COMPRESS,
          "COCCL compressor %s release device %d persistent %zu scratch_peak %zu states %zu",
          policy->plugin->name, comm->cudaDev, persistentBytes,
          resources->second.scratchPeakBytes, resources->second.states.size());

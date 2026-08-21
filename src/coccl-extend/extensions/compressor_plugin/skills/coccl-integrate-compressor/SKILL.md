@@ -89,8 +89,6 @@ the plugin's build system; add only the adapter and build bridge COCCL needs.
   `src/coccl-extend/extensions/compressor_plugin/zfp/`
 - Framed variable-length codec with an offline CMake bridge:
   `src/coccl-extend/extensions/compressor_plugin/dietgpu/`
-- Optional scratch without state:
-  `src/coccl-extend/extensions/compressor_plugin/tahquant/`
 - Lazy instance and persistent memory:
   `src/coccl-extend/extensions/compressor_plugin/sdp4bit/`
 

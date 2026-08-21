@@ -133,39 +133,6 @@ bool checkSdp4Bit(const LoadedPlugin& plugin) {
       {{"groupCount", "127"}, {"quantBits", "4"}}, false) == nullptr;
 }
 
-bool checkTahQuant(const LoadedPlugin& plugin) {
-  const uint64_t fused = cocclCompressorCapabilityDecompressReduce |
-      cocclCompressorCapabilityDecompressReduceCompress;
-  if (!hasCapabilities(plugin, fused)) return false;
-  void* config = parseConfig(plugin,
-      {{"groupCount", "128"}, {"quantBits", "4"},
-       {"quantType", "Symmetric"}}, true);
-  if (config == nullptr || config == reinterpret_cast<void*>(1)) return false;
-  const bool size =
-      checkBound(plugin, config, cocclCompressorOperationCompress,
-                 1024, 4, ncclFloat32, 544) &&
-      checkBound(plugin, config,
-                 cocclCompressorOperationDecompressReduceCompress,
-                 1024, 4, ncclFloat32, 544);
-  plugin.descriptor->destroyConfig(config);
-  if (!size) return false;
-
-  void* pivot = parseConfig(plugin,
-      {{"groupCount", "128"}, {"quantBits", "4"},
-       {"quantType", "Symmetric"}, {"hadamard", "true"},
-       {"pivotSwap", "true"}}, true);
-  if (pivot == nullptr || pivot == reinterpret_cast<void*>(1)) return false;
-  const bool pivotSize = checkBound(plugin, pivot,
-      cocclCompressorOperationCompress, 1024, 4, ncclFloat32, 616);
-  plugin.descriptor->destroyConfig(pivot);
-  if (!pivotSize) return false;
-  return parseConfig(plugin,
-      {{"groupCount", "128"}, {"quantBits", "2"}}, false) == nullptr &&
-      parseConfig(plugin,
-      {{"groupCount", "128"}, {"quantBits", "4"},
-       {"pivotSwap", "true"}}, false) == nullptr;
-}
-
 bool checkTaco(const LoadedPlugin& plugin) {
   if (plugin.descriptor->capabilities !=
       COCCL_COMPRESSOR_REQUIRED_CAPABILITIES) return false;
@@ -204,14 +171,13 @@ bool checkZfp(const LoadedPlugin& plugin) {
 
 int main(int argc, char** argv) {
   if (argc != 2) return 2;
-  const char* names[] = {"sdp4bit", "tahquant", "taco", "zfp"};
-  LoadedPlugin plugins[4];
-  for (int index = 0; index < 4; ++index) {
+  const char* names[] = {"sdp4bit", "taco", "zfp"};
+  LoadedPlugin plugins[3];
+  for (int index = 0; index < 3; ++index) {
     if (!loadPlugin(argv[1], names[index], &plugins[index])) return 1;
   }
   const bool passed = checkSdp4Bit(plugins[0]) &&
-      checkTahQuant(plugins[1]) && checkTaco(plugins[2]) &&
-      checkZfp(plugins[3]);
+      checkTaco(plugins[1]) && checkZfp(plugins[2]);
   for (LoadedPlugin& plugin : plugins) dlclose(plugin.library);
   if (!passed) return 1;
   printf("COCCL M9 fixed compressor tests passed\n");

@@ -38,7 +38,7 @@ mkdir -p "$config_root"
 export CUDA_HOME="$cuda_home"
 export NCCL_HOME="$coccl_root/build"
 export PATH="$CUDA_HOME/bin:$MPI_HOME/bin:$PATH"
-export LD_LIBRARY_PATH="$NCCL_HOME/lib:$plugin_root:$CUDA_HOME/lib64:$MPI_HOME/lib:${LD_LIBRARY_PATH:-}"
+export LD_LIBRARY_PATH="$NCCL_HOME/lib:$CUDA_HOME/lib64:$MPI_HOME/lib:${LD_LIBRARY_PATH:-}"
 export NCCL_DEBUG=${NCCL_DEBUG:-WARN}
 export NCCL_BUFFSIZE=${NCCL_BUFFSIZE:-16777216}
 

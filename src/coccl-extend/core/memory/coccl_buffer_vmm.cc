@@ -130,7 +130,7 @@ ncclResult_t ensureRegistration(VmmBlock* block, ncclComm_t comm) {
   block->registrations.push_back(
       VmmRegistration{comm, block->ptr, block->capacity, handle});
   block->pool->registeredBytes += block->capacity;
-  INFO(NCCL_INIT,
+  INFO(COCCL_MEMORY,
        "COCCL VMM registration comm %p bytes %zu total %zu", comm,
        block->capacity, block->pool->registeredBytes);
   return ncclSuccess;
@@ -179,7 +179,7 @@ ncclResult_t createBlock(VmmPool* pool, size_t requested,
   pool->virtualBytes += capacity;
   *result = block.get();
   pool->blocks.push_back(std::move(block));
-  INFO(NCCL_INIT,
+  INFO(COCCL_MEMORY,
        "COCCL VMM allocation comm %p requested %zu reserved %zu virtual %zu physical %zu registered %zu",
        pool->ownerComm, requested, capacity, pool->virtualBytes,
        pool->physicalBytes, pool->registeredBytes);
@@ -234,7 +234,7 @@ ncclResult_t growBlock(VmmBlock* block, size_t requested) {
   block->capacity = newCapacity;
   pool->virtualBytes += newCapacity - oldCapacity;
   resetSlices(block);
-  INFO(NCCL_INIT,
+  INFO(COCCL_MEMORY,
        "COCCL VMM growth comm %p requested %zu reserved %zu virtual %zu physical %zu registered %zu",
        pool->ownerComm, requested, newCapacity, pool->virtualBytes,
        pool->physicalBytes, pool->registeredBytes);
@@ -436,7 +436,7 @@ ncclResult_t vmmDestroy(VmmPool* pool) {
   CUDACHECK(cudaDeviceSynchronize());
   for (auto& block : pool->blocks) NCCLCHECK(releaseBlock(block.get()));
   pool->blocks.clear();
-  INFO(NCCL_INIT,
+  INFO(COCCL_MEMORY,
        "COCCL VMM release comm %p virtual %zu physical %zu registered %zu remaining_virtual %zu remaining_physical %zu remaining_registered %zu",
        pool->ownerComm, virtualBytes, physicalBytes, registeredBytes,
        pool->virtualBytes, pool->physicalBytes, pool->registeredBytes);

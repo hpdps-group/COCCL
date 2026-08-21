@@ -153,7 +153,7 @@ ncclResult_t cocclSelectAlgorithm(cocclPreparedCall* prepared) {
   ncclResult_t result = selectCandidate(prepared);
   const cocclInfo& info = prepared->info;
   if (result == ncclSuccess && info.comm->rank == 0) {
-    INFO(NCCL_TUNING,
+    INFO(COCCL_TUNING,
          "COCCL select bytes=%g ranks=%d local=%d nodes=%d one=%g two=%g triple=%g model=%d -> %s",
          messageBytes(*prepared), info.comm->nRanks,
          info.comm->localRanks, info.comm->nNodes, prepared->oneShotUs,

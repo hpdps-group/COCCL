@@ -27,7 +27,7 @@ ncclResult_t initPool(ncclComm_t comm, CommBufferPool* pool) {
   NCCLCHECK(vmmInit(&pool->vmm, comm, &available));
   if (available) pool->backend = BufferBackend::Vmm;
 #endif
-  INFO(NCCL_INIT, "COCCL buffer comm %p backend %s", comm,
+  INFO(COCCL_MEMORY, "COCCL buffer comm %p backend %s", comm,
        pool->backend == BufferBackend::Vmm ? "VMM" : "legacy");
   return ncclSuccess;
 }
@@ -49,7 +49,7 @@ ncclResult_t destroyPool(CommBufferPool* pool) {
 #endif
   const size_t releasedBytes = pool->totalBytes;
   NCCLCHECK(legacyDestroy(pool));
-  INFO(NCCL_INIT,
+  INFO(COCCL_MEMORY,
        "COCCL legacy buffer comm %p released %zu bytes", pool->ownerComm,
        releasedBytes);
   return ncclSuccess;

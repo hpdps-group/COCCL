@@ -13,12 +13,42 @@ COCCL currently accepts compressor ABI v8. The SDK generates the ABI
 descriptor, configuration lifecycle, operation dispatch, and fixed entry
 symbol. Plugin authors implement typed algorithm code rather than the raw ABI.
 
+## Source Ownership
+
+`src/coccl-extend/extensions/` is the user-modifiable part of COCCL:
+
+- `primitives/` defines collective recipes and explicit `coccl*Comp*` entry
+  points.
+- `compressor_plugin/` contains compressor adapters, codec kernels, and vendor
+  dependencies.
+- `configs/` contains editable normal-mode and training-mode policies.
+
+`src/coccl-extend/core/` owns routing, pipeline planning and execution,
+compression dispatch, memory, configuration parsing, autotuning, training
+classification, and COCCL CUDA kernels. Compressor authors do not modify Core.
+Core never includes plugin headers, and plugins may include only
+`include/compressor_plugin/` plus their own sources.
+
+`include/runtime/` is the NCCL-to-COCCL integration boundary.
+`include/compressor_plugin/` is the public ABI and C++ SDK. This dependency
+direction keeps a newly integrated codec independent of COCCL's scheduling and
+workspace implementation.
+
 ## Choose The Encoding Model
 
-| Model | Use it when | Plugin contract |
-| --- | --- | --- |
-| Fixed layout | Shape and configuration determine one equal encoded size per logical chunk. | Implement `compress()` and `decompress()`, then commit exact bytes with `Output::commitBytes()`. |
-| Framed layout | Each logical chunk can produce a different encoded size. | Declare `static constexpr bool kFramed = true`, emit one fixed-capacity slot and one metadata entry per chunk, then call `Output::commitFrames()`. |
+Use a **fixed layout** when shape and configuration determine one equal encoded
+size for every logical chunk. Implement `compress()` and `decompress()`, then
+commit the exact total with `Output::commitBytes()`.
+
+Use a **framed layout** when different chunks can produce different payload
+sizes. Declare:
+
+```cpp
+static constexpr bool kFramed = true;
+```
+
+Encode each chunk into its own fixed-capacity slot, write one metadata entry
+per chunk, and finish with `Output::commitFrames()`.
 
 Pack/Unpack, pipeline slicing, rank layout, metadata exchange, and NCCL
 communication are Core responsibilities. A normal plugin receives contiguous
@@ -202,27 +232,34 @@ existing CMake project; invoke it from the bridge.
 
 ## Built-In Plugin Parameters
 
-| Plugin | Key and default | Effect and constraints |
-| --- | --- | --- |
-| `sdp4bit` | `groupCount = 2048` | Values per quantization group. Hadamard kernels cap their effective group at 128. |
-| `sdp4bit` | `quantBits = 8` | Quantized payload width; only `4` and `8` are accepted. |
-| `sdp4bit` | `quantType = "Symmetric"` | `Symmetric` or `Asymmetric` metadata and quantization. |
-| `sdp4bit` | `hadamard = false` | Enables the Hadamard transform path. |
-| `sdp4bit` | `pipelineSize = 1` | Number of persistent subAdd state slots. It is not the COCCL pipeline depth. |
-| `sdp4bit` | `subAdd = false` | Enables stateful delta compression; it cannot be combined with Hadamard. |
-| `tahquant` | `groupCount = 2048` | Values per quantization group; the encoded shape must contain complete groups. |
-| `tahquant` | `quantBits = 8` | Quantized payload width; only `4` and `8` are accepted. |
-| `tahquant` | `quantType = "Symmetric"` | `Symmetric` or `Asymmetric` quantization. |
-| `tahquant` | `hadamard = false` | Enables the Hadamard path and caps the effective group at 128. |
-| `tahquant` | `pivotSwap = false` | Emits pivot metadata; valid only with Hadamard enabled. |
-| `taco` | `fp8Format = "E4M3"` | Selects `E4M3` or `E5M2`. |
-| `taco` | `saturate = true` | Uses finite saturation during FP8 conversion. |
-| `taco` | `groupSize = 128` | Accepted groups are `32`, `64`, `128`, `256`, and `512`. |
-| `taco` | `targetRange = 448.0` | Target range used to derive the quantization scale. |
-| `taco` | `lambda = 1e-6` | Stabilizer added to the variance estimate. |
-| `taco` | `fp8MaxValue = 0.0` | Optional positive FP8 maximum override; `0` uses the format default. |
-| `zfp` | `rate = 4` | Fixed rate in `1..64` bits per value. |
-| `dietgpu` | `probBits = 10` | ANS probability precision; only `9`, `10`, and `11` are accepted. The codec is framed and bytewise lossless. |
+### SDP4Bit
+
+`groupCount = 2048` controls values per quantization group, and
+`quantBits = 8` accepts either 4 or 8 bits. `quantType = "Symmetric"` also
+accepts `"Asymmetric"`. Set `hadamard = true` for the Hadamard path; its
+effective group is capped at 128.
+
+`subAdd = true` enables stateful delta compression and cannot be combined with
+Hadamard. `pipelineSize = 1` controls persistent subAdd state slots; it is not
+the COCCL pipeline depth.
+
+### TACO
+
+`fp8Format = "E4M3"` also accepts `"E5M2"`. `saturate = true` enables finite
+saturation. `groupSize = 128` accepts 32, 64, 128, 256, or 512. The scale
+calculation uses `targetRange = 448.0` and `lambda = 1e-6`.
+`fp8MaxValue = 0.0` uses the selected format's default maximum; set a positive
+value to override it.
+
+### ZFP
+
+`rate = 4` is the fixed rate in bits per value and accepts `1..64`.
+
+### dietGPU
+
+`probBits = 10` controls ANS probability precision and accepts 9, 10, or 11.
+dietGPU is framed, bytewise lossless, and can route Int8, Int32, and Int64 in
+addition to floating-point data.
 
 Unknown keys are rejected by `ConfigReader::finish()`. The examples in
 `../configs/` are the authoritative policy examples.
@@ -257,24 +294,23 @@ Built-in reference points:
 - [taco](taco): small configured fixed-layout plugin.
 - [zfp](zfp): existing CMake project behind a Makefile bridge.
 - [dietgpu](dietgpu): framed variable-length lossless codec.
-- [tahquant](tahquant): optional scratch without persistent state.
 - [sdp4bit](sdp4bit): fused reductions plus lazy state and persistent memory.
 
 ## Integrate With The Codex Skill
 
-This repository includes
-[`$coccl-integrate-compressor`](../../../../.codex/skills/coccl-integrate-compressor/SKILL.md).
-Start Codex from the COCCL repository and provide the codec source path,
+The integration skill lives beside the plugins:
+[`$coccl-integrate-compressor`](skills/coccl-integrate-compressor/SKILL.md).
+Open COCCL in Codex, reference that skill, and provide the codec source path,
 plugin name, fixed or framed layout, supported datatypes, build system, desired
 TOML parameters, and target GPU architecture.
 
 Example request:
 
 ```text
-Use $coccl-integrate-compressor to integrate /data/code/mycodec as a fixed-size
-plugin named mycodec. Preserve its CMake build, support FP32, expose bits=4|8,
-add a normal AllGather TOML example, and validate for sm_80 without running a
-top-level full rebuild.
+Use [$coccl-integrate-compressor](src/coccl-extend/extensions/compressor_plugin/skills/coccl-integrate-compressor/SKILL.md)
+to integrate /data/code/mycodec as a fixed-size plugin named mycodec. Preserve
+its CMake build, support FP32, expose bits=4|8, add a normal AllGather TOML
+example, and validate for sm_80 without running a top-level full rebuild.
 ```
 
 The skill reads the current ABI v8 SDK, preserves the codec implementation and

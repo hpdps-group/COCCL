@@ -82,7 +82,7 @@ ncclResult_t createBlock(CommBufferPool* pool, size_t bytes,
   *result = block.get();
   pool->totalBytes += blockBytes;
   pool->blocks.push_back(std::move(block));
-  INFO(NCCL_INIT,
+  INFO(COCCL_MEMORY,
        "COCCL legacy buffer comm %p allocated %zu bytes, total %zu",
        pool->ownerComm, blockBytes, pool->totalBytes);
   return ncclSuccess;

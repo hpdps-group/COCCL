@@ -1025,8 +1025,7 @@ static int testTrainingConfig() {
       config.training.pipelineParallelSize != 2 ||
       config.training.dataParallelStrategy !=
           cocclDataParallelStrategy::Sdp ||
-      !config.training.sequenceParallel ||
-      config.training.contextParallel) {
+      !config.training.sequenceParallel) {
     fprintf(stderr, "M22 training config failed to parse: %s\n",
             error.c_str());
     return 1;
@@ -1129,13 +1128,11 @@ static int testOperationDescriptors() {
 int main() {
   testConfig.runtime.mode = cocclRuntimeMode::Training;
   testConfig.training.observationIterations = 10;
-  testConfig.training.maxEvents = 65536;
   testConfig.training.dataParallelSize = 31;
   testConfig.training.tensorParallelSize = 29;
   testConfig.training.pipelineParallelSize = 23;
   testConfig.training.dataParallelStrategy = cocclDataParallelStrategy::Sdp;
   testConfig.training.sequenceParallel = true;
-  testConfig.training.contextParallel = false;
   if (testTrainingConfig() ||
       testTrainingConfigRequiresParallelSizes() ||
       testOperationDescriptors() ||

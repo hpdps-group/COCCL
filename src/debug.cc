@@ -16,7 +16,7 @@ static int pid = -1;
 static char hostname[1024];
 thread_local int ncclDebugNoWarn = 0;
 char ncclLastError[1024] = ""; // Global string for the last error in human readable form
-uint64_t ncclDebugMask = NCCL_INIT|NCCL_ENV; // Default debug sub-system mask is INIT and ENV
+uint64_t ncclDebugMask = NCCL_INIT|NCCL_ENV|COCCL_INIT; // Default mask includes NCCL and COCCL initialization
 FILE *ncclDebugFile = stdout;
 pthread_mutex_t ncclDebugLock = PTHREAD_MUTEX_INITIALIZER;
 std::chrono::steady_clock::time_point ncclEpoch;
@@ -85,6 +85,20 @@ void ncclDebugInit() {
         mask = NCCL_REG;
       } else if (strcasecmp(subsys, "COMPRESS") == 0) {
         mask = NCCL_COMPRESS;
+      } else if (strcasecmp(subsys, "COCCL") == 0) {
+        mask = COCCL_ALL;
+      } else if (strcasecmp(subsys, "COCCL_INIT") == 0) {
+        mask = COCCL_INIT;
+      } else if (strcasecmp(subsys, "COCCL_RUNTIME") == 0) {
+        mask = COCCL_RUNTIME;
+      } else if (strcasecmp(subsys, "COCCL_PIPELINE") == 0) {
+        mask = COCCL_PIPELINE;
+      } else if (strcasecmp(subsys, "COCCL_COMPRESS") == 0) {
+        mask = COCCL_COMPRESS;
+      } else if (strcasecmp(subsys, "COCCL_MEMORY") == 0) {
+        mask = COCCL_MEMORY;
+      } else if (strcasecmp(subsys, "COCCL_TUNING") == 0) {
+        mask = COCCL_TUNING;
       } else if (strcasecmp(subsys, "ALL") == 0) {
         mask = NCCL_ALL;
       } 

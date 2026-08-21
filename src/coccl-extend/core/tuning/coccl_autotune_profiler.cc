@@ -490,7 +490,7 @@ void publishP2pModel(bool interNode, const cocclLinearModel& model, int rank) {
   }
   pthread_mutex_unlock(&cocclAutotuneLock);
   if (rank == 0) {
-    INFO(NCCL_TUNING,
+    INFO(COCCL_TUNING,
          "COCCL profile %s P2P: time_us=%g+%g*bytes",
          interNode ? "inter" : "intra", model.alphaUs,
          model.betaUsPerByte);
@@ -512,7 +512,7 @@ void publishCompressorModel(const cocclProfiledCompressor& profiled,
   cocclPerformanceModel.compressorModels[profiled.compressor] = model;
   pthread_mutex_unlock(&cocclAutotuneLock);
   if (rank == 0) {
-    INFO(NCCL_TUNING,
+    INFO(COCCL_TUNING,
          "COCCL compressor %s policy=%s-%s model: time_us=%g+%g*bytes ratio=%g",
          compressorName(compressor), operationName(profiled.policy.operation),
          scopeName(profiled.policy.scope), model.time.alphaUs,
@@ -582,7 +582,7 @@ ncclResult_t cocclAutotuneEnsureGlobalModels(ncclComm_t measurementComm) {
     return ncclSuccess;
   }
   if (measurementComm->rank == 0) {
-    INFO(NCCL_TUNING,
+    INFO(COCCL_TUNING,
          "COCCL fitting global models at %zu sizes from %zu to %zu bytes",
          sampleSizes.size(), sampleSizes.front(), sampleSizes.back());
   }

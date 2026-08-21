@@ -4,7 +4,7 @@ A collective communication library supporting easy integration and configuration
 
 ## Introduction
 
-COCCL is a compression-aware GPU collective communication library built upon NCCL 2.21.5. It systematically integrates compression support into NCCL and provides NCCL-compatible APIs with a suite of collective communication pipelines optimized by high-performance GPU compression techniques. COCCL is designed to be extensible, supporting customized compression operators through a unified compression programming model, with [SDP4Bit](https://github.com/ByteDance-Seed/SDP4Bit), [TACO](src/coccl-extend/extensions/compressor_plugin/taco), TAHQuant, ZFP, and dietGPU included by default. COCCL also introduces automatic algorithm selection and a two-level runtime overlap mechanism to hide compression overhead. We acknowledge that while some existing works support collective communication with compression, such as [1]-[5], COCCL is the first NCCL-based collective communication library to deeply integrate compression operators and co-design compression-aware algorithms for multiple collective primitives within GPU clusters.
+COCCL is a compression-aware GPU collective communication library built upon NCCL 2.21.5. It systematically integrates compression support into NCCL and provides NCCL-compatible APIs with a suite of collective communication pipelines optimized by high-performance GPU compression techniques. COCCL is designed to be extensible, supporting customized compression operators through a unified compression programming model, with [SDP4Bit](https://github.com/ByteDance-Seed/SDP4Bit), [TACO](src/coccl-extend/extensions/compressor_plugin/taco), [ZFP](https://github.com/LLNL/zfp), and [dietGPU](https://github.com/facebookresearch/dietgpu) included by default. COCCL also introduces automatic algorithm selection and a two-level runtime overlap mechanism to hide compression overhead. We acknowledge that while some existing works support collective communication with compression, such as [1]-[5], COCCL is the first NCCL-based collective communication library to deeply integrate compression operators and co-design compression-aware algorithms for multiple collective primitives within GPU clusters.
 
 
 For example, by utilizing SDP4Bit compression, COCCL achieves 2.60x, 2.58x, 5.66x, and 4.92x speedups on AllReduce, ReduceScatter, AllGather, and AlltoAll, respectively, compared to the original FP32-based communication. In end-to-end 3D-parallel training, the tuned COCCL-3D configuration improves GPT and Qwen2.5 training throughput by up to 1.24x while maintaining model accuracy. COCCL is particularly beneficial for applications requiring intensive collective communication, including large-scale model training, inference systems, and scientific computing.
@@ -62,7 +62,7 @@ the application:
 ```bash
 export COCCL_ROOT=/path/to/COCCL
 export NCCL_HOME=$COCCL_ROOT/build
-export LD_LIBRARY_PATH=$NCCL_HOME/lib:$NCCL_HOME/obj/coccl-extend/compressor_plugin/libcompress:${LD_LIBRARY_PATH:-}
+export LD_LIBRARY_PATH=$NCCL_HOME/lib:${LD_LIBRARY_PATH:-}
 export C_INCLUDE_PATH=$NCCL_HOME/include:${C_INCLUDE_PATH:-}
 export CPLUS_INCLUDE_PATH=$NCCL_HOME/include:${CPLUS_INCLUDE_PATH:-}
 ```
@@ -85,65 +85,61 @@ Ready-to-run single-node and multi-node benchmark workflows are documented in
 
 ## Integrating a compressor
 
-For source ownership and extension points, see
-[src/coccl-extend/README.md](src/coccl-extend/README.md). Compressor integration
-instructions are in
+Source ownership, the compressor SDK contract, a minimal plugin, built-in
+parameters, build validation, and the Codex integration skill are documented
+in one place:
 [src/coccl-extend/extensions/compressor_plugin/README.md](src/coccl-extend/extensions/compressor_plugin/README.md).
 
 ## Configuration
 
-COCCL is NCCL-compatible, so standard NCCL environment variables such as
-`NCCL_DEBUG`, `NCCL_IB_HCA`, and `NCCL_SOCKET_IFNAME` remain available. COCCL
-itself reads only two environment variables:
+### Enable COCCL
 
-| Variable | Meaning |
-| --- | --- |
-| `COCCL_ENABLE` | `1` enables COCCL routing; unset or `0` keeps native NCCL behavior. |
-| `COCCL_CONFIG_FILE` | Path to one process-wide schema-v3 TOML file. Required when `COCCL_ENABLE=1`. |
+COCCL keeps NCCL's environment interface. Enable routing and select one TOML
+file for the process:
 
-Configuration is loaded once per process. An invalid file disables COCCL for
-that process and reports the parser error through NCCL logging. Relative plugin
-paths are resolved relative to the TOML file.
+```bash
+export COCCL_ENABLE=1
+export COCCL_CONFIG_FILE=/path/to/coccl.toml
+```
 
-### Global settings
+Unset `COCCL_ENABLE`, or set it to `0`, to use native NCCL. Configuration is
+loaded once per process. Relative plugin paths are resolved from the TOML
+file, and an invalid configuration disables COCCL with a parser error.
 
-| TOML key | Default or accepted value | Effect |
-| --- | --- | --- |
-| `schema_version` | Required: `3` | Selects the configuration schema. |
-| `runtime.mode` | Required: `normal` or `training` | Selects operation-based policies or automatically classified DP/TP/PP policies. |
-| `runtime.compression_threshold_bytes` | `8388608` | Default minimum logical message size for automatic routing. COCCL compresses only when bytes are greater than the threshold. |
-| `compressor_plugins.compressors` | `[]` | Names of plugin DSOs to load, for example `sdp4bit` or `zfp`. Every compressor referenced by a policy must be listed. |
-| `compressor_plugins.library_path` | Empty | Directory containing `lib<name>.so`; required when the catalog is nonempty. |
-| `pipeline.depth` | `1`, range `1..16` | Number of slices in compression/communication overlap. |
+Standard NCCL settings such as `NCCL_IB_HCA`, `NCCL_SOCKET_IFNAME`, and
+`NCCL_BUFFSIZE` continue to work. COCCL logs use NCCL's logger:
 
-Explicit `coccl*Comp*` APIs still require a configured compressor policy, but
-they bypass the compression threshold. Calls through standard NCCL APIs use
-the threshold and fall back to native NCCL when the operation, datatype,
-shape, policy, or compressor is unsupported.
+```bash
+export NCCL_DEBUG=INFO
+export NCCL_DEBUG_SUBSYS=COCCL
+```
 
-Buffer settings control the communicator-owned temporary-memory pool:
+`COCCL` enables every COCCL subsystem. Select individual areas with
+`COCCL_INIT` for configuration and initialization, `COCCL_RUNTIME` for policy
+routing, `COCCL_PIPELINE` for pipeline execution, `COCCL_COMPRESS` for codec
+resources, `COCCL_MEMORY` for workspace allocation, or `COCCL_TUNING` for
+autotuning and training-role classification.
 
-| TOML key | Default | Effect |
-| --- | ---: | --- |
-| `buffer.legacy_block_bytes` | `0` | Minimum block size for the legacy `ncclMemAlloc` backend; `0` allocates to the current request size. |
-| `buffer.physical_chunk_bytes` | `8388608` | Physical mapping growth unit for the CUDA VMM backend. It must be greater than zero. |
-| `buffer.pool_limit_bytes` | `0` | Reserved configuration field. The current allocator does not enforce this limit; leave it at `0`. |
+### Common TOML Settings
 
-Autotuning applies to ReduceScatter and AllReduce algorithm selection:
+Every configuration starts with `schema_version = 3` and a runtime mode:
 
-| TOML key | Default or accepted value | Effect |
-| --- | --- | --- |
-| `autotune.enabled` | `true` | Profiles communication and codec cost and scores legal algorithms. If a required model is unavailable, selection uses the built-in heuristic. |
-| `autotune.profile_min_bytes` | `262144` | Smallest profiling sample. Must be greater than zero. |
-| `autotune.profile_max_bytes` | `8589934592` | Largest profiling sample; runtime also caps it to one quarter of free device memory. |
-| `autotune.warmup` | `3` | Warmup iterations per profiling point. |
-| `autotune.iterations` | `10` | Timed iterations per profiling point. |
-| `autotune.reduce_scatter_algorithm` | `auto` | `auto`, `oneshot`, or `twoshot`. A forced unavailable TwoShot falls back to OneShot. |
-| `autotune.all_reduce_algorithm` | `auto` | `auto`, `oneshot`, `twoshot`, or `tripleshot`. A forced unavailable TripleShot falls back to TwoShot. |
+- `runtime.mode` is `normal` or `training`.
+- `runtime.compression_threshold_bytes` defaults to 8 MiB. Standard NCCL calls
+  are compressed only when the logical message is larger than this threshold.
+  Explicit `coccl*Comp*` APIs bypass the threshold but still require a policy.
+- `compressor_plugins.compressors` lists the plugin names used by policies.
+- `compressor_plugins.library_path` names the directory containing
+  `lib<name>.so`. This is how COCCL finds plugins; the directory does not need
+  to be added to `LD_LIBRARY_PATH`.
+- `pipeline.depth` is the number of overlap slices and accepts `1..16`.
 
-### Normal mode
+Unsupported operations, datatypes, shapes, or policies fall back to native
+NCCL when called through the standard NCCL APIs.
 
-Normal mode selects a policy by collective type:
+### Normal Mode
+
+Normal mode provides one policy for each operation:
 
 ```text
 normal.all_gather
@@ -153,30 +149,17 @@ normal.all_to_all
 normal.sendrecv
 ```
 
-Each policy accepts `threshold_bytes` and three compressor scopes:
+Each policy can override the global threshold with `threshold_bytes` and can
+define three compressor scopes. `default` handles flat communication and is
+the fallback for unspecified scopes. `intra` handles node-local phases;
+`inter` handles cross-node phases. A scope names a `compressor` and an
+optional plugin-specific `config` table. Set `enabled = false` to keep that
+scope on native NCCL.
 
-| Scope | Meaning |
-| --- | --- |
-| `default` | Flat/global communication and the fallback for an unspecified `intra` or `inter` scope. |
-| `intra` | Node-local phase, or a Send/Recv whose peer is on the same node. |
-| `inter` | Cross-node phase, or a Send/Recv whose peer is on another node. |
-
-Each configured scope contains:
-
-| TOML key | Default | Effect |
-| --- | --- | --- |
-| `enabled` | `true` when the scope table exists | Enables or explicitly disables compression for this scope. A disabled scope cannot also name a compressor or config. |
-| `compressor` | Required when enabled | Plugin name from `compressor_plugins.compressors`. |
-| `config` | Empty table | Scalar parameters passed to that plugin's `configure()` method; accepted keys are plugin-specific. |
-
-An explicitly configured `intra` or `inter` scope overrides `default`.
-`enabled = false` explicitly runs that phase without compression; an omitted
-scope inherits `default`, and an omitted policy has compression disabled.
-Hierarchical ReduceScatter TwoShot uses `intra` then `inter`; AllReduce
-TripleShot uses `intra`, `inter`, and `default` for its final global phase.
-
-This example keeps node-local ReduceScatter native and compresses only the
-cross-node phase:
+An explicit `intra` or `inter` scope overrides `default`. ReduceScatter
+TwoShot executes `intra` then `inter`; AllReduce TripleShot additionally uses
+`default` for its final global phase. This example leaves the local phase
+native and compresses only cross-node ReduceScatter traffic:
 
 ```toml
 schema_version = 3
@@ -209,25 +192,13 @@ enabled = false
 reduce_scatter_algorithm = "twoshot"
 ```
 
-### Training mode
+Ready-to-edit normal-mode examples for SDP4Bit, ZFP, and dietGPU are under
+`src/coccl-extend/extensions/configs/`.
 
-Training mode first identifies each communicator as data parallel (DP), tensor
-parallel (TP), pipeline parallel (PP), or unknown, then selects the matching
-policy. The classifier settings are:
+### Training Mode
 
-| TOML key | Default or accepted value | Effect |
-| --- | --- | --- |
-| `training.observation_iterations` | `5`, range `2..100` | Repeated iterations used when topology alone cannot distinguish communicator roles. |
-| `training.max_events` | `65536` | Maximum retained trace events; the effective runtime range is `256..1048576`. |
-| `training.classifier.data_parallel_size` | Required in training mode | Expected DP communicator size. |
-| `training.classifier.tensor_parallel_size` | Required in training mode | Expected TP communicator size. |
-| `training.classifier.pipeline_parallel_size` | Required in training mode | Expected PP communicator size. |
-| `training.classifier.dp_strategy` | `sdp` | `ddp` expects AllReduce buckets, `sdp` uses sharded optimizer communication patterns, and `fsdp` expects recurring AllGather/ReduceScatter flows. |
-| `training.classifier.sequence_parallel` | `false` | Tells the classifier whether TP may use ReduceScatter/AllGather instead of the usual dense AllReduce pattern. |
-| `training.classifier.context_parallel` | `false` | Records whether the job uses context parallelism. It currently does not select a separate role or policy. |
-
-Training policies use the same `threshold_bytes` and
-`default`/`intra`/`inter` scope grammar as normal mode:
+Training mode classifies communicators as data parallel (DP), tensor parallel
+(TP), pipeline parallel (PP), or unknown, then applies role-specific policies:
 
 ```text
 training.dp.{all_gather,reduce_scatter,all_reduce}
@@ -235,34 +206,84 @@ training.tp.{all_gather,reduce_scatter,all_reduce}
 training.pp.sendrecv.{forward,backward}
 ```
 
-When DP and TP communicator sizes are different, COCCL classifies them
-immediately from the configured sizes. Otherwise it observes AllGather,
-ReduceScatter, AllReduce, Send, and Recv calls, ignores ambiguous messages
-smaller than 1 MiB, detects repeated iteration schedules, and combines
-operation shape, DP strategy, topology, ordering, and PP boundaries. Traffic
-remains on native NCCL until a role is committed; unknown communicators stay
-native. PP direction is derived locally from rank and peer, allowing separate
-forward and backward compressors.
+`training.classifier.data_parallel_size`, `tensor_parallel_size`, and
+`pipeline_parallel_size` are required. Set `dp_strategy` to `ddp`, `sdp`, or
+`fsdp` to match the framework optimizer. Set `sequence_parallel = true` when
+TP uses ReduceScatter/AllGather instead of the usual AllReduce pattern.
+`training.observation_iterations` defaults to `5` and accepts `2..100`.
 
-Enable classification logs with:
+When DP and TP sizes differ, topology identifies them immediately. Otherwise
+COCCL observes repeated AllGather, ReduceScatter, AllReduce, Send, and Recv
+schedules. Ambiguous messages smaller than 1 MiB are ignored, and traffic
+stays on native NCCL until a role is committed. PP direction is inferred from
+the local rank and peer.
 
-```bash
-export NCCL_DEBUG=INFO
-export NCCL_DEBUG_SUBSYS=TUNING
+The following minimal training configuration compresses DP AllGather with
+SDP4Bit while leaving TP and PP on native NCCL:
+
+```toml
+schema_version = 3
+
+[runtime]
+mode = "training"
+compression_threshold_bytes = 67108864
+
+[compressor_plugins]
+compressors = ["sdp4bit"]
+library_path = "/path/to/COCCL/build/obj/coccl-extend/compressor_plugin/libcompress"
+
+[training]
+observation_iterations = 5
+
+[training.classifier]
+data_parallel_size = 4
+tensor_parallel_size = 2
+pipeline_parallel_size = 1
+dp_strategy = "sdp"
+sequence_parallel = false
+
+[training.dp.all_gather.default]
+compressor = "sdp4bit"
+
+[training.dp.all_gather.default.config]
+groupCount = 2048
+quantBits = 8
+quantType = "Symmetric"
+subAdd = true
+pipelineSize = 1
+
+[pipeline]
+depth = 1
 ```
 
-The complete training example is
-[src/coccl-extend/extensions/configs/training.toml](src/coccl-extend/extensions/configs/training.toml).
-It enables the validated SDP4Bit DP policies; TP and PP remain native until
-the user adds corresponding policies.
-Framework loading, submodule setup, and Qwen launch instructions are in
+Use `NCCL_DEBUG_SUBSYS=COCCL_TUNING` to inspect classification and algorithm
+selection. The complete validated example is
+[training.toml](src/coccl-extend/extensions/configs/training.toml), and Qwen
+launch instructions are in
 [examples/training_scripts/README.md](examples/training_scripts/README.md).
 
-### Validate a configuration
+### Algorithm And Memory Controls
 
-Examples are under `src/coccl-extend/extensions/configs/`. Validate parsing,
-plugin loading, plugin parameters, and the effective inherited scopes without
-starting a communicator:
+Autotuning applies to ReduceScatter and AllReduce:
+
+- `autotune.enabled` defaults to `true`. Missing models fall back to the
+  built-in heuristic.
+- `profile_min_bytes` and `profile_max_bytes` delimit profiling sizes; the
+  defaults are 256 KiB and 8 GiB. Runtime also caps the maximum to one quarter
+  of free device memory.
+- `warmup` and `iterations` default to `3` and `10`.
+- `reduce_scatter_algorithm` accepts `auto`, `oneshot`, or `twoshot`.
+- `all_reduce_algorithm` accepts `auto`, `oneshot`, `twoshot`, or
+  `tripleshot`.
+
+The buffer pool normally needs no tuning. `buffer.legacy_block_bytes = 0`
+allocates legacy blocks to the request size. `buffer.physical_chunk_bytes`
+controls CUDA VMM growth and defaults to 8 MiB.
+
+### Validate a Configuration
+
+Validate parsing, plugin loading, plugin parameters, and inherited scopes
+without starting a communicator:
 
 ```bash
 build/bin/coccl-config-check path/to/config.toml
@@ -279,7 +300,7 @@ detection diagnostics are maintained with the runnable scripts in
 
 ## Performance
 
-**Setup.** Experiments are conducted on a 4-node H800 cluster, with 8 NVIDIA H800 SXM5 80 GB GPUs per node, 8 InfiniBand links, CUDA 12.6, NVIDIA driver 550.90.07, NCCL 2.21.5, PyTorch 2.5.1, and Megatron-LM. Communication benchmarks use `nccl-tests`; end-to-end training uses 3D parallelism with SDP4Bit, TAHQuant, and cuZFP.
+**Setup.** Experiments are conducted on a 4-node H800 cluster, with 8 NVIDIA H800 SXM5 80 GB GPUs per node, 8 InfiniBand links, CUDA 12.6, NVIDIA driver 550.90.07, NCCL 2.21.5, PyTorch 2.5.1, and Megatron-LM. Communication benchmarks use `nccl-tests`; end-to-end training uses 3D parallelism with compression-aware collective policies.
 
 - **Communication performance**
 
