@@ -245,10 +245,8 @@ At 32 GPUs, COCCL-SDP4Bit achieves 2.60x, 2.58x, 5.66x, and 4.92x speedups on Al
 
 ## Examples
 
-Example scripts are provided for communication benchmarks and end-to-end training:
-
-- Communication benchmark examples: `examples/benchmarks_scripts/`
-- End-to-end training examples: `examples/training_scripts/`
+Build, communication benchmark, and Qwen training scripts are documented in
+[examples/README.md](examples/README.md).
 
 ## Citation
 
