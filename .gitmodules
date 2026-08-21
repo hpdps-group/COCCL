@@ -1,0 +1,3 @@
+[submodule "examples/training_scripts/Pai-Megatron-Patch"]
+	path = examples/training_scripts/Pai-Megatron-Patch
+	url = https://github.com/alibaba/Pai-Megatron-Patch.git

@@ -21,62 +21,66 @@ Moving forward, we plan to incorporate NCCL device API support and integrate sel
 
 ## Build
 
-To build the library:
+Clone COCCL and initialize the optional training-framework submodule:
 
-```shell
-git clone https://github.com/hpdps-group/coccl.git
-chmod 777 -R coccl
-cd coccl
-make -j src.build
+```bash
+git clone --recurse-submodules https://github.com/hpdps-group/COCCL.git
+cd COCCL
 ```
 
-If CUDA is not installed in the default `/usr/local/cuda` path, specify the CUDA path with:
+The user-facing build script compiles COCCL, all bundled compressor plugins,
+the configuration checker, and MPI-enabled communication tests:
 
-```shell
-$ make src.build CUDA_HOME=<path to cuda install>
+```bash
+CUDA_HOME=/path/to/cuda \
+MPI_HOME=/path/to/mpi \
+CUDA_ARCH=80 \
+bash examples/build_scripts/build.sh
 ```
 
-By default, COCCL is compiled for all supported architectures. To accelerate compilation and reduce binary size, redefine `NVCC_GENCODE` (defined in `makefiles/common.mk`) to include only the architecture of the target platform:
+`COCCL_ROOT`, `BUILD_JOBS`, and `NVCC_GENCODE` can override the inferred
+repository, parallelism, and generated GPU architecture. See
+[examples/build_scripts/README.md](examples/build_scripts/README.md) for the
+complete build-script interface.
 
-```shell
-$ make -j src.build NVCC_GENCODE="-gencode=arch=compute_90,code=sm_90"
+To build only the library manually:
+
+```bash
+make -j src.build \
+  CUDA_HOME=/path/to/cuda \
+  NVCC_GENCODE="-gencode=arch=compute_80,code=sm_80"
 ```
 
-To clean the build, use:
+Use `make clean` to clean the build. COCCL is installed under `build/` unless
+`BUILDDIR` is set. The current pipeline layout kernels require CUDA 12.4 or
+later.
 
-```shell
-$ make clean
+After building, make the COCCL NCCL-compatible library and plugins visible to
+the application:
+
+```bash
+export COCCL_ROOT=/path/to/COCCL
+export NCCL_HOME=$COCCL_ROOT/build
+export LD_LIBRARY_PATH=$NCCL_HOME/lib:$NCCL_HOME/obj/coccl-extend/compressor_plugin/libcompress:${LD_LIBRARY_PATH:-}
+export C_INCLUDE_PATH=$NCCL_HOME/include:${C_INCLUDE_PATH:-}
+export CPLUS_INCLUDE_PATH=$NCCL_HOME/include:${CPLUS_INCLUDE_PATH:-}
 ```
-
-instead of deleting the build directory manually.
-
-COCCL is compiled and installed in `build/` unless `BUILDDIR` is set.
-
-After building COCCL, set the required environment variables:
-
-```shell
-export COCCL_PATH=<path to coccl>
-export NCCL_HOME=$COCCL_PATH/build
-export LIBRARY_PATH=$NCCL_HOME/lib:$LIBRARY_PATH
-export LD_LIBRARY_PATH=$NCCL_HOME/lib:$LD_LIBRARY_PATH
-export C_INCLUDE_PATH=$NCCL_HOME/include:$C_INCLUDE_PATH
-export CPLUS_INCLUDE_PATH=$NCCL_HOME/include:$CPLUS_INCLUDE_PATH
-```
-
-The current compression kernel implementation requires CUDA 12.2 or later to fully support the half type.
 
 ## Tests
 
-To build [tests](tests/coccl-tests):
+The build script above compiles [tests/coccl-tests](tests/coccl-tests). A
+focused manual build is also available:
 
-
-```shell
+```bash
 cd tests/coccl-tests
-make -j MPI=1 MPI_HOME=<path to mpi install> CUDA_HOME=<path to cuda install> NCCL_HOME=$NCCL_HOME NVCC_GENCODE=$NVCC_GENCODE
-./build/alltoall_comp_perf -b 1M -e 1G -f 2 -t <ngpus> -g 1
+make -j MPI=1 MPI_HOME=/path/to/mpi CUDA_HOME=/path/to/cuda \
+  NCCL_HOME=$NCCL_HOME \
+  NVCC_GENCODE="-gencode=arch=compute_80,code=sm_80"
+./build/alltoall_comp_perf -b 1M -e 1G -f 2 -t 4 -g 1
 ```
 
-All tests are listed as binary files in the build directory. For more examples, see [benchmark examples](examples/benchmarks_scripts).
+Ready-to-run single-node and multi-node benchmark workflows are documented in
+[examples/benchmarks_scripts](examples/benchmarks_scripts).
 
 ## Integrating a compressor
 
@@ -85,102 +89,189 @@ For source ownership and extension points, see
 instructions are in
 [src/coccl-extend/extensions/compressor_plugin/README.md](src/coccl-extend/extensions/compressor_plugin/README.md).
 
-## Environment variables
+## Configuration
 
 COCCL is NCCL-compatible, so standard NCCL environment variables such as
 `NCCL_DEBUG`, `NCCL_IB_HCA`, and `NCCL_SOCKET_IFNAME` remain available. COCCL
-itself uses two environment variables:
+itself reads only two environment variables:
 
-- `COCCL_ENABLE=1` enables compression-aware routing. It is disabled when
-  unset or set to `0`.
-- `COCCL_CONFIG_FILE=/absolute/path/to/config.toml` selects the process-wide
-  schema-v3 configuration.
+| Variable | Meaning |
+| --- | --- |
+| `COCCL_ENABLE` | `1` enables COCCL routing; unset or `0` keeps native NCCL behavior. |
+| `COCCL_CONFIG_FILE` | Path to one process-wide schema-v3 TOML file. Required when `COCCL_ENABLE=1`. |
 
-The TOML file owns plugin loading, per-operation `default`/`intra`/`inter`
-policies, thresholds, pipeline depth, autotuning, and training-mode routing.
-Examples are under `src/coccl-extend/extensions/configs/`. Validate a file
-without starting a communicator with:
+Configuration is loaded once per process. An invalid file disables COCCL for
+that process and reports the parser error through NCCL logging. Relative plugin
+paths are resolved relative to the TOML file.
 
-```shell
+### Global settings
+
+| TOML key | Default or accepted value | Effect |
+| --- | --- | --- |
+| `schema_version` | Required: `3` | Selects the configuration schema. |
+| `runtime.mode` | Required: `normal` or `training` | Selects operation-based policies or automatically classified DP/TP/PP policies. |
+| `runtime.compression_threshold_bytes` | `8388608` | Default minimum logical message size for automatic routing. COCCL compresses only when bytes are greater than the threshold. |
+| `compressor_plugins.compressors` | `[]` | Names of plugin DSOs to load, for example `sdp4bit` or `zfp`. Every compressor referenced by a policy must be listed. |
+| `compressor_plugins.library_path` | Empty | Directory containing `lib<name>.so`; required when the catalog is nonempty. |
+| `pipeline.depth` | `1`, range `1..16` | Number of slices in compression/communication overlap. |
+
+Explicit `coccl*Comp*` APIs still require a configured compressor policy, but
+they bypass the compression threshold. Calls through standard NCCL APIs use
+the threshold and fall back to native NCCL when the operation, datatype,
+shape, policy, or compressor is unsupported.
+
+Buffer settings control the communicator-owned temporary-memory pool:
+
+| TOML key | Default | Effect |
+| --- | ---: | --- |
+| `buffer.legacy_block_bytes` | `0` | Minimum block size for the legacy `ncclMemAlloc` backend; `0` allocates to the current request size. |
+| `buffer.physical_chunk_bytes` | `8388608` | Physical mapping growth unit for the CUDA VMM backend. It must be greater than zero. |
+| `buffer.pool_limit_bytes` | `0` | Reserved configuration field. The current allocator does not enforce this limit; leave it at `0`. |
+
+Autotuning applies to ReduceScatter and AllReduce algorithm selection:
+
+| TOML key | Default or accepted value | Effect |
+| --- | --- | --- |
+| `autotune.enabled` | `true` | Profiles communication and codec cost and scores legal algorithms. If a required model is unavailable, selection uses the built-in heuristic. |
+| `autotune.profile_min_bytes` | `262144` | Smallest profiling sample. Must be greater than zero. |
+| `autotune.profile_max_bytes` | `8589934592` | Largest profiling sample; runtime also caps it to one quarter of free device memory. |
+| `autotune.warmup` | `3` | Warmup iterations per profiling point. |
+| `autotune.iterations` | `10` | Timed iterations per profiling point. |
+| `autotune.reduce_scatter_algorithm` | `auto` | `auto`, `oneshot`, or `twoshot`. A forced unavailable TwoShot falls back to OneShot. |
+| `autotune.all_reduce_algorithm` | `auto` | `auto`, `oneshot`, `twoshot`, or `tripleshot`. A forced unavailable TripleShot falls back to TwoShot. |
+
+### Normal mode
+
+Normal mode selects a policy by collective type:
+
+```text
+normal.all_gather
+normal.reduce_scatter
+normal.all_reduce
+normal.all_to_all
+normal.sendrecv
+```
+
+Each policy accepts `threshold_bytes` and three compressor scopes:
+
+| Scope | Meaning |
+| --- | --- |
+| `default` | Flat/global communication and the fallback for an unspecified `intra` or `inter` scope. |
+| `intra` | Node-local phase, or a Send/Recv whose peer is on the same node. |
+| `inter` | Cross-node phase, or a Send/Recv whose peer is on another node. |
+
+Each configured scope contains:
+
+| TOML key | Default | Effect |
+| --- | --- | --- |
+| `enabled` | `true` when the scope table exists | Enables or explicitly disables compression for this scope. A disabled scope cannot also name a compressor or config. |
+| `compressor` | Required when enabled | Plugin name from `compressor_plugins.compressors`. |
+| `config` | Empty table | Scalar parameters passed to that plugin's `configure()` method; accepted keys are plugin-specific. |
+
+An explicitly configured `intra` or `inter` scope overrides `default`.
+`enabled = false` explicitly runs that phase without compression; an omitted
+scope inherits `default`, and an omitted policy has compression disabled.
+Hierarchical ReduceScatter TwoShot uses `intra` then `inter`; AllReduce
+TripleShot uses `intra`, `inter`, and `default` for its final global phase.
+
+This example keeps node-local ReduceScatter native and compresses only the
+cross-node phase:
+
+```toml
+schema_version = 3
+
+[runtime]
+mode = "normal"
+compression_threshold_bytes = 1048576
+
+[compressor_plugins]
+compressors = ["zfp"]
+library_path = "/path/to/COCCL/build/obj/coccl-extend/compressor_plugin/libcompress"
+
+[normal.reduce_scatter]
+threshold_bytes = 4194304
+
+[normal.reduce_scatter.intra]
+enabled = false
+
+[normal.reduce_scatter.inter]
+compressor = "zfp"
+
+[normal.reduce_scatter.inter.config]
+rate = 8
+
+[pipeline]
+depth = 4
+
+[autotune]
+enabled = false
+reduce_scatter_algorithm = "twoshot"
+```
+
+### Training mode
+
+Training mode first identifies each communicator as data parallel (DP), tensor
+parallel (TP), pipeline parallel (PP), or unknown, then selects the matching
+policy. The classifier settings are:
+
+| TOML key | Default or accepted value | Effect |
+| --- | --- | --- |
+| `training.observation_iterations` | `5`, range `2..100` | Repeated iterations used when topology alone cannot distinguish communicator roles. |
+| `training.max_events` | `65536` | Maximum retained trace events; the effective runtime range is `256..1048576`. |
+| `training.classifier.data_parallel_size` | Required in training mode | Expected DP communicator size. |
+| `training.classifier.tensor_parallel_size` | Required in training mode | Expected TP communicator size. |
+| `training.classifier.pipeline_parallel_size` | Required in training mode | Expected PP communicator size. |
+| `training.classifier.dp_strategy` | `sdp` | `ddp` expects AllReduce buckets, `sdp` uses sharded optimizer communication patterns, and `fsdp` expects recurring AllGather/ReduceScatter flows. |
+| `training.classifier.sequence_parallel` | `false` | Tells the classifier whether TP may use ReduceScatter/AllGather instead of the usual dense AllReduce pattern. |
+| `training.classifier.context_parallel` | `false` | Records whether the job uses context parallelism. It currently does not select a separate role or policy. |
+
+Training policies use the same `threshold_bytes` and
+`default`/`intra`/`inter` scope grammar as normal mode:
+
+```text
+training.dp.{all_gather,reduce_scatter,all_reduce}
+training.tp.{all_gather,reduce_scatter,all_reduce}
+training.pp.sendrecv.{forward,backward}
+```
+
+When DP and TP communicator sizes are different, COCCL classifies them
+immediately from the configured sizes. Otherwise it observes AllGather,
+ReduceScatter, AllReduce, Send, and Recv calls, ignores ambiguous messages
+smaller than 1 MiB, detects repeated iteration schedules, and combines
+operation shape, DP strategy, topology, ordering, and PP boundaries. Traffic
+remains on native NCCL until a role is committed; unknown communicators stay
+native. PP direction is derived locally from rank and peer, allowing separate
+forward and backward compressors.
+
+Enable classification logs with:
+
+```bash
+export NCCL_DEBUG=INFO
+export NCCL_DEBUG_SUBSYS=TUNING
+```
+
+The complete training example is
+[src/coccl-extend/extensions/configs/training.toml](src/coccl-extend/extensions/configs/training.toml).
+Framework loading, submodule setup, and Qwen launch instructions are in
+[examples/training_scripts/README.md](examples/training_scripts/README.md).
+
+### Validate a configuration
+
+Examples are under `src/coccl-extend/extensions/configs/`. Validate parsing,
+plugin loading, plugin parameters, and the effective inherited scopes without
+starting a communicator:
+
+```bash
 build/bin/coccl-config-check path/to/config.toml
 ```
 
 ## Deploying COCCL in LLM frameworks
 
-Install the necessary environment dependencies for training frameworks such as [Megatron-LM](https://github.com/NVIDIA/Megatron-LM) or [PyTorch](https://github.com/pytorch/pytorch).
-
-To switch from the NCCL library to the COCCL library, follow the steps below:
-
-1. Confirm whether the NCCL library used by PyTorch is a dynamic library.
-
-   - Confirm the location of the PyTorch library.
-     If PyTorch is installed in a specific directory, search directly within that directory. For example, after confirming that PyTorch resides in `/usr/local/lib`, the following command locates the `libtorch.so` file:
-
-     ```bash
-     find /usr/local/lib -name "libtorch*"
-     # Example output:
-     /usr/local/lib/python3.10/dist-packages/torch/lib/libtorchcuda.so
-     /usr/local/lib/python3.10/dist-packages/torch/lib/libtorch.so
-     /usr/local/lib/python3.10/dist-packages/torch/lib/libtorchbindtest.so
-     ```
-
-   - Use the `ldd` command to inspect the PyTorch library’s dependency on the NCCL library.
-
-     ```bash
-     ldd libtorch.so | grep nccl
-     ```
-
-     If the command returns results in the following format, it indicates that PyTorch depends on NCCL as a dynamic library. You can then configure COCCL according to the subsequent steps.
-
-     ```bash
-     libnccl.so.2=>/usr/lib/x86_64-linux-gnu/libnccl.so.2(0x00007feab3b27000)
-     ```
-
-     If `ldd` returns no results, this indicates that PyTorch relies on NCCL as a static (non-dynamic) library and therefore cannot be switched to COCCL. To proceed with COCCL configuration, use a PyTorch version that depends on the NCCL dynamic library.
-
-2. Install and replace the backend with the COCCL library.
-
-   After confirming that the PyTorch library depends on NCCL dynamically, replace the NCCL backend loaded by PyTorch with COCCL.
-
-   - Build and initialize the COCCL runtime environment.
-
-     Follow the Build section to build COCCL, then configure the required environment variables, such as `NCCL_HOME` and `LD_LIBRARY_PATH`, so that applications load the COCCL library instead of the original NCCL library at runtime.
-
-   - Verify whether PyTorch now resolves NCCL to the COCCL library.
-   
-     ```bash
-     ldd <path to libtorch.so> | grep nccl
-     ```
-
-     If the output points to the COCCL build directory, the replacement has succeeded. For example:
-   
-     ```bash
-     libnccl.so.2 => path/to/coccl/build/lib/libnccl.so.2
-     ```
-   
-   - Replace the original NCCL library if `LD_LIBRARY_PATH` does not take effect.
-   
-     If `libnccl.so.2` is still resolved to the original NCCL installation, replace that shared library with the COCCL-provided version. Back up the original file before overwriting it:
-   
-     ```bash
-     ORIG_NCCL=/usr/lib/x86_64-linux-gnu/libnccl.so.2
-     COCCL_NCCL=$COCCL_PATH/build/lib/libnccl.so.2
-     
-     cp -a $ORIG_NCCL ${ORIG_NCCL}.bak
-     rm -f $ORIG_NCCL
-     cp -a $COCCL_NCCL $ORIG_NCCL
-     ```
-     
-   - Check the PyTorch dependency again after replacement.
-   
-     ```bash
-     ldd <path to libtorch.so> | grep nccl
-     ldd <path to libtorch_cuda.so> | grep nccl
-     ```
-   
-     The output should now resolve `libnccl.so.2` to the COCCL-provided library or to the original path that has been replaced by the COCCL library.
-   
-3. For running scripts, see [training examples](examples/training_scripts) for details.
+COCCL is loaded as an NCCL-compatible shared library; training frameworks do
+not need COCCL-specific collective calls. Dynamic-link verification,
+Pai-Megatron-Patch setup, Qwen2.5/Qwen3 launch commands, and training-role
+detection diagnostics are maintained with the runnable scripts in
+[examples/training_scripts](examples/training_scripts).
 
 
 ## Performance

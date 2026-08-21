@@ -2,7 +2,8 @@
 
 # Edit these paths once, or export the same variables before launching.
 CUDA_HOME=${CUDA_HOME:-}
-PAI_MEGATRON_ROOT=${PAI_MEGATRON_ROOT:-}
+training_scripts_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+PAI_MEGATRON_ROOT=${PAI_MEGATRON_ROOT:-$training_scripts_dir/Pai-Megatron-Patch}
 
 QWEN25_DATA_PREFIX=${QWEN25_DATA_PREFIX:-}
 QWEN25_MODEL_PATH=${QWEN25_MODEL_PATH:-}

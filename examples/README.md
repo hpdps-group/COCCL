@@ -41,15 +41,20 @@ matrix and tuning variables.
 
 ## 3. Qwen Training
 
-Edit [training_scripts/training_envs.sh](training_scripts/training_envs.sh),
-activate the Pai-Megatron-Patch Python environment, and launch the same script
-on every node:
+Initialize the bundled Pai-Megatron-Patch submodule, edit
+[training_scripts/training_envs.sh](training_scripts/training_envs.sh), activate
+the framework Python environment, and launch the same script on every node:
+
+```bash
+git submodule update --init --recursive \
+  examples/training_scripts/Pai-Megatron-Patch
+```
 
 ```bash
 MASTER_ADDR=10.0.0.1 MASTER_PORT=29501 \
 bash /path/to/COCCL/examples/training_scripts/train_qwen_coccl.sh qwen25 2 4 0
 ```
 
-The first argument is `qwen25` or `qwen3`; the final argument is the node
-rank. See [training_scripts/README.md](training_scripts/README.md) for the
-multi-node example and topology requirements.
+The first argument is `qwen25` or `qwen3`; the final argument is the node rank.
+See [training_scripts/README.md](training_scripts/README.md) for dynamic NCCL
+loading, multi-node launch, topology matching, and automatic DP/TP/PP routing.

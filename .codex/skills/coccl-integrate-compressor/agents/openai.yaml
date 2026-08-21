@@ -1,0 +1,4 @@
+interface:
+  display_name: "Integrate COCCL Compressor"
+  short_description: "Adapt fixed or framed CUDA compressors to COCCL"
+  default_prompt: "Use $coccl-integrate-compressor to integrate this compressor project into COCCL."
