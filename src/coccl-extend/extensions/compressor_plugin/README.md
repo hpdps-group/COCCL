@@ -1,127 +1,80 @@
-# Integrating a COCCL Compressor
+# Add A Compressor To COCCL
 
-This directory is the user-owned extension boundary for compressor plugins.
-A plugin may include the public C++ SDK and its own sources, but must not
-include `core/` headers or depend on pipeline internals.
+COCCL compressor plugins use the public C++17 SDK and build as independent
+shared libraries. A plugin implements encoding; COCCL owns slicing, Pack and
+Unpack, communication, workspace, and scheduling.
 
 ```cpp
 #include "compressor_plugin/coccl_compressor_plugin.h"
-#include <cuda_runtime.h>
 ```
 
-COCCL currently accepts compressor ABI v8. The SDK generates the ABI
-descriptor, configuration lifecycle, operation dispatch, and fixed entry
-symbol. Plugin authors implement typed algorithm code rather than the raw ABI.
+The current compressor ABI is v8. Plugins include only the public SDK and
+their own sources, never `core/` headers.
 
-## Source Ownership
+## Pick A Layout
 
-`src/coccl-extend/extensions/` is the user-modifiable part of COCCL:
+- **Fixed layout:** every logical chunk has a predictable encoded size. Call
+  `Output::commitBytes()` after encoding.
+- **Framed layout:** each chunk may have a different payload size. Set
+  `static constexpr bool kFramed = true`, write one metadata entry per chunk,
+  and call `Output::commitFrames()`.
 
-- `primitives/` defines collective recipes and explicit `coccl*Comp*` entry
-  points.
-- `compressor_plugin/` contains compressor adapters, codec kernels, and vendor
-  dependencies.
-- `configs/` contains editable normal-mode and training-mode policies.
+Use framed layout only for genuinely variable-length codecs. COCCL exchanges
+frame sizes and sends only each frame's actual payload.
 
-`src/coccl-extend/core/` owns routing, pipeline planning and execution,
-compression dispatch, memory, configuration parsing, autotuning, training
-classification, and COCCL CUDA kernels. Compressor authors do not modify Core.
-Core never includes plugin headers, and plugins may include only
-`include/compressor_plugin/` plus their own sources.
+## Add The Plugin
 
-`include/runtime/` is the NCCL-to-COCCL integration boundary.
-`include/compressor_plugin/` is the public ABI and C++ SDK. This dependency
-direction keeps a newly integrated codec independent of COCCL's scheduling and
-workspace implementation.
-
-## Choose The Encoding Model
-
-Use a **fixed layout** when shape and configuration determine one equal encoded
-size for every logical chunk. Implement `compress()` and `decompress()`, then
-commit the exact total with `Output::commitBytes()`.
-
-Use a **framed layout** when different chunks can produce different payload
-sizes. Declare:
-
-```cpp
-static constexpr bool kFramed = true;
-```
-
-Encode each chunk into its own fixed-capacity slot, write one metadata entry
-per chunk, and finish with `Output::commitFrames()`.
-
-Pack/Unpack, pipeline slicing, rank layout, metadata exchange, and NCCL
-communication are Core responsibilities. A normal plugin receives contiguous
-logical chunks and does not need to know how the collective is scheduled.
-
-## Integration Steps
-
-1. Create an immediate child directory, for example `mycodec/`, containing a
-   `Makefile`. The root plugin Makefile discovers only immediate children with
-   this file.
-2. Keep the codec's existing kernels and Makefile or CMake project. Add one
-   C++17/PIC adapter translation unit that includes only the public SDK.
-3. Add a typed `Config` and `configure()` only when the codec has parameters.
-4. Implement required `compress()` and `decompress()` methods. Define optional
-   `decompressReduce()` or `decompressReduceCompress()` only when the codec has
-   a real fused implementation; otherwise Core supplies the generic fallback.
-5. Register the plugin exactly once with
+1. Create `compressor_plugin/mycodec/` with a `Makefile`.
+2. Keep the codec's CUDA implementation and existing Make or CMake build.
+3. Add one SDK adapter with a typed `Config`, `compress()`, and
+   `decompress()`.
+4. Add fused `decompressReduce()` or `decompressReduceCompress()` only when
+   the codec implements that operation. COCCL supplies the generic path.
+5. Register once with
    `COCCL_REGISTER_COMPRESSOR("mycodec", MyCompressor)`.
-6. Build `$(SUBOBJDIR)/libcompress/libmycodec.so`, add `mycodec` to the TOML
-   plugin catalog, and bind it to one or more policies.
-7. Validate the configuration, exported symbol, encoded layout, output guard
-   bytes, and GPU round trip.
+6. Emit `libmycodec.so`, list it in TOML, and bind it to a policy.
+7. Validate the exported symbol, output bounds, passthrough, and GPU round
+   trip.
 
-## SDK Responsibilities
+The parent Makefile discovers immediate child directories that contain a
+`Makefile`.
 
-- `coccl::Input` is read-only and exposes data, bytes, elements, datatype,
-  chunks, and optional frame metadata.
-- `coccl::Output` owns the writable buffer and capacity. Compression must
-  commit its output; successful decompression is committed to the planned raw
-  shape by the SDK adapter.
-- `coccl::Context` provides the call stream, rank/topology, typed config, and
-  lazy resources.
-- `Context::scratch()` is callback-local device workspace.
-- `Context::persistent()` is device memory retained for a compressor handle
-  and slot.
-- `Context::instance()` creates typed Host state only when state must survive
-  across calls.
+## Know The SDK Contract
 
-Do not call `cudaMalloc`, `cudaFree`, NCCL registration, or communication APIs
-inside normal compressor callbacks. Launch all work on `Context::stream()`.
+- `coccl::Input` exposes read-only data, shape, datatype, chunks, and optional
+  frame metadata.
+- `coccl::Output` exposes writable capacity. A compressor must commit its
+  actual output.
+- `coccl::Context` provides the CUDA stream, topology, typed config, and lazy
+  resources.
+- `scratch()` is temporary device workspace. `persistent()` and `instance()`
+  retain device or Host state across calls.
 
-For a fixed layout, calculate bytes before launching the encoder. If encoding
-would be larger than the raw input, call
-`output.passthrough(input, context.stream())`; Core transports and copies that
-raw representation without calling the decoder. Check capacity before every
-encoded write.
+Launch all CUDA work on `Context::stream()`. Do not allocate CUDA memory,
+register NCCL memory, communicate, or synchronize the Host inside a normal
+codec callback.
 
-For a framed layout, each metadata entry contains an actual `payloadBytes`, an
-`Encoded` or `Raw` tag, and `reserved = 0`. A Raw payload is the raw bytes of
-that frame and can be smaller than an alignment-padded `frameStrideBytes`.
-COCCL exchanges metadata and sends only `payloadBytes`; the plugin must not do
-Host synchronization or communication.
+If fixed-layout encoding is not smaller than the input, use
+`output.passthrough(input, context.stream())`. For framed codecs, mark each
+frame `Encoded` or `Raw` and set its actual `payloadBytes`.
 
 Implement the optional Host-only `encodedSizeBound()` when shape and config
-provide a safe upper bound. It must share byte-layout arithmetic with
-execution and must not launch kernels or acquire resources. If omitted or if
-it returns `ncclInvalidUsage`, COCCL plans the raw size. A DRC size query
-describes the reduced raw output that will be recompressed.
+give a safe upper bound. Reuse the execution layout formula. If no bound is
+available, COCCL plans the raw size.
 
-Lossless byte-oriented codecs may declare:
+A lossless byte-oriented codec may declare:
 
 ```cpp
 static constexpr bool kBytewiseLossless = true;
 ```
 
-This allows automatic routing of `ncclInt8`, `ncclInt32`, and `ncclInt64` in
-addition to the floating-point types supported by the normal compression
-path. Do not declare it for a lossy or datatype-specific encoding.
+This enables Int8, Int32, and Int64 routing. Do not use it for lossy or
+datatype-specific formats.
 
-## Minimal Fixed-Layout Example
+## Minimal Fixed Plugin
 
-The following adapter shows the complete SDK shape. `launchMyEncode` and
-`launchMyDecode` stand for the codec's existing CUDA launchers.
+This adapter leaves the CUDA kernels to the codec and shows the COCCL-facing
+code:
 
 ```cpp
 #include "compressor_plugin/coccl_compressor_plugin.h"
@@ -135,10 +88,6 @@ struct MyConfig {
 
 template <typename Shape>
 bool encodedBytes(const Shape& shape, int bits, size_t* bytes) {
-  if (shape.chunks() == 0 || shape.elements() % shape.chunks() != 0 ||
-      (bits != 4 && bits != 8)) {
-    return false;
-  }
   size_t chunkBits = 0;
   size_t paddedBits = 0;
   return coccl::checkedMultiply(shape.elementsPerChunk(), (size_t)bits,
@@ -177,8 +126,8 @@ struct MyCompressor {
                                 coccl::Output& output,
                                 coccl::Context& context) {
     if (input.datatype() != ncclFloat32) return ncclInvalidArgument;
-    size_t bytes = 0;
     const Config& config = context.config<Config>();
+    size_t bytes = 0;
     if (!encodedBytes(input, config.bits, &bytes)) return ncclInvalidArgument;
     if (coccl::shouldPassthrough(input, bytes)) {
       return output.passthrough(input, context.stream());
@@ -194,10 +143,7 @@ struct MyCompressor {
   static coccl::Status decompress(const coccl::Input& input,
                                   coccl::Output& output,
                                   coccl::Context& context) {
-    if (output.datatype() != ncclFloat32 ||
-        input.chunks() != output.chunks()) {
-      return ncclInvalidArgument;
-    }
+    if (output.datatype() != ncclFloat32) return ncclInvalidArgument;
     launchMyDecode(input.data(), output.dataAs<float>(), output.elements(),
                    context.config<Config>().bits, context.stream());
     return coccl::fromCuda(cudaGetLastError());
@@ -209,7 +155,7 @@ struct MyCompressor {
 COCCL_REGISTER_COMPRESSOR("mycodec", MyCompressor)
 ```
 
-Bind the resulting DSO in TOML:
+Bind the shared library to a collective:
 
 ```toml
 [compressor_plugins]
@@ -223,56 +169,15 @@ compressor = "mycodec"
 bits = 4
 ```
 
-The directory Makefile must honor `NCCLDIR`, `COCCL_ROOT`, `BUILDDIR`,
-`SUBOBJDIR`, and `NVCC_GENCODE`, and emit
-`$(SUBOBJDIR)/libcompress/libmycodec.so`. See
-[taco/Makefile](taco/Makefile) for a small NVCC build and
-[zfp/Makefile](zfp/Makefile) for a Make-to-CMake bridge. Do not replace an
-existing CMake project; invoke it from the bridge.
+## Build And Check
 
-## Built-In Plugin Parameters
-
-### SDP4Bit
-
-`groupCount = 2048` controls values per quantization group, and
-`quantBits = 8` accepts either 4 or 8 bits. `quantType = "Symmetric"` also
-accepts `"Asymmetric"`. Set `hadamard = true` for the Hadamard path; its
-effective group is capped at 128.
-
-`subAdd = true` enables stateful delta compression and cannot be combined with
-Hadamard. `pipelineSize = 1` controls persistent subAdd state slots; it is not
-the COCCL pipeline depth.
-
-### TACO
-
-`fp8Format = "E4M3"` also accepts `"E5M2"`. `saturate = true` enables finite
-saturation. `groupSize = 128` accepts 32, 64, 128, 256, or 512. The scale
-calculation uses `targetRange = 448.0` and `lambda = 1e-6`.
-`fp8MaxValue = 0.0` uses the selected format's default maximum; set a positive
-value to override it.
-
-### ZFP
-
-`rate = 4` is the fixed rate in bits per value and accepts `1..64`.
-
-### dietGPU
-
-`probBits = 10` controls ANS probability precision and accepts 9, 10, or 11.
-dietGPU is framed, bytewise lossless, and can route Int8, Int32, and Int64 in
-addition to floating-point data.
-
-Unknown keys are rejected by `ConfigReader::finish()`. The examples in
-`../configs/` are the authoritative policy examples.
-
-## Build And Validate
-
-Build the host library first, then the focused plugin:
+Build COCCL, the plugin, and the config checker:
 
 ```bash
-make -j src.build CUDA_HOME=/path/to/cuda \
+make src.build CUDA_HOME=/path/to/cuda \
   NVCC_GENCODE="-gencode=arch=compute_80,code=sm_80"
 
-make -C src/coccl-extend/extensions/compressor_plugin/mycodec -j8 \
+make -C src/coccl-extend/extensions/compressor_plugin/mycodec \
   CUDA_HOME=/path/to/cuda \
   NVCC_GENCODE="-gencode=arch=compute_80,code=sm_80"
 
@@ -285,34 +190,43 @@ nm -D build/obj/coccl-extend/compressor_plugin/libcompress/libmycodec.so \
   | grep cocclGetCompressorPlugin
 ```
 
-Build and config parsing are not numerical validation. On a GPU, test every
-supported datatype, representative chunk count, partial group, raw
-passthrough, capacity guard, and compress/decompress round trip.
+Then run GPU tests for every supported datatype, representative chunk and
+partial-group shapes, raw passthrough, output guard bytes, and encode/decode
+round trips.
 
-Built-in reference points:
+See [TACO](taco) for a small NVCC plugin, [ZFP](zfp) for a CMake bridge,
+[dietGPU](dietgpu) for framed lossless encoding, and [SDP4Bit](sdp4bit) for
+fused reductions and persistent state.
 
-- [taco](taco): small configured fixed-layout plugin.
-- [zfp](zfp): existing CMake project behind a Makefile bridge.
-- [dietgpu](dietgpu): framed variable-length lossless codec.
-- [sdp4bit](sdp4bit): fused reductions plus lazy state and persistent memory.
+## Built-In Parameters
 
-## Integrate With The Codex Skill
+- **SDP4Bit:** `groupCount`, `quantBits = 4|8`,
+  `quantType = "Symmetric"|"Asymmetric"`, `hadamard`, and `subAdd`.
+  `pipelineSize` controls subAdd state slots, not COCCL pipeline depth.
+- **TACO:** `fp8Format = "E4M3"|"E5M2"`, `saturate`,
+  `groupSize = 32|64|128|256|512`, `targetRange`, `lambda`, and optional
+  `fp8MaxValue`.
+- **ZFP:** `rate = 1..64` bits per value.
+- **dietGPU:** `probBits = 9|10|11`. It is framed, bytewise lossless, and
+  supports floating-point data plus Int8, Int32, and Int64.
 
-The integration skill lives beside the plugins:
-[`$coccl-integrate-compressor`](skills/coccl-integrate-compressor/SKILL.md).
-Open COCCL in Codex, reference that skill, and provide the codec source path,
-plugin name, fixed or framed layout, supported datatypes, build system, desired
-TOML parameters, and target GPU architecture.
+Unknown parameters are rejected. The examples in
+[`../configs`](../configs) are the authoritative policy configurations.
+
+## Use The Codex Skill
+
+The bundled
+[`coccl-integrate-compressor` skill](skills/coccl-integrate-compressor/SKILL.md)
+can inspect a codec and generate its adapter, build bridge, config, and focused
+tests.
 
 Example request:
 
 ```text
-Use [$coccl-integrate-compressor](src/coccl-extend/extensions/compressor_plugin/skills/coccl-integrate-compressor/SKILL.md)
-to integrate /data/code/mycodec as a fixed-size plugin named mycodec. Preserve
-its CMake build, support FP32, expose bits=4|8, add a normal AllGather TOML
-example, and validate for sm_80 without running a top-level full rebuild.
+Use $coccl-integrate-compressor to integrate /data/code/mycodec as a fixed-size
+plugin named mycodec. Preserve its CMake build, support FP32, expose bits=4|8,
+add an AllGather config, and validate only sm_80 targets.
 ```
 
-The skill reads the current ABI v8 SDK, preserves the codec implementation and
-build ownership, generates only the required adapter/bridge/config changes,
-and reports which Host, build, symbol, and GPU checks actually ran.
+Provide the codec path, plugin name, fixed or framed layout, supported
+datatypes, build system, parameters, and target GPU architecture.

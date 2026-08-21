@@ -1,60 +1,16 @@
 # TACO
 
-TACO is an FP8 communication compressor for tensor-parallel large-language
-model training. This directory contains its COCCL adapter and CUDA kernels.
-General ABI, build, and integration requirements are documented in the
-[compressor plugin guide](../README.md).
+TACO compresses tensor-parallel communication with FP8 quantization. This
+directory contains its CUDA kernels and COCCL adapter. See the
+[compressor plugin guide](../README.md) for the common SDK and integration
+workflow.
 
----
+![TACO overview](TACO_Overview.png)
 
-## 📌 Overview
+## Configure
 
-Communication overhead is a critical bottleneck in large-scale tensor-parallel training, especially due to the **dense and near-zero distributions** of intermediate tensors.
-
-To address this, we propose **TACO (Tensor-parallel Adaptive COmmunication compression)**:
-
-* FP8-based compression for intermediate tensors
-* Adaptive Scale + Hadamard Transform for high-fidelity quantization
-* Dual-scale quantization for numerical stability
-* Fused compression kernels for low overhead
-* Seamless integration with TP + PP + DP (3D parallelism)
-
-### 🚀 Performance
-
-* Up to **1.87× end-to-end training speedup**
-* **Near-lossless accuracy**
-
----
-
-## 🖼️ Framework Overview
-
-![TACO Overview](TACO_Overview.png)
-
----
-
-## 🧩 TACO Compression Operator
-
-Source directory:
-
-```bash
-src/coccl-extend/extensions/compressor_plugin/taco
-```
-
-### 🔧 Compile Operator Only
-
-```bash
-cd src/coccl-extend/extensions/compressor_plugin/taco
-make
-```
-
----
-
-## ⚙️ Compression Configuration
-
-TACO accepts `fp8Format = "E4M3"|"E5M2"`, `saturate = true|false`,
-`groupSize = 32|64|128|256|512`, `targetRange`, `lambda`, and an optional
-positive `fp8MaxValue`. A value of `0.0` for `fp8MaxValue` uses the selected
-format's default.
+TACO supports `E4M3` and `E5M2`, optional finite saturation, and group sizes
+32, 64, 128, 256, or 512.
 
 ```toml
 [training.tp.all_reduce.default]
@@ -68,39 +24,36 @@ targetRange = 448.0
 lambda = 1e-6
 ```
 
----
+Set `fp8MaxValue` only when overriding the selected FP8 format's default
+maximum.
 
-## 📊 Ablation Results
+## Build
 
-| Method   | Val Loss ↓ | Test Loss ↓ | Val Deg. ↓ | Test Deg. ↓ |
-| -------- | ---------- | ----------- | ---------- | ----------- |
-| Baseline | 2.389899   | 2.344701    | –          | –           |
-| **TACO** | 2.395784   | 2.351210    | **+0.25%** | **+0.28%**  |
+Build COCCL first, then this plugin:
 
----
+```bash
+make -C src/coccl-extend/extensions/compressor_plugin/taco \
+  CUDA_HOME=/path/to/cuda \
+  NVCC_GENCODE="-gencode=arch=compute_80,code=sm_80"
+```
 
-![Ablation](Ablation.png)
+The shared library is written to COCCL's compressor plugin output directory.
 
+## Results
 
-## 📈 Comparison Results
+The reported TACO evaluation reaches up to 1.87x end-to-end training speedup.
+The validation and test losses in the ablation were within 0.3% of baseline:
 
-![Comparison](Comparison.png)
+| Method | Validation loss | Test loss | Validation change | Test change |
+| --- | ---: | ---: | ---: | ---: |
+| Baseline | 2.389899 | 2.344701 | - | - |
+| TACO | 2.395784 | 2.351210 | +0.25% | +0.28% |
 
----
+![TACO ablation](Ablation.png)
 
+![TACO comparison](Comparison.png)
 
----
-
-## 📎 Notes
-
-* Designed for large-scale distributed training (Megatron-LM based)
-* Supports integration with existing TP/PP/DP pipelines
-* Requires CUDA + NCCL + MPI environment
-* Achieves better performance under high tensor parallelism (TP ≥ 4)
-
----
-
-## 📖 Citation
+## Citation
 
 ```bibtex
 @misc{liu2026taco,
@@ -114,5 +67,4 @@ lambda = 1e-6
 }
 ```
 
-> 🔗 arXiv: https://arxiv.org/abs/2604.24088
-> 📌 HPDC version will be updated once available.
+Paper: <https://arxiv.org/abs/2604.24088>
