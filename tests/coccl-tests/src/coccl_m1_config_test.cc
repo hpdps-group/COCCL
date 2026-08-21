@@ -17,10 +17,9 @@ const cocclCompressorScopeEntry& scope(
   return cocclConfiguredCompressorScope(policy, value);
 }
 
-int checkCatalog(const cocclConfig& config) {
-  return config.plugins.compressors.size() == 2 &&
-         config.plugins.compressors[0] == "sdp4bit" &&
-         config.plugins.compressors[1] == "zfp" &&
+int checkCatalog(const cocclConfig& config, const char* compressor) {
+  return config.plugins.compressors.size() == 1 &&
+         config.plugins.compressors[0] == compressor &&
          config.plugins.libraryPath.find(
              "build/obj/coccl-extend/compressor_plugin/libcompress") !=
              std::string::npos
@@ -34,7 +33,8 @@ int checkSdp(const char* path) {
     fprintf(stderr, "failed to parse SDP4Bit TOML: %s\n", error.c_str());
     return 1;
   }
-  if (checkCatalog(config) || config.runtime.compressionThresholdBytes != 0 ||
+  if (checkCatalog(config, "sdp4bit") ||
+      config.runtime.compressionThresholdBytes != 1048576 ||
       scope(config.normal.allToAll, cocclCompressionScope::Default).name !=
           "sdp4bit" ||
       scope(config.normal.allGather, cocclCompressionScope::Default).name !=
@@ -61,12 +61,12 @@ int checkSdp(const char* path) {
       !valueIs(ar, "hadamard", "false") ||
       !valueIs(arInter, "quantBits", "4") ||
       !valueIs(arInter, "groupCount", "128") ||
-      !valueIs(arInter, "hadamard", "true") ||
+      !valueIs(arInter, "hadamard", "false") ||
       arInter.count("inQuantBits") != 0 ||
       arInter.count("inGroupCount") != 0 ||
       !valueIs(rs, "groupCount", "128") ||
       !valueIs(rs, "hadamard", "true")) {
-    fprintf(stderr, "SDP4Bit TOML values differ from the M0 configs\n");
+    fprintf(stderr, "SDP4Bit public TOML values are invalid\n");
     return 1;
   }
   return 0;
@@ -79,7 +79,7 @@ int checkZfp(const char* path) {
     fprintf(stderr, "failed to parse ZFP TOML: %s\n", error.c_str());
     return 1;
   }
-  if (checkCatalog(config) ||
+  if (checkCatalog(config, "zfp") ||
       scope(config.normal.allToAll, cocclCompressionScope::Default).name !=
           "zfp" ||
       scope(config.normal.allGather, cocclCompressionScope::Default).name !=
@@ -100,7 +100,7 @@ int checkZfp(const char* path) {
       !valueIs(scope(config.normal.reduceScatter,
                      cocclCompressionScope::Default).values,
                "rate", "8")) {
-    fprintf(stderr, "ZFP policy mapping differs from the M0 configs\n");
+    fprintf(stderr, "ZFP public TOML values are invalid\n");
     return 1;
   }
   return 0;

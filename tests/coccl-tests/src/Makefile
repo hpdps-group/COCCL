@@ -115,8 +115,8 @@ M1_SDK_TEST := $(DST_DIR)/coccl_compressor_sdk_test
 M1_CONFIG_READER_TEST := $(DST_DIR)/coccl_config_reader_test
 M1_CONFIG_TEST := $(DST_DIR)/coccl_m1_config_test
 M1_PLUGIN_LOAD_TEST := $(DST_DIR)/coccl_m1_plugin_load_test
-M1_SDP_CONFIG := ../../../examples/benchmarks_scripts/configs/m1_sdp4bit.toml
-M1_ZFP_CONFIG := ../../../examples/benchmarks_scripts/configs/m1_zfp.toml
+M1_SDP_CONFIG := ../../../examples/benchmarks_scripts/configs/sdp4bit.toml
+M1_ZFP_CONFIG := ../../../examples/benchmarks_scripts/configs/zfp.toml
 M1_PLUGIN_DIR := $(NCCL_HOME)/obj/coccl-extend/compressor_plugin/libcompress
 M2_RUNTIME_TEST := $(DST_DIR)/coccl_m2_runtime_test
 M2_GROUP_TEST := $(DST_DIR)/coccl_m2_group_test
@@ -156,7 +156,7 @@ M19_SELECTOR_SCOPE_TEST := $(DST_DIR)/coccl_m19_selector_scope_test
 M20_REMAINDER_PLAN_TEST := $(DST_DIR)/coccl_m20_remainder_plan_test
 M22_TRAINING_TEST := $(DST_DIR)/coccl_m22_training_test
 M22_KNOWN_ROLES_TEST := $(DST_DIR)/coccl_m22_known_roles
-M22_TRAINING_CONFIG := ../../../examples/benchmarks_scripts/configs/m22_training.toml
+M22_TRAINING_CONFIG := ../../../examples/training_scripts/configs/training.toml
 DIETGPU_INTEGER_TEST := $(DST_DIR)/coccl_dietgpu_integer_test
 
 dietgpu-integer-build: $(DIETGPU_INTEGER_TEST)

@@ -57,5 +57,9 @@ bash communication_benchmarks.sh single
 Multi-node mode forwards `NCCL_SOCKET_IFNAME`, `NCCL_IB_DISABLE`,
 `NCCL_IB_HCA`, and `NCCL_LOCAL_REGISTER` to MPI ranks when they are set.
 
+The `configs/` directory contains the current TOML examples for SDP4Bit, ZFP,
+and dietGPU. The script copies the selected file to the build directory and
+adds the requested pipeline depth without modifying the checked-in example.
+
 `COCCL_ROOT` defaults to the repository containing the script. Generated
 runtime configurations are written below `build/examples/benchmark-configs`.

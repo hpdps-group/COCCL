@@ -1002,11 +1002,12 @@ static int testAmbiguousConstantCollective() {
 static int expectConfigCompressor(const cocclPrimitivePolicy& policy,
                                   cocclCompressionScope scope,
                                   const char* compressor,
+                                  cocclCompressionScope source,
                                   const char* scenario) {
   const cocclEffectiveCompressorScope effective =
       cocclEffectiveCompressorScopeFor(policy, scope);
   if (!effective.enabled() || effective.entry->name != compressor ||
-      effective.source != cocclCompressionScope::Default) {
+      effective.source != source) {
     fprintf(stderr, "%s: unexpected configured compressor\n", scenario);
     return 1;
   }
@@ -1018,7 +1019,7 @@ static int testTrainingConfig() {
   std::string error;
   if (!cocclLoadConfigFile(COCCL_M22_CONFIG_FILE, &config, &error) ||
       config.runtime.mode != cocclRuntimeMode::Training ||
-      config.runtime.compressionThresholdBytes != 0 ||
+      config.runtime.compressionThresholdBytes != 67108864 ||
       config.training.observationIterations != 5 ||
       config.training.dataParallelSize != 2 ||
       config.training.tensorParallelSize != 2 ||
@@ -1032,19 +1033,12 @@ static int testTrainingConfig() {
   }
   return expectConfigCompressor(
              config.trainingPolicies.dataParallel.allGather,
-             cocclCompressionScope::Default, "sdp4bit", "DP AllGather") ||
+             cocclCompressionScope::Default, "sdp4bit",
+             cocclCompressionScope::Default, "DP AllGather") ||
       expectConfigCompressor(
              config.trainingPolicies.dataParallel.reduceScatter,
-             cocclCompressionScope::Inter, "sdp4bit", "DP inter RS") ||
-      expectConfigCompressor(
-             config.trainingPolicies.tensorParallel.allReduce,
-             cocclCompressionScope::Intra, "zfp", "TP intra AR") ||
-      expectConfigCompressor(
-             config.trainingPolicies.pipelineSendRecvForward,
-             cocclCompressionScope::Inter, "sdp4bit", "PP forward") ||
-      expectConfigCompressor(
-             config.trainingPolicies.pipelineSendRecvBackward,
-             cocclCompressionScope::Inter, "zfp", "PP backward");
+             cocclCompressionScope::Inter, "sdp4bit",
+             cocclCompressionScope::Inter, "DP inter RS");
 }
 
 static int testTrainingConfigRequiresParallelSizes() {

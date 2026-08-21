@@ -52,7 +52,7 @@ Edit `training_envs.sh` once or export the same variables before launch:
 | `TRAIN_OUTPUT_ROOT` | Training output and checkpoint root. |
 | `TRAIN_LOG_ROOT` | Per-model, per-node log root. |
 | `COCCL_ROOT` | Optional external COCCL checkout; inferred from this repository by default. |
-| `COCCL_CONFIG_FILE` | Optional training TOML; defaults to `src/coccl-extend/extensions/configs/training.toml`. |
+| `COCCL_CONFIG_FILE` | Optional training TOML; defaults to `examples/training_scripts/configs/training.toml`. |
 
 The job computes `DP = world_size / (TP * PP * CP)`. The selected TOML must
 declare matching values in `training.classifier`. `dp_strategy` must match the
@@ -112,10 +112,10 @@ Once a role is known, COCCL routes collectives through `training.dp.*` or
 `training.pp.sendrecv.backward`; direction is inferred from local rank and
 peer.
 
-The bundled `training.toml` loads only SDP4Bit and enables the SDP4Bit DP
-policies used by the validated Qwen runs. It does not load ZFP. TP and PP
-remain on native NCCL. Add role-specific policies only after validating the
-selected codec for training.
+The bundled [`configs/training.toml`](configs/training.toml) loads only
+SDP4Bit and enables the SDP4Bit DP policies used by the validated Qwen runs.
+It does not load ZFP. TP and PP remain on native NCCL. Add role-specific
+policies only after validating the selected codec for training.
 
 Use tuning logs to verify the detected role and selected policy:
 

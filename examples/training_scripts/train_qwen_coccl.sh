@@ -9,7 +9,7 @@ nnodes=${2:-${NNODES:-2}}
 gpus_per_node=${3:-${GPUS_PER_NODE:-4}}
 node_rank=${4:-${NODE_RANK:-0}}
 coccl_root=${COCCL_ROOT:-$(cd "$script_dir/../.." && pwd)}
-coccl_config=${COCCL_CONFIG_FILE:-$coccl_root/src/coccl-extend/extensions/configs/training.toml}
+coccl_config=${COCCL_CONFIG_FILE:-$script_dir/configs/training.toml}
 
 : "${CUDA_HOME:?Set CUDA_HOME in training_envs.sh or the environment}"
 : "${PAI_MEGATRON_ROOT:?Set PAI_MEGATRON_ROOT in training_envs.sh or the environment}"

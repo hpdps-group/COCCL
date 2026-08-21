@@ -1,9 +1,9 @@
 [runtime]
 mode = "training"
-compression_threshold_bytes = 0
+compression_threshold_bytes = 67108864
 
 [compressor_plugins]
-compressors = ["sdp4bit", "zfp"]
+compressors = ["sdp4bit"]
 library_path = "../../../build/obj/coccl-extend/compressor_plugin/libcompress"
 
 [training]
@@ -21,8 +21,10 @@ compressor = "sdp4bit"
 
 [training.dp.all_gather.default.config]
 groupCount = 2048
-quantBits = 4
+quantBits = 8
 quantType = "Symmetric"
+subAdd = true
+pipelineSize = 1
 
 [training.dp.reduce_scatter.default]
 compressor = "sdp4bit"
@@ -31,52 +33,25 @@ compressor = "sdp4bit"
 groupCount = 128
 quantBits = 4
 quantType = "Symmetric"
-hadamard = false
-pipelineSize = 1
+hadamard = true
 
-[training.dp.all_reduce.default]
+[training.dp.reduce_scatter.intra]
 compressor = "sdp4bit"
 
-[training.dp.all_reduce.default.config]
+[training.dp.reduce_scatter.intra.config]
 groupCount = 128
 quantBits = 4
 quantType = "Symmetric"
-hadamard = false
-pipelineSize = 1
+hadamard = true
 
-[training.tp.all_gather.default]
-compressor = "zfp"
-
-[training.tp.all_gather.default.config]
-rate = 8
-
-[training.tp.reduce_scatter.default]
-compressor = "zfp"
-
-[training.tp.reduce_scatter.default.config]
-rate = 8
-
-[training.tp.all_reduce.default]
-compressor = "zfp"
-
-[training.tp.all_reduce.default.config]
-rate = 8
-
-[training.pp.sendrecv.forward.default]
+[training.dp.reduce_scatter.inter]
 compressor = "sdp4bit"
 
-[training.pp.sendrecv.forward.default.config]
+[training.dp.reduce_scatter.inter.config]
 groupCount = 128
 quantBits = 4
 quantType = "Symmetric"
-hadamard = false
-pipelineSize = 1
-
-[training.pp.sendrecv.backward.default]
-compressor = "zfp"
-
-[training.pp.sendrecv.backward.default.config]
-rate = 8
+hadamard = true
 
 [pipeline]
 depth = 1

@@ -158,8 +158,9 @@ scope on native NCCL.
 
 An explicit `intra` or `inter` scope overrides `default`. ReduceScatter
 TwoShot executes `intra` then `inter`; AllReduce TripleShot additionally uses
-`default` for its final global phase. This example leaves the local phase
-native and compresses only cross-node ReduceScatter traffic:
+`default` for its final global phase. Multiple plugins can be loaded together
+and selected independently by operation. This example uses ZFP for AllReduce
+and SDP4Bit for ReduceScatter:
 
 ```toml
 [runtime]
@@ -167,31 +168,31 @@ mode = "normal"
 compression_threshold_bytes = 1048576
 
 [compressor_plugins]
-compressors = ["zfp"]
+compressors = ["zfp", "sdp4bit"]
 library_path = "/path/to/COCCL/build/obj/coccl-extend/compressor_plugin/libcompress"
 
-[normal.reduce_scatter]
-threshold_bytes = 4194304
-
-[normal.reduce_scatter.intra]
-enabled = false
-
-[normal.reduce_scatter.inter]
+[normal.all_reduce.default]
 compressor = "zfp"
 
-[normal.reduce_scatter.inter.config]
+[normal.all_reduce.default.config]
 rate = 8
+
+[normal.reduce_scatter.default]
+compressor = "sdp4bit"
+
+[normal.reduce_scatter.default.config]
+groupCount = 128
+quantBits = 4
+quantType = "Symmetric"
+hadamard = true
 
 [pipeline]
 depth = 4
-
-[autotune]
-enabled = false
-reduce_scatter_algorithm = "twoshot"
 ```
 
 Ready-to-edit normal-mode examples for SDP4Bit, ZFP, and dietGPU are under
-`src/coccl-extend/extensions/configs/`.
+`src/coccl-extend/extensions/configs/`. The complete two-plugin example is
+[normal-mixed.toml](src/coccl-extend/extensions/configs/normal-mixed.toml).
 
 ### Training Mode
 
@@ -253,9 +254,9 @@ depth = 1
 ```
 
 Use `NCCL_DEBUG_SUBSYS=COCCL_TUNING` to inspect classification and algorithm
-selection. The complete validated example is
-[training.toml](src/coccl-extend/extensions/configs/training.toml), and Qwen
-launch instructions are in
+selection. The complete Qwen training example is
+[training.toml](examples/training_scripts/configs/training.toml), and launch
+instructions are in
 [examples/training_scripts/README.md](examples/training_scripts/README.md).
 
 ### Algorithm And Memory Controls

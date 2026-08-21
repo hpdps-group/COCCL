@@ -44,7 +44,7 @@ export NCCL_BUFFSIZE=${NCCL_BUFFSIZE:-16777216}
 
 config_for() {
   local compressor=$1 depth=$2
-  local template="$script_dir/configs/m16_${compressor}.toml"
+  local template="$script_dir/configs/${compressor}.toml"
   local output="$config_root/${compressor}-d${depth}.toml"
 
   sed "s|^library_path = .*|library_path = \"$plugin_root\"|" \
