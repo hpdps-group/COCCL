@@ -88,7 +88,9 @@ bash train_qwen_coccl.sh qwen3 2 4 0
 
 `DP_OVERLAP` accepts `on` or `off`. Other useful controls include
 `MICRO_BATCH_SIZE`, `GLOBAL_BATCH_SIZE`, `SEQUENCE_LENGTH`, `WARMUP_ITERS`,
-`EVAL_INTERVAL`, `EVAL_ITERS`, and `SAVE_INTERVAL`.
+`EVAL_INTERVAL`, and `EVAL_ITERS`. Checkpoints are disabled by default, even
+though the upstream Pai launchers add `--save`. Set `SAVE_CHECKPOINTS=on` and
+optionally `SAVE_INTERVAL` to enable checkpoint output.
 
 ## Automatic DP, TP, And PP Detection
 
@@ -109,6 +111,11 @@ Once a role is known, COCCL routes collectives through `training.dp.*` or
 `training.tp.*`. PP Send/Recv uses `training.pp.sendrecv.forward` or
 `training.pp.sendrecv.backward`; direction is inferred from local rank and
 peer.
+
+The bundled `training.toml` loads only SDP4Bit and enables the SDP4Bit DP
+policies used by the validated Qwen runs. It does not load ZFP. TP and PP
+remain on native NCCL. Add role-specific policies only after validating the
+selected codec for training.
 
 Use tuning logs to verify the detected role and selected policy:
 

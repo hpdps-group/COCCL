@@ -5,6 +5,7 @@ script_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 coccl_root=${COCCL_ROOT:-$(cd "$script_dir/../.." && pwd)}
 cuda_home=${CUDA_HOME:-${1:-}}
 mpi_home=${MPI_HOME:-${2:-}}
+cmake_home=${CMAKE_HOME:-${3:-}}
 cuda_arch=${CUDA_ARCH:-80}
 build_jobs=${BUILD_JOBS:-$(nproc)}
 nvcc_gencode=${NVCC_GENCODE:-"-gencode=arch=compute_${cuda_arch},code=sm_${cuda_arch}"}
@@ -15,11 +16,18 @@ nvcc_gencode=${NVCC_GENCODE:-"-gencode=arch=compute_${cuda_arch},code=sm_${cuda_
 export CUDA_HOME="$cuda_home"
 export MPI_HOME="$mpi_home"
 export NCCL_HOME="$coccl_root/build"
+if [[ -n "$cmake_home" ]]; then
+  export PATH="$cmake_home/bin:$PATH"
+fi
+command -v cmake >/dev/null 2>&1 || {
+  echo "CMake is required to build the bundled ZFP and dietGPU plugins; set CMAKE_HOME or add cmake to PATH" >&2
+  exit 2
+}
 export PATH="$CUDA_HOME/bin:$MPI_HOME/bin:$PATH"
 export LD_LIBRARY_PATH="$NCCL_HOME/lib:$CUDA_HOME/lib64:$MPI_HOME/lib:${LD_LIBRARY_PATH:-}"
 
 echo "Building COCCL in $coccl_root"
-echo "CUDA_HOME=$CUDA_HOME MPI_HOME=$MPI_HOME CUDA_ARCH=$cuda_arch"
+echo "CUDA_HOME=$CUDA_HOME MPI_HOME=$MPI_HOME CMAKE=$(command -v cmake) CUDA_ARCH=$cuda_arch"
 
 make -C "$coccl_root" -j "$build_jobs" src.build \
   CUDA_HOME="$CUDA_HOME" NVCC_GENCODE="$nvcc_gencode"

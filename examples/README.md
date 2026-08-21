@@ -9,6 +9,7 @@ directory.
 ```bash
 CUDA_HOME=/path/to/cuda \
 MPI_HOME=/path/to/mpi \
+CMAKE_HOME=/path/to/cmake-prefix \
 CUDA_ARCH=80 \
 bash /path/to/COCCL/examples/build_scripts/build.sh
 ```
@@ -22,7 +23,7 @@ build controls.
 Single node:
 
 ```bash
-CUDA_HOME=/path/to/cuda GPUS_PER_NODE=4 \
+CUDA_HOME=/path/to/cuda MPI_HOME=/path/to/mpi GPUS_PER_NODE=4 \
 bash /path/to/COCCL/examples/benchmarks_scripts/communication_benchmarks.sh single
 ```
 

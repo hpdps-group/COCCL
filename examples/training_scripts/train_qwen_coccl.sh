@@ -34,12 +34,24 @@ warmup_iterations=${WARMUP_ITERS:-10}
 train_tokens=$((train_iterations * global_batch_size * sequence_length))
 warmup_tokens=$((warmup_iterations * global_batch_size * sequence_length))
 save_interval=${SAVE_INTERVAL:-$train_iterations}
+save_checkpoints=${SAVE_CHECKPOINTS:-off}
 dp_overlap=${DP_OVERLAP:-off}
 
 case "$dp_overlap" in
   on) unset QWEN_DISABLE_DP_OVERLAP ;;
   off) export QWEN_DISABLE_DP_OVERLAP=1 ;;
   *) echo "DP_OVERLAP must be on or off" >&2; exit 2 ;;
+esac
+
+case "$save_checkpoints" in
+  on) ;;
+  off)
+    torchrun() {
+      "$CONDA_PREFIX/bin/torchrun" "$@" --save ""
+    }
+    export -f torchrun
+    ;;
+  *) echo "SAVE_CHECKPOINTS must be on or off" >&2; exit 2 ;;
 esac
 
 export WORLD_SIZE="$nnodes"
@@ -67,7 +79,6 @@ export LD_LIBRARY_PATH="$NCCL_HOME/lib:$plugin_root:$CUDA_HOME/lib64:${LD_LIBRAR
 export LD_PRELOAD="$NCCL_HOME/lib/libnccl.so.2${LD_PRELOAD:+:$LD_PRELOAD}"
 export NCCL_DEBUG=${NCCL_DEBUG:-WARN}
 export NCCL_BUFFSIZE=${NCCL_BUFFSIZE:-33554432}
-export NCCL_LOCAL_REGISTER=${NCCL_LOCAL_REGISTER:-0}
 export COCCL_ENABLE=1
 export COCCL_CONFIG_FILE="$coccl_config"
 
@@ -116,6 +127,6 @@ case "$model" in
 esac
 
 echo "model=$model rank=$node_rank/$nnodes GPUs/node=$gpus_per_node TP=$tp_size PP=$pp_size CP=$cp_size DP=$dp_size"
-echo "COCCL_CONFIG_FILE=$COCCL_CONFIG_FILE iterations=$train_iterations DP_OVERLAP=$dp_overlap"
+echo "COCCL_CONFIG_FILE=$COCCL_CONFIG_FILE iterations=$train_iterations DP_OVERLAP=$dp_overlap SAVE_CHECKPOINTS=$save_checkpoints"
 cd "$example"
 "${command[@]}" 2>&1 | tee "$log_dir/node${node_rank}.log"

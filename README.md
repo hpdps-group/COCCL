@@ -34,6 +34,7 @@ the configuration checker, and MPI-enabled communication tests:
 ```bash
 CUDA_HOME=/path/to/cuda \
 MPI_HOME=/path/to/mpi \
+CMAKE_HOME=/path/to/cmake-prefix \
 CUDA_ARCH=80 \
 bash examples/build_scripts/build.sh
 ```
@@ -252,6 +253,8 @@ export NCCL_DEBUG_SUBSYS=TUNING
 
 The complete training example is
 [src/coccl-extend/extensions/configs/training.toml](src/coccl-extend/extensions/configs/training.toml).
+It enables the validated SDP4Bit DP policies; TP and PP remain native until
+the user adds corresponding policies.
 Framework loading, submodule setup, and Qwen launch instructions are in
 [examples/training_scripts/README.md](examples/training_scripts/README.md).
 

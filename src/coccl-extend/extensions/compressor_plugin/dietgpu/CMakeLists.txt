@@ -27,6 +27,7 @@ add_library(dietgpu SHARED
 target_include_directories(dietgpu PRIVATE
   ${COCCL_INCLUDE_DIR}
   ${COCCL_NCCL_INCLUDE_DIR}
+  ${CMAKE_CUDA_TOOLKIT_INCLUDE_DIRECTORIES}
   ${CMAKE_CURRENT_SOURCE_DIR}/vendor/dietgpu)
 target_link_libraries(dietgpu PRIVATE glog::glog)
 target_compile_options(dietgpu PRIVATE
