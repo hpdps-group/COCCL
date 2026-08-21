@@ -1055,7 +1055,6 @@ static int testTrainingConfigRequiresParallelSizes() {
   };
   for (size_t missing = 0; missing < 3; ++missing) {
     std::string contents =
-        "schema_version = 3\n"
         "runtime.mode = \"training\"\n"
         "compressor_plugins.compressors = []\n"
         "compressor_plugins.library_path = \".\"\n"

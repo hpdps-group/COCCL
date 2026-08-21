@@ -123,8 +123,6 @@ void appendPolicy(std::vector<std::string>* lines, const std::string& path,
 std::vector<std::string> cocclFormatEffectiveConfig(
     const cocclConfig& config) {
   std::vector<std::string> lines;
-  lines.push_back("schema_version = " +
-                  std::to_string(kCocclConfigSchemaVersion));
   lines.push_back("runtime.mode = " + quote(runtimeModeName(config.runtime.mode)));
   lines.push_back("runtime.compression_threshold_bytes = " +
                   std::to_string(config.runtime.compressionThresholdBytes));

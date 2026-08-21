@@ -44,7 +44,6 @@ constexpr ExpectedScope enabled(const char* compressor,
 
 std::string configPreamble() {
   return
-      "schema_version = 3\n"
       "runtime.mode = \"normal\"\n"
       "runtime.compression_threshold_bytes = 4096\n"
       "compressor_plugins.compressors = [\"sdp4bit\", \"zfp\", \"dietgpu\"]\n"

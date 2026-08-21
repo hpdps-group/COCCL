@@ -134,7 +134,6 @@ struct cocclConfig {
   cocclTrainingPolicies trainingPolicies;
 };
 
-constexpr int kCocclConfigSchemaVersion = 3;
 constexpr int kCocclMinPipelineDepth = 1;
 constexpr int kCocclMaxPipelineDepth = 16;
 

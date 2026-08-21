@@ -7,7 +7,6 @@
 #include <cmath>
 #include <iomanip>
 #include <limits>
-#include <optional>
 #include <set>
 #include <sstream>
 #include <string_view>
@@ -588,18 +587,10 @@ bool parseConfigFileImpl(const std::string& path, cocclConfig* config,
   try {
     toml::table root = toml::parse_file(path);
     if (!validateKeys(root,
-                      {"schema_version", "runtime", "compressor_plugins",
-                       "pipeline", "buffer", "autotune", "normal",
-                       "training"},
+                      {"runtime", "compressor_plugins", "pipeline",
+                       "buffer", "autotune", "normal", "training"},
                       "root", error)) {
       return false;
-    }
-    const toml::node* versionNode = root.get("schema_version");
-    auto version = versionNode == nullptr
-        ? std::optional<int64_t>() : versionNode->value<int64_t>();
-    if (!version || *version != kCocclConfigSchemaVersion) {
-      return fail(error, "schema_version must be " +
-                             std::to_string(kCocclConfigSchemaVersion));
     }
     if (!parseRuntime(root, config, error) ||
         !parsePlugins(root, path, config, error) ||

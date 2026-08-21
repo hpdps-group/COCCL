@@ -122,7 +122,7 @@ autotuning and training-role classification.
 
 ### Common TOML Settings
 
-Every configuration starts with `schema_version = 3` and a runtime mode:
+Every configuration selects a runtime mode:
 
 - `runtime.mode` is `normal` or `training`.
 - `runtime.compression_threshold_bytes` defaults to 8 MiB. Standard NCCL calls
@@ -162,8 +162,6 @@ TwoShot executes `intra` then `inter`; AllReduce TripleShot additionally uses
 native and compresses only cross-node ReduceScatter traffic:
 
 ```toml
-schema_version = 3
-
 [runtime]
 mode = "normal"
 compression_threshold_bytes = 1048576
@@ -222,8 +220,6 @@ The following minimal training configuration compresses DP AllGather with
 SDP4Bit while leaving TP and PP on native NCCL:
 
 ```toml
-schema_version = 3
-
 [runtime]
 mode = "training"
 compression_threshold_bytes = 67108864

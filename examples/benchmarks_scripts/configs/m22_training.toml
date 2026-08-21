@@ -1,5 +1,3 @@
-schema_version = 3
-
 [runtime]
 mode = "training"
 compression_threshold_bytes = 0
