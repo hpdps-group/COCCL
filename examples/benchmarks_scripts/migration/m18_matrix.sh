@@ -47,7 +47,7 @@ run_profile() {
     timeout --signal=TERM --kill-after=30s 1800
     "$mpi_root/bin/mpirun" -np 8 --hostfile "$hostfile"
     --map-by ppr:4:node --bind-to none --mca btl '^openib'
-    -x "LD_LIBRARY_PATH=$current_root/build/lib:$current_root/build/obj/device/compress/libcompress:$cuda_root/lib64:$mpi_root/lib"
+    -x "LD_LIBRARY_PATH=$current_root/build/lib:$current_root/build/obj/coccl-extend/compressor_plugin/libcompress:$cuda_root/lib64:$mpi_root/lib"
     -x CUDA_VISIBLE_DEVICES
     -x "COCCL_CONFIG_FILE=$config"
     -x COCCL_ENABLE=1

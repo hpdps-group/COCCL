@@ -1,6 +1,6 @@
-#include "coccl_hierarchical_reduction.h"
-#include "coccl_pipeline_internal.h"
-#include "coccl_prepared_call.h"
+#include "extensions/primitives/coccl_hierarchical_reduction.h"
+#include "core/pipeline/coccl_pipeline_internal.h"
+#include "core/runtime/coccl_prepared_call.h"
 #include "coccl_m11_size_query_stub.h"
 
 #include "comm.h"

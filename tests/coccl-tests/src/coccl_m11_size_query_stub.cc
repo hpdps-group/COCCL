@@ -1,6 +1,6 @@
 #include "coccl_m11_size_query_stub.h"
 
-#include "compress.h"
+#include "core/compression/compress.h"
 
 namespace {
 
@@ -72,8 +72,7 @@ const cocclM11SizeQueryObservation& cocclM11DrcQueryObservation() {
   return state.drc;
 }
 
-ncclResult_t cocclGetCompressorEncodedSizeBound(
-    cocclTrainingRole, cocclPolicyKey,
+static ncclResult_t encodedSizeBound(
     cocclCompressorOperation operation,
     size_t elements, size_t chunks, ncclDataType_t datatype,
     size_t* encodedBytes) {
@@ -111,15 +110,12 @@ ncclResult_t cocclGetCompressorEncodedSizeBound(
     void*, cocclCompressorOperation operation,
     size_t elements, size_t chunks, ncclDataType_t datatype,
     size_t* encodedBytes) {
-  return cocclGetCompressorEncodedSizeBound(
-      cocclTrainingRoleUnknown, cocclPolicyKey{}, operation,
-      elements, chunks, datatype,
-      encodedBytes);
+  return encodedSizeBound(
+      operation, elements, chunks, datatype, encodedBytes);
 }
 
-bool cocclCompressorPolicySupports(
-    cocclTrainingRole, cocclPolicyKey,
-    cocclCompressorCapability capability) {
+bool cocclCompressorSupports(
+    void*, cocclCompressorCapability capability) {
   if (capability == cocclCompressorCapabilityFramed) return state.framed;
   if (capability ==
       cocclCompressorCapabilityFusedHierarchicalSwizzle) {
@@ -128,12 +124,6 @@ bool cocclCompressorPolicySupports(
   return capability ==
              cocclCompressorCapabilityDecompressReduceCompress &&
       state.supportsDrc;
-}
-
-bool cocclCompressorSupports(
-    void*, cocclCompressorCapability capability) {
-  return cocclCompressorPolicySupports(
-      cocclTrainingRoleUnknown, {}, capability);
 }
 
 ncclResult_t cocclResolveCompressorPolicy(

@@ -1,5 +1,5 @@
-#include "coccl_config.h"
-#include "coccl_config_debug.h"
+#include "core/config/coccl_config.h"
+#include "core/config/coccl_config_debug.h"
 
 #include <array>
 #include <cstdio>

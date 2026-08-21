@@ -256,33 +256,33 @@ void runCompressed(Operation operation, const void* input, void* output,
 #ifdef COCCL_M16_LEGACY_API
   switch (operation) {
     case Operation::AllToAll:
-      NCCLCHECK(ncclAlltoAllCompOverlap(
+      NCCLCHECK(cocclAllToAllComp(
           input, output, inputCount / ranks, datatype, comm, stream));
       return;
     case Operation::AllGather:
-      NCCLCHECK(ncclAllGatherCompOverlap(
+      NCCLCHECK(cocclAllGatherComp(
           input, output, inputCount, datatype, comm, stream));
       return;
     case Operation::ReduceScatterOneShot:
-      NCCLCHECK(ncclReduceScatterCompOneShotOverlap(
+      NCCLCHECK(cocclReduceScatterCompOneShot(
           input, output, inputCount / ranks, datatype, ncclSum, comm,
           stream));
       return;
     case Operation::ReduceScatterTwoShot:
-      NCCLCHECK(ncclReduceScatterCompTwoShotTLOverlap(
+      NCCLCHECK(cocclReduceScatterCompTwoShot(
           input, output, inputCount / ranks, datatype, ncclSum, comm,
           stream));
       return;
     case Operation::AllReduceOneShot:
-      NCCLCHECK(ncclAllReduceCompOneShot(
+      NCCLCHECK(cocclAllReduceCompOneShot(
           input, output, inputCount, datatype, ncclSum, comm, stream));
       return;
     case Operation::AllReduceTwoShot:
-      NCCLCHECK(ncclAllReduceCompTwoShotOverlap(
+      NCCLCHECK(cocclAllReduceCompTwoShot(
           input, output, inputCount, datatype, ncclSum, comm, stream));
       return;
     case Operation::AllReduceTripleShot:
-      NCCLCHECK(ncclAllReduceCompTripleShotTLOverlap(
+      NCCLCHECK(cocclAllReduceCompTripleShot(
           input, output, inputCount, datatype, ncclSum, comm, stream));
       return;
     case Operation::SendRecv: {

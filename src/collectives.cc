@@ -5,7 +5,7 @@
  ************************************************************************/
 
  #include "argcheck.h" // Need some checks here since we access comm
- #include "coccl_runtime.h"
+ #include "runtime/coccl_runtime.h"
  #include "collectives.h"
  #include "enqueue.h"
  #include "nccl.h"

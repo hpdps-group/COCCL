@@ -1,6 +1,6 @@
-#include "misc/tuning/coccl_autotune_internal.h"
+#include "core/tuning/coccl_autotune_internal.h"
 
-#include "coccl_config.h"
+#include "core/config/coccl_config.h"
 #include "comm.h"
 #include "debug.h"
 

@@ -1,7 +1,7 @@
-#include "coccl_pipeline_internal.h"
+#include "core/pipeline/coccl_pipeline_internal.h"
 
 #include "comm.h"
-#include "compress.h"
+#include "core/compression/compress.h"
 
 #include <cstdio>
 #include <cstdlib>

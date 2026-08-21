@@ -6,7 +6,7 @@ compression_threshold_bytes = 17179869184
 
 [compressor_plugins]
 compressors = ["sdp4bit", "zfp"]
-library_path = "../../../build/obj/device/compress/libcompress"
+library_path = "../../../build/obj/coccl-extend/compressor_plugin/libcompress"
 
 [normal.all_to_all.default]
 compressor = "zfp"

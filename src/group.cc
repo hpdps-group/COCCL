@@ -5,7 +5,7 @@
  ************************************************************************/
 
 #include "group.h"
-#include "coccl_group.h"
+#include "runtime/coccl_group.h"
 #include "debug.h"
 #include "enqueue.h"
 #include "transport.h"

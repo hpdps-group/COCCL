@@ -18,12 +18,6 @@ OBJDIR := $(BUILDDIR)/obj/device
 
 MANIFEST := $(OBJDIR)/manifest
 DEVGLUE_OBJ  := $(OBJDIR)/device_glue.o
-# SUBDIR := compress/sdp4bit
-# SUBOBJDIR := $(OBJDIR)/$(SUBDIR)
-
-COMPSUBDIR := compress
-COMPSUBOBJDIR := $(OBJDIR)/$(COMPSUBDIR)
-
 INCFLAGS  = -I. -I.. -I$(BUILDDIR)/include -I../include
 NVCUFLAGS += $(INCFLAGS) --compiler-options "-fPIC -fvisibility=hidden"
 CXXFLAGS  += $(INCFLAGS)
@@ -51,7 +45,7 @@ define DEPENDS
  echo "$(patsubst %.d,%.o,$1) $1: " $$files > $1
 endef
 
-all: $(MANIFEST) compress.build
+all: $(MANIFEST)
 
 ifeq (1,1)
 # Case if the <gensrc> directory is generated on-demand:
@@ -75,30 +69,9 @@ $(OBJDIR)/gensrc/rules.mk: $(OBJDIR)/gensrc ;
 -include $(OBJDIR)/gensrc/rules.mk
 # "gensrc/rules.mk" populates $(LIB_OBJS_GEN)
 
-#$(SUBOBJDIR):
-#	@mkdir -p $(SUBOBJDIR)
-#	$(MAKE) -C $(SUBDIR) OBJDIR=$(SUBOBJDIR)
+NCCL_SRCS = common.cu onerank.cu
 
-
-$(COMPSUBOBJDIR):
-	@mkdir -p $(COMPSUBOBJDIR)
-
-compress.build: | $(COMPSUBOBJDIR)
-	$(MAKE) -C $(COMPSUBDIR) SUBOBJDIR=$(COMPSUBOBJDIR)
-# SRCS = common.cu onerank.cu
-SRCS = common.cu onerank.cu compress/reduce_extend_kernel.cu \
-	pipeline/coccl_pipeline_layout.cu
-
-#  $(SUBSO)
-LIB_OBJS = $(patsubst %, $(OBJDIR)/%.o, $(SRCS)) $(LIB_OBJS_GEN)
-PIPELINE_LAYOUT_OBJ := $(OBJDIR)/pipeline/coccl_pipeline_layout.cu.o
-RDC_LIB_OBJS := $(filter-out $(PIPELINE_LAYOUT_OBJ),$(LIB_OBJS))
-
-$(PIPELINE_LAYOUT_OBJ): pipeline/coccl_pipeline_layout.cu \
-		$(OBJDIR)/pipeline/coccl_pipeline_layout.cu.d
-	@$(SAY) "Compiling" $<; \
-	 mkdir -p $(dir $@); \
-	 $(NVCC) $(NVCUFLAGS) -c $< -o $@
+LIB_OBJS = $(patsubst %, $(OBJDIR)/%.o, $(NCCL_SRCS)) $(LIB_OBJS_GEN)
 
 $(OBJDIR)/%.o: % $(OBJDIR)/%.d
 	$(call COMPILE,$@,$<)
@@ -112,7 +85,7 @@ $(OBJDIR)/%.d: %
 $(OBJDIR)/genobj/%.d: $(OBJDIR)/gensrc/%
 	$(call DEPENDS,$@,$<)
 
-$(DEVGLUE_OBJ): $(RDC_LIB_OBJS)
+$(DEVGLUE_OBJ): $(LIB_OBJS)
 	$(NVCC) $(NVCUFLAGS) -dlink $^ -o $@
 
 $(MANIFEST): $(LIB_OBJS) $(DEVGLUE_OBJ)
@@ -121,6 +94,6 @@ $(MANIFEST): $(LIB_OBJS) $(DEVGLUE_OBJ)
 -include $(wildcard $(OBJDIR)/*.d)
 -include $(wildcard $(OBJDIR)/genobj/*.d)
 
-.PHONY: clean compress.build
+.PHONY: clean
 clean:
 	rm -rf $(OBJDIR)

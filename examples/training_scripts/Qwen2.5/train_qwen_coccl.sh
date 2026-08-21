@@ -44,21 +44,9 @@ export NCCL_SOCKET_IFNAME=bond0
 export NCCL_IB_TIMEOUT=23
 export NCCL_IB_RETRY_CNT=13
 
-export NCCL_ENABLE_COMPRESS=1
-export NCCL_COMPRESSORS=sdp4bit,tahquant,taco
-export NCCL_ENABLE_ALLREDUCE_COMPRESS=1
-export NCCL_ALLREDUCE_COMPRESSORS=taco
-export NCCL_ENABLE_ALLGATHER_COMPRESS=1
-export NCCL_ALLGATHER_COMPRESSORS=sdp4bit
-export NCCL_ENABLE_REDUCESCATTER_COMPRESS=1
-export NCCL_REDUCESCATTER_COMPRESSORS=sdp4bit
-export NCCL_REDUCESCATTER_INTER_COMPRESSORS=sdp4bit
-export NCCL_ENABLE_SENDRECV_COMPRESS=1
-export NCCL_SENDRECV_COMPRESSORS=tahquant
-export NCCL_SENDRECV_BWD_COMPRESSORS=tahquant
-export NCCL_COMPRESS_ENABLE_THRESHOLD=10485760 # 10MB
-export NCCL_COMPRESSORS_CONFIG_PATH=$COCCL_PATH/examples/training_scripts/configs_training
-export NCCL_COMPRESSORS_LIB_PATH=$COCCL_PATH/build/obj/device/compress/libcompress
+export COCCL_ENABLE=1
+: "${COCCL_CONFIG_FILE:?set COCCL_CONFIG_FILE to a training config matching this job topology}"
+export COCCL_CONFIG_FILE
 # export NCCL_ALGO=Tree
 export NCCL_LOCAL_REGISTER=0
 export NCCL_CHECKS_DISABLE=1
@@ -96,4 +84,3 @@ bash run_mcore_qwen.sh \
   131072 \
   $OUTPUT_PATH \
   2>&1 | tee $LOG_DIR/qwen2.5-3B_distributed_Rank${RANK}-coccl-tp2pp2dp2-${BATCH_JOB_ID}.log
-

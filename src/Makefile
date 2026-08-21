@@ -5,15 +5,18 @@
 #
 include ../makefiles/common.mk
 include ../makefiles/version.mk
+COCCL_MAKEFILE_INCLUDE_ONLY := 1
+include coccl-extend/Makefile
+COCCL_MAKEFILE_INCLUDE_ONLY :=
 
 ##### src files
 INCEXPORTS  := nccl.h nccl_net.h
 LIBSRCFILES := \
 	bootstrap.cc channel.cc collectives.cc debug.cc enqueue.cc group.cc \
 	init.cc init_nvtx.cc net.cc proxy.cc transport.cc register.cc\
+	$(COCCL_HOST_SRCFILES) \
 	$(wildcard graph/*.cc) \
 	$(wildcard misc/*.cc) \
-	$(wildcard misc/tuning/*.cc) \
 	$(wildcard transport/*.cc)
 
 ##### lib files
@@ -40,30 +43,25 @@ LIBSONAME  := $(LIBNAME:%=%.$(NCCL_MAJOR))
 LIBTARGET  := $(LIBNAME:%=%.$(NCCL_MAJOR).$(NCCL_MINOR).$(NCCL_PATCH))
 STATICLIBTARGET := $(STATICLIBNAME)
 PKGTARGET  := $(PKGCONFIGFILE)
-LIBOBJ     := $(LIBSRCFILES:%.cc=$(OBJDIR)/%.o)
-DEPFILES   := $(LIBOBJ:%.o=%.d)
+$(COCCL_CUDA_OBJFILES): $(INCDIR)/nccl.h
+LIBOBJ     := $(LIBSRCFILES:%.cc=$(OBJDIR)/%.o) $(COCCL_CUDA_OBJFILES)
+DEPFILES   := $(LIBSRCFILES:%.cc=$(OBJDIR)/%.d) $(COCCL_CUDA_DEPFILES)
 LDFLAGS    += -L${CUDA_LIB} -l$(CUDARTLIB) -lpthread -lrt -ldl
-
-# The compressor SDK and TOML parser use C++17. Keep the rest of NCCL on its
-# existing language mode during this migration step.
-$(OBJDIR)/misc/coccl_config.o \
-$(OBJDIR)/misc/coccl_config_format.o \
-$(OBJDIR)/misc/coccl_config_log.o \
-$(OBJDIR)/misc/coccl_training_assist.o \
-$(OBJDIR)/misc/coccl_training_classifier.o \
-$(OBJDIR)/misc/compress.o: CXXFLAGS += -std=c++17
-
-$(patsubst %.cc,$(OBJDIR)/%.o,$(wildcard misc/tuning/*.cc)): \
-	CXXFLAGS += -std=c++17
 
 DEVMANIFEST := $(BUILDDIR)/obj/device/manifest
 
 ##### rules
-build : lib staticlib
+build : $(COCCL_BUILD_TARGET) lib staticlib
 
 lib : $(INCTARGETS) $(LIBDIR)/$(LIBTARGET) $(PKGDIR)/$(PKGTARGET)
 
 staticlib : $(LIBDIR)/$(STATICLIBTARGET)
+
+.PHONY: $(COCCL_BUILD_TARGET)
+$(COCCL_BUILD_TARGET): $(INCTARGETS)
+	$(MAKE) -f coccl-extend/Makefile $(COCCL_BUILD_TARGET) \
+		BUILDDIR=$(BUILDDIR) NCCLDIR=$(abspath ..) COCCL_ROOT=coccl-extend \
+		NVCC_GENCODE='$(NVCC_GENCODE)'
 
 $(DEVMANIFEST): ALWAYS_REBUILD $(INCTARGETS)
 	$(MAKE) -C ./device
@@ -96,6 +94,7 @@ $(LIBDIR)/$(LIBTARGET): $(LIBOBJ) $(DEVMANIFEST)
 $(LIBDIR)/$(STATICLIBTARGET): $(LIBOBJ) $(DEVMANIFEST)
 	@printf "Archiving  %-35s > %s\n" $(STATICLIBTARGET) $@
 	mkdir -p $(LIBDIR)
+	rm -f $@
 	ar cr $@ $(LIBOBJ) $$(cat $(DEVMANIFEST))
 
 $(PKGDIR)/nccl.pc : nccl.pc.in
@@ -125,8 +124,8 @@ $(PKGDIR)/%.pc : %.pc
 $(OBJDIR)/%.o : %.cc $(INCTARGETS)
 	@printf "Compiling  %-35s > %s\n" $< $@
 	mkdir -p `dirname $@`
-	$(CXX) -I. -I$(INCDIR) $(CXXFLAGS) -Iinclude -c $< -o $@
-	@$(CXX) -I. -I$(INCDIR) $(CXXFLAGS) -Iinclude -M $< > $(@:%.o=%.d.tmp)
+	$(CXX) -I. -I$(INCDIR) $(CXXFLAGS) -Iinclude $(COCCL_INCFLAGS) -c $< -o $@
+	@$(CXX) -I. -I$(INCDIR) $(CXXFLAGS) -Iinclude $(COCCL_INCFLAGS) -M $< > $(@:%.o=%.d.tmp)
 	@sed "0,/^.*:/s//$(subst /,\/,$@):/" $(@:%.o=%.d.tmp) > $(@:%.o=%.d)
 	@sed -e 's/.*://' -e 's/\\$$//' < $(@:%.o=%.d.tmp) | fmt -1 | \
                 sed -e 's/^ *//' -e 's/$$/:/' >> $(@:%.o=%.d)

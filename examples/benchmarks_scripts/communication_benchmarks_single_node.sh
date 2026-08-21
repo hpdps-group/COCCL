@@ -1,147 +1,71 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+cuda_root=${1:-/data/apps/cuda/12.4}
+coccl_root=${2:-/data/home/scyb672/run/lxc/COCCL-migrate}
+gpus=${3:-4}
+warmup=${COCCL_BENCH_WARMUP:-20}
+iterations=${COCCL_BENCH_ITERATIONS:-30}
+tests="$coccl_root/tests/coccl-tests/build"
+plugin_root="$coccl_root/build/obj/coccl-extend/compressor_plugin/libcompress"
+config_root=${COCCL_BENCH_CONFIG_ROOT:-/data/home/scyb672/run/codex-tmp/coccl-benchmark-configs/single-node}
 
 if type module >/dev/null 2>&1; then
-  module unload cuda
+  module unload cuda >/dev/null 2>&1 || true
   module load cuda/12.4
 fi
-CUDA_PATH=/data/apps/cuda/12.4
-COCCL_PATH=/data/home/scyb672/run/lxc/COCCL-migrate
-NGPUS=4
 
-# bash build.sh $CUDA_PATH $MPI_PATH $COCCL_PATH
-COMPRESSORS=("sdp4bit" "cuzfp")
-export CUDA_HOME=$CUDA_PATH
-export PATH=$CUDA_HOME/bin:$PATH
-export CUDACXX=$CUDA_HOME/bin/nvcc
-export NVHPC_CUDA_HOME=$CUDA_HOME
-export LD_LIBRARY_PATH=$CUDA_HOME/lib64/:$LD_LIBRARY_PATH
-
-
-export NCCL_HOME=$COCCL_PATH/build
-export LD_LIBRARY_PATH=$NCCL_HOME/lib:$LD_LIBRARY_PATH
-export C_INCLUDE_PATH=$NCCL_HOME/include:$C_INCLUDE_PATH
-export CPLUS_INCLUDE_PATH=$NCCL_HOME/include:$CPLUS_INCLUDE_PATH
-export NCCL_COMPRESSORS_CONFIG_PATH=$COCCL_PATH/examples/benchmarks_scripts/configs
-export NCCL_COMPRESSORS_LIB_PATH=$COCCL_PATH/build/obj/device/compress/libcompress
-
-
-# coccl environment variables
-export NCCL_DEBUG=WARN
-export NCCL_DEBUG_FILE=ncclcomp.%h
+mkdir -p "$config_root"
+export CUDA_HOME="$cuda_root"
+export PATH="$CUDA_HOME/bin:$PATH"
+export LD_LIBRARY_PATH="$coccl_root/build/lib:$plugin_root:$CUDA_HOME/lib64:${LD_LIBRARY_PATH:-}"
+export CUDA_VISIBLE_DEVICES=${CUDA_VISIBLE_DEVICES:-0,1,2,3}
+export NCCL_DEBUG=${NCCL_DEBUG:-WARN}
 export NCCL_BUFFSIZE=16777216
-export NCCL_ENABLE_COMPRESS=1
-export NCCL_COMPRESSORS=sdp4bit,cuzfp
-export NCCL_ENABLE_ALLTOALL_COMPRESS=1
-export NCCL_ALLTOALL_COMPRESSORS=sdp4bit
-export NCCL_ENABLE_ALLREDUCE_COMPRESS=1
-export NCCL_ALLREDUCE_COMPRESSORS=sdp4bit
-export NCCL_ALLREDUCE_INTER_COMPRESSORS=sdp4bit
-export NCCL_ENABLE_ALLGATHER_COMPRESS=1
-export NCCL_ALLGATHER_COMPRESSORS=sdp4bit
-export NCCL_ALLGATHER_INTER_COMPRESSORS=sdp4bit
-export NCCL_ENABLE_REDUCESCATTER_COMPRESS=1
-export NCCL_REDUCESCATTER_COMPRESSORS=sdp4bit
-export NCCL_REDUCESCATTER_INTER_COMPRESSORS=sdp4bit
-export NCCL_LOCAL_REGISTER=1 
-export NCCL_PIPELINE_DEPTH=1 
-export NCCL_COMPRESSORS_CONFIG_PATH=${NCCL_COMPRESSORS_CONFIG_PATH}
-export NCCL_COMPRESSORS_LIB_PATH=${NCCL_COMPRESSORS_LIB_PATH}
 
-cd $COCCL_PATH
+config_for() {
+  local compressor=$1
+  local depth=$2
+  local output="$config_root/${compressor}-d${depth}.toml"
+  sed "s|^library_path = .*|library_path = \"$plugin_root\"|" \
+    "$coccl_root/examples/benchmarks_scripts/configs/m16_${compressor}.toml" \
+    >"$output"
+  printf '\n[pipeline]\ndepth = %s\n' "$depth" >>"$output"
+  printf '\n[autotune]\nenabled = false\n' >>"$output"
+  printf '%s\n' "$output"
+}
 
-for ((gpus=4; gpus<=$NGPUS; gpus*=2));
-do
-echo '==========================================================alltoall tests=========================================================='
-echo '=================================================================================================================================='
+run_native() {
+  local title=$1 executable=$2 begin=$3 end=$4
+  echo "========== $title native =========="
+  COCCL_ENABLE=0 "$tests/$executable" \
+    -b "$begin" -e "$end" -f 2 -t "$gpus" -g 1 \
+    -w "$warmup" -n "$iterations" -c 0
+}
 
-echo "------------------------------------------------------alltoall native $gpus A800 GPUs------------------------------------------------------"
-  export NCCL_ENABLE_COMPRESS=0
-  $COCCL_PATH/tests/coccl-tests/build/alltoall_p2p_perf -b 1MB -e 8G -f 2 -t $gpus -g 1 -w 10 -n 20 -c 0
+run_compressed() {
+  local title=$1 executable=$2 compressor=$3 depth=$4 begin=$5 end=$6
+  echo "========== $title $compressor depth=$depth =========="
+  COCCL_ENABLE=1 COCCL_CONFIG_FILE=$(config_for "$compressor" "$depth") \
+    "$tests/$executable" \
+    -b "$begin" -e "$end" -f 2 -t "$gpus" -g 1 \
+    -w "$warmup" -n "$iterations" -c 0
+}
 
+run_native alltoall alltoall_p2p_perf 1MB 8G
+run_native allgather all_gather_perf 1MB 8G
+run_native reducescatter reduce_scatter_perf 1MB 8G
+run_native allreduce all_reduce_perf 4KB 8G
 
-
-for comp in "${COMPRESSORS[@]}"; do
-  echo "================= Running tests with compressor: $comp ================="
-  export NCCL_ENABLE_COMPRESS=1
-  export NCCL_ALLTOALL_COMPRESSORS=$comp
-  for ((pipe=1;pipe<=8;pipe=pipe*2))do
-    echo "------------------------------------------------------alltoall comp $gpus A800 GPUs pipe $pipe [compressor=$comp]------------------------------------------------------"
-    export NCCL_PIPELINE_DEPTH=$pipe
-    $COCCL_PATH/tests/coccl-tests/build/alltoall_comp_overlap_perf -b 1MB -e 8G -f 2 -t $gpus -g 1 -w 10 -n 20 -c 0
- done
-done
-
-
-echo '==========================================================allgather tests=========================================================='
-echo '=================================================================================================================================='
-
-echo "------------------------------------------------------allgather native $gpus A800 GPUs------------------------------------------------------"
-export NCCL_ENABLE_COMPRESS=0
-$COCCL_PATH/tests/coccl-tests/build/all_gather_perf -b 1MB -e 8G -f 2 -t $gpus -g 1 -w 10 -n 20 -c 0
-
-echo ' '
-for comp in "${COMPRESSORS[@]}"; do
-  echo "================= Running allgather with compressor: $comp ================="
-  export NCCL_ENABLE_COMPRESS=1
-  export NCCL_ALLGATHER_COMPRESSORS=$comp
-  export NCCL_ALLGATHER_INTER_COMPRESSORS=$comp
-  for ((pipe=1;pipe<=8;pipe=pipe*2))do
-    echo "------------------------------------------------------allgather comp $gpus A800 GPUs pipe $pipe [compressor=$comp]------------------------------------------------------"
-    export NCCL_PIPELINE_DEPTH=$pipe
-    $COCCL_PATH/tests/coccl-tests/build/all_gather_comp_overlap_perf -b 1MB -e 8G -f 2 -t $gpus -g 1 -w 10 -n 20 -c 0
+for compressor in sdp4bit zfp; do
+  for depth in 1 2 4 8; do
+    run_compressed alltoall alltoall_comp_perf "$compressor" "$depth" 1MB 8G
+    run_compressed allgather all_gather_comp_perf "$compressor" "$depth" 1MB 8G
+    run_compressed reducescatter reduce_scatter_comp_oneshot_perf \
+      "$compressor" "$depth" 1MB 8G
+    run_compressed allreduce all_reduce_comp_twoshot_perf \
+      "$compressor" "$depth" 1MB 8G
   done
-done
-
-echo '==========================================================reducescatter tests=========================================================='
-echo '=================================================================================================================================='
-
-echo ' '
-echo "------------------------------------------------------reducescatter native $gpus A800 GPUs------------------------------------------------------"
-export NCCL_ENABLE_COMPRESS=0
-$COCCL_PATH/tests/coccl-tests/build/reduce_scatter_perf -b 1MB -e 8G -f 2 -t $gpus -g 1 -w 10 -n 20 -c 0
-
-echo ' '
-for comp in "${COMPRESSORS[@]}"; do
-  echo "================= Running reduce_scatter with compressor: $comp ================="
-  export NCCL_ENABLE_COMPRESS=1
-  export NCCL_REDUCESCATTER_COMPRESSORS=$comp
-  export NCCL_REDUCESCATTER_INTER_COMPRESSORS=$comp
-
-  echo ' '
-  for ((pipe=1;pipe<=8;pipe=pipe*2))do
-    echo "------------------------------------------------------reducescatter comp oneshot $gpus A800 GPUs pipe $pipe [compressor=$comp]------------------------------------------------------"
-    export NCCL_PIPELINE_DEPTH=$pipe
-    $COCCL_PATH/tests/coccl-tests/build/reduce_scatter_comp_oneshot_perf -b 1MB -e 8G -f 2 -t $gpus -g 1 -w 10 -n 20 -c 0
-  done
-
-  echo ' '
-done
-
-echo '==========================================================allreduce tests=========================================================='
-echo '=================================================================================================================================='
-
-echo "------------------------------------------------------allreduce native $gpus A800 GPUs------------------------------------------------------"
-export NCCL_ENABLE_COMPRESS=0
-$COCCL_PATH/tests/coccl-tests/build/all_reduce_perf -b 4KB -e 8G -f 2 -t $gpus -g 1 -w 10 -n 20 -c 0
-
-echo ' '
-for comp in "${COMPRESSORS[@]}"; do
-  echo "================= Running allreduce with compressor: $comp ================="
-  export NCCL_ENABLE_COMPRESS=1
-  export NCCL_ALLREDUCE_COMPRESSORS=$comp
-  export NCCL_ALLREDUCE_INTER_COMPRESSORS=$comp
- 
-  echo ' '
-  echo "------------------------------------------------------allreduce comp oneshot $gpus A800 GPUs[compressor=$comp]------------------------------------------------------"
-  $COCCL_PATH/tests/coccl-tests/build/all_reduce_comp_oneshot_perf -b 4KB -e 32M -f 2 -t $gpus -g 1 -w 10 -n 20 -c 0
-
-  echo ' '
-  for ((pipe=1;pipe<=8;pipe=pipe*2))do
-    echo "------------------------------------------------------allreduce comp twoshot $gpus A800 GPUs pipe $pipe [compressor=$comp]------------------------------------------------------"
-    export NCCL_PIPELINE_DEPTH=$pipe
-    $COCCL_PATH/tests/coccl-tests/build/all_reduce_comp_twoshot_perf -b 1MB -e 8G -f 2 -t $gpus -g 1 -w 10 -n 20 -c 0
-  done
-
-  echo ' '
-done
-
+  run_compressed allreduce-oneshot all_reduce_comp_oneshot_perf \
+    "$compressor" 1 4KB 32M
 done

@@ -1,6 +1,6 @@
-#include "coccl_buffer_management.h"
-#include "coccl_buffer_internal.h"
-#include "coccl_config.h"
+#include "core/memory/coccl_buffer_management.h"
+#include "core/memory/coccl_buffer_internal.h"
+#include "core/config/coccl_config.h"
 #include "comm.h"
 #include "debug.h"
 

@@ -4,7 +4,7 @@ A collective communication library supporting easy integration and configuration
 
 ## Introduction
 
-COCCL is a compression-aware GPU collective communication library built upon NCCL 2.21.5. It systematically integrates compression support into NCCL and provides NCCL-compatible APIs with a suite of collective communication pipelines optimized by high-performance GPU compression techniques. COCCL is designed to be extensible, supporting customized compression operators through a unified compression programming model, with [SDP4Bit](https://github.com/ByteDance-Seed/SDP4Bit), [TACO](src/device/compress/taco), TAHQuant, and [cuZFP](https://github.com/llnl/zfp) included by default. COCCL also introduces automatic algorithm selection and a two-level runtime overlap mechanism to hide compression overhead. We acknowledge that while some existing works support collective communication with compression, such as [1]-[5], COCCL is the first NCCL-based collective communication library to deeply integrate compression operators and co-design compression-aware algorithms for multiple collective primitives within GPU clusters.
+COCCL is a compression-aware GPU collective communication library built upon NCCL 2.21.5. It systematically integrates compression support into NCCL and provides NCCL-compatible APIs with a suite of collective communication pipelines optimized by high-performance GPU compression techniques. COCCL is designed to be extensible, supporting customized compression operators through a unified compression programming model, with [SDP4Bit](https://github.com/ByteDance-Seed/SDP4Bit), [TACO](src/coccl-extend/extensions/compressor_plugin/taco), TAHQuant, ZFP, and dietGPU included by default. COCCL also introduces automatic algorithm selection and a two-level runtime overlap mechanism to hide compression overhead. We acknowledge that while some existing works support collective communication with compression, such as [1]-[5], COCCL is the first NCCL-based collective communication library to deeply integrate compression operators and co-design compression-aware algorithms for multiple collective primitives within GPU clusters.
 
 
 For example, by utilizing SDP4Bit compression, COCCL achieves 2.60x, 2.58x, 5.66x, and 4.92x speedups on AllReduce, ReduceScatter, AllGather, and AlltoAll, respectively, compared to the original FP32-based communication. In end-to-end 3D-parallel training, the tuned COCCL-3D configuration improves GPT and Qwen2.5 training throughput by up to 1.24x while maintaining model accuracy. COCCL is particularly beneficial for applications requiring intensive collective communication, including large-scale model training, inference systems, and scientific computing.
@@ -80,36 +80,30 @@ All tests are listed as binary files in the build directory. For more examples, 
 
 ## Integrating a compressor
 
-For compressor integration instructions, see [src/device/compress/README.md](src/device/compress/README.md).
+For source ownership and extension points, see
+[src/coccl-extend/README.md](src/coccl-extend/README.md). Compressor integration
+instructions are in
+[src/coccl-extend/extensions/compressor_plugin/README.md](src/coccl-extend/extensions/compressor_plugin/README.md).
 
 ## Environment variables
 
-COCCL is NCCL-compatible, so standard NCCL environment variables such as `NCCL_DEBUG`, `NCCL_IB_HCA`, and `NCCL_SOCKET_IFNAME` remain available. This section lists the COCCL-specific variables and the setup variables used by the provided build, benchmark, and training scripts.
+COCCL is NCCL-compatible, so standard NCCL environment variables such as
+`NCCL_DEBUG`, `NCCL_IB_HCA`, and `NCCL_SOCKET_IFNAME` remain available. COCCL
+itself uses two environment variables:
 
-- Compression loader
-  - `NCCL_ENABLE_COMPRESS`: `0` or `1`, initialize the COCCL compression runtime during NCCL communicator creation, disabled when unset.
-  - `NCCL_COMPRESSORS`: comma-separated string, all compressor names to load, e.g. `sdp4bit,tahquant,cuzfp`. Do not include spaces.
-  - `NCCL_COMPRESSORS_LIB_PATH`: string, directory containing compressor shared libraries named `lib<name>.so`.
-  - `NCCL_COMPRESSORS_CONFIG_PATH`: string, base directory for compressor config files. COCCL resolves configs as `$NCCL_COMPRESSORS_CONFIG_PATH/<name>/<name>_<suffix>.config`.
-  - `NCCL_COMPRESS_ENABLE_THRESHOLD`: integer bytes, only use compression when the message size is greater than this threshold, `0` by default.
-- Collective compression selection
-  - `NCCL_ENABLE_ALLGATHER_COMPRESS`: `0` or `1`, enable the compressed AllGather path, disabled when unset.
-  - `NCCL_ALLGATHER_COMPRESSORS`: comma-separated string, compressors used by AllGather. If unset, it falls back to `NCCL_COMPRESSORS`.
-  - `NCCL_ALLGATHER_INTER_COMPRESSORS`: comma-separated string, compressors used by inter-node AllGather. If unset, it falls back to `NCCL_ALLGATHER_COMPRESSORS`.
-  - `NCCL_ENABLE_REDUCESCATTER_COMPRESS`: `0` or `1`, enable the compressed ReduceScatter path, disabled when unset.
-  - `NCCL_REDUCESCATTER_COMPRESSORS`: comma-separated string, compressors used by ReduceScatter. If unset, it falls back to `NCCL_COMPRESSORS`.
-  - `NCCL_REDUCESCATTER_INTER_COMPRESSORS`: comma-separated string, compressors used by inter-node ReduceScatter. If unset, it falls back to `NCCL_REDUCESCATTER_COMPRESSORS`.
-  - `NCCL_ENABLE_ALLREDUCE_COMPRESS`: `0` or `1`, load compressor configuration for compressed AllReduce implementations, disabled when unset.
-  - `NCCL_ALLREDUCE_COMPRESSORS`: comma-separated string, compressors used by AllReduce. If unset, it falls back to `NCCL_COMPRESSORS`.
-  - `NCCL_ALLREDUCE_INTER_COMPRESSORS`: comma-separated string, compressors used by inter-node AllReduce. If unset, it falls back to `NCCL_ALLREDUCE_COMPRESSORS`.
-  - `NCCL_ENABLE_ALLTOALL_COMPRESS`: `0` or `1`, load compressor configuration for compressed AllToAll implementations, disabled when unset.
-  - `NCCL_ALLTOALL_COMPRESSORS`: comma-separated string, compressors used by AllToAll. If unset, it falls back to `NCCL_COMPRESSORS`.
-  - `NCCL_ALLTOALL_INTER_COMPRESSORS`: comma-separated string, compressors used by inter-node AllToAll. If unset, it falls back to `NCCL_ALLTOALL_COMPRESSORS`.
-  - `NCCL_ENABLE_SENDRECV_COMPRESS`: `0` or `1`, enable compressed point-to-point Send/Recv, disabled when unset.
-  - `NCCL_SENDRECV_COMPRESSORS`: comma-separated string, compressors used by forward Send/Recv. If unset, it falls back to `NCCL_COMPRESSORS`.
-  - `NCCL_SENDRECV_BWD_COMPRESSORS`: comma-separated string, compressors used by backward Send/Recv. If unset, it falls back to `NCCL_SENDRECV_COMPRESSORS`.
-- Pipeline and overlap
-  - `NCCL_PIPELINE_DEPTH`: integer, number of chunks used by pipelined overlap implementations for compressed collectives. Values smaller than `2` use the non-overlapped path in most overlap wrappers, `0` by default.
+- `COCCL_ENABLE=1` enables compression-aware routing. It is disabled when
+  unset or set to `0`.
+- `COCCL_CONFIG_FILE=/absolute/path/to/config.toml` selects the process-wide
+  schema-v3 configuration.
+
+The TOML file owns plugin loading, per-operation `default`/`intra`/`inter`
+policies, thresholds, pipeline depth, autotuning, and training-mode routing.
+Examples are under `src/coccl-extend/extensions/configs/`. Validate a file
+without starting a communicator with:
+
+```shell
+build/bin/coccl-config-check path/to/config.toml
+```
 
 ## Deploying COCCL in LLM frameworks
 

@@ -1,8 +1,8 @@
-#include "coccl_config.h"
-#include "coccl_group_internal.h"
-#include "coccl_prepared_call.h"
+#include "core/config/coccl_config.h"
+#include "core/runtime/coccl_group_internal.h"
+#include "core/runtime/coccl_prepared_call.h"
 #include "comm.h"
-#include "compress.h"
+#include "core/compression/compress.h"
 #include "debug.h"
 
 #include <chrono>

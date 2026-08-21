@@ -1,7 +1,7 @@
-#include "coccl_frame_exchange.h"
+#include "core/pipeline/coccl_frame_exchange.h"
 
 #include "comm.h"
-#include "coccl_runtime.h"
+#include "runtime/coccl_runtime.h"
 
 #include <cstdio>
 #include <cstdlib>

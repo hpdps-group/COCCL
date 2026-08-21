@@ -16,7 +16,7 @@ worker_host=${M23_WORKER_HOST:-d1n41a28g03}
 master_addr=${M23_MASTER_ADDR:-10.252.14.32}
 ssh_user=${M23_SSH_USER:-scyb672}
 node_script="$script_dir/m23_qwen_node.sh"
-plugin_root="$current_root/build/obj/device/compress/libcompress"
+plugin_root="$current_root/build/obj/coccl-extend/compressor_plugin/libcompress"
 config_root="$result_root/runtime-configs"
 coccl_commit=$(git -C "$source_root" rev-parse HEAD)
 

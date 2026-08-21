@@ -1,4 +1,4 @@
-#include "coccl_config.h"
+#include "core/config/coccl_config.h"
 
 #include <stdio.h>
 
@@ -22,7 +22,8 @@ int checkCatalog(const cocclConfig& config) {
          config.plugins.compressors[0] == "sdp4bit" &&
          config.plugins.compressors[1] == "zfp" &&
          config.plugins.libraryPath.find(
-             "build/obj/device/compress/libcompress") != std::string::npos
+             "build/obj/coccl-extend/compressor_plugin/libcompress") !=
+             std::string::npos
       ? 0 : 1;
 }
 

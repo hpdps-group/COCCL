@@ -26,9 +26,7 @@
 #include <sys/stat.h>
 #include <unistd.h>
 #include "param.h"
-#include "compress.h"
-#include "coccl_buffer_management.h"
-#include "coccl_pipeline.h"
+#include "runtime/coccl_init.h"
 #define STR2(v) #v
 #define STR(v) STR2(v)
 
@@ -1557,10 +1555,7 @@ static ncclResult_t ncclCommInitRankFunc(struct ncclAsyncJob* job_) {
     NCCLCHECK(comm->tuner->init(comm->nRanks, comm->nNodes, ncclDebugLog, &comm->tunerContext));
   }
 
-  NCCLCHECKGOTO(ncclCompressInit(comm), res, fail);
-  if (cocclCompressionEnabled()) {
-    NCCLCHECKGOTO(cocclBufferCommInit(comm), res, fail);
-  }
+  NCCLCHECKGOTO(cocclInit(comm), res, fail);
   // update communicator state
   comm->initState = ncclSuccess;
 
@@ -1992,9 +1987,7 @@ static ncclResult_t commCleanup(ncclComm_t comm) {
     NCCLCHECK(ncclTunerPluginUnload(&comm->tuner));
   }
 
-  NCCLCHECK(cocclPipelineCommDestroy(comm));
-  NCCLCHECK(cocclBufferCommDestroy(comm));
-  NCCLCHECK(ncclCompressDestroy(comm));
+  NCCLCHECK(cocclDestroy(comm));
   NCCLCHECK(commFree(comm));
 
   if (savedDevice != commDevice) {

@@ -1,5 +1,5 @@
 #include "coccl_m11_size_query_stub.h"
-#include "coccl_pipeline_internal.h"
+#include "core/pipeline/coccl_pipeline_internal.h"
 
 #include "comm.h"
 

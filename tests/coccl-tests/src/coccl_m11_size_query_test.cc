@@ -1,4 +1,4 @@
-#include "compress.h"
+#include "core/compression/compress.h"
 
 #include <cstdio>
 #include <cstdlib>

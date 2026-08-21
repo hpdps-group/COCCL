@@ -49,19 +49,9 @@ export NCCL_SOCKET_IFNAME=bond0
 export NCCL_IB_TIMEOUT=23
 export NCCL_IB_RETRY_CNT=13
 
-export NCCL_ENABLE_COMPRESS=1
-export NCCL_COMPRESSORS=sdp4bit,tahquant
-export NCCL_ENABLE_ALLGATHER_COMPRESS=1
-export NCCL_ALLGATHER_COMPRESSORS=sdp4bit
-export NCCL_ENABLE_REDUCESCATTER_COMPRESS=1
-export NCCL_REDUCESCATTER_COMPRESSORS=sdp4bit
-export NCCL_REDUCESCATTER_INTER_COMPRESSORS=sdp4bit
-export NCCL_ENABLE_SENDRECV_COMPRESS=1
-export NCCL_SENDRECV_COMPRESSORS=tahquant
-export NCCL_SENDRECV_BWD_COMPRESSORS=tahquant
-export NCCL_COMPRESS_ENABLE_THRESHOLD=10485760 # 10MB
-export NCCL_COMPRESSORS_CONFIG_PATH=$COCCL_PATH/examples/training_scripts/configs_training
-export NCCL_COMPRESSORS_LIB_PATH=$COCCL_PATH/build/obj/device/compress/libcompress
+export COCCL_ENABLE=1
+: "${COCCL_CONFIG_FILE:?set COCCL_CONFIG_FILE to a training config matching this job topology}"
+export COCCL_CONFIG_FILE
 
 
 export NCCL_CHECKS_DISABLE=1
@@ -71,4 +61,3 @@ export NCCL_BUFFSIZE=16777216
 cd $LING_PRETRAIN_PATH
 
 bash run_pretrain_4k.sh 1 1 8 200 $LOG_DIR/ling_distributed_Rank${RANK}_coccl_tp1pp1ep8_${BATCH_JOB_ID}.log
-

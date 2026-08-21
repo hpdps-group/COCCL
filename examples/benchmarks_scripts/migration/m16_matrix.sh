@@ -67,9 +67,10 @@ materialize_current_config() {
   [[ "$suite" != subadd ]] || \
     template="$source_root/examples/benchmarks_scripts/configs/m16_sdp4bit_subadd.toml"
   local output="$config_root/${compressor}-${suite}-d${depth}.toml"
-  sed "s|^library_path = .*|library_path = \"$current_root/build/obj/device/compress/libcompress\"|" \
+  sed "s|^library_path = .*|library_path = \"$current_root/build/obj/coccl-extend/compressor_plugin/libcompress\"|" \
     "$template" >"$output"
   printf '\n[pipeline]\ndepth = %s\n' "$depth" >>"$output"
+  printf '\n[autotune]\nenabled = false\n' >>"$output"
   printf '%s\n' "$output"
 }
 
@@ -79,7 +80,7 @@ configure_current() {
   export COCCL_ENABLE=1
   export COCCL_CONFIG_FILE
   COCCL_CONFIG_FILE=$(materialize_current_config "$compressor" "$depth")
-  export LD_LIBRARY_PATH="$current_root/build/lib:$current_root/build/obj/device/compress/libcompress:$cuda_root/lib64:$mpi_root/lib:${LD_LIBRARY_PATH:-}"
+  export LD_LIBRARY_PATH="$current_root/build/lib:$current_root/build/obj/coccl-extend/compressor_plugin/libcompress:$cuda_root/lib64:$mpi_root/lib:${LD_LIBRARY_PATH:-}"
 }
 
 configure_baseline() {

@@ -1,6 +1,6 @@
-#include "coccl_group.h"
-#include "coccl_group_internal.h"
-#include "coccl_prepared_call.h"
+#include "runtime/coccl_group.h"
+#include "core/runtime/coccl_group_internal.h"
+#include "core/runtime/coccl_prepared_call.h"
 
 #include <cstdio>
 #include <cstdlib>

@@ -73,7 +73,6 @@ export -f torchrun
 library=system
 case "$backend" in
   current)
-    export NCCL_ENABLE_COMPRESS=1
     export COCCL_ENABLE=1
     export COCCL_CONFIG_FILE=$config
     export NCCL_HOME="$coccl_root/build"

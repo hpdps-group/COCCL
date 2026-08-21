@@ -28,9 +28,10 @@ NVCC_GENCODE="$gencode" \
 
 # Make does not track DEBUG or NVCC_GENCODE changes in existing CUDA objects.
 # Rebuild this performance-critical plugin once with the M17 release flags.
-make -B -C "$source_root/src/device/compress/sdp4bit" \
+make -B -C "$source_root/src/coccl-extend/extensions/compressor_plugin/sdp4bit" \
   BUILDDIR="$current_root/build" \
-  SUBOBJDIR="$current_root/build/obj/device/compress" \
+  SUBOBJDIR="$current_root/build/obj/coccl-extend/compressor_plugin" \
+  COCCL_ROOT="$source_root/src/coccl-extend" \
   NCCLDIR="$source_root" CUDA_HOME="$CUDA_HOME" \
   NVHPC_CUDA_HOME="$CUDA_HOME" NVCC_GENCODE="$gencode" DEBUG=0 -j8
 

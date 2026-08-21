@@ -1,0 +1,61 @@
+schema_version = 3
+
+[runtime]
+mode = "normal"
+compression_threshold_bytes = 0
+
+[compressor_plugins]
+compressors = ["dietgpu"]
+library_path = "../../../../build/obj/coccl-extend/compressor_plugin/libcompress"
+
+[normal.all_to_all.default]
+compressor = "dietgpu"
+
+[normal.all_to_all.default.config]
+probBits = 10
+
+[normal.all_gather.default]
+compressor = "dietgpu"
+
+[normal.all_gather.default.config]
+probBits = 10
+
+[normal.all_reduce.default]
+compressor = "dietgpu"
+
+[normal.all_reduce.default.config]
+probBits = 10
+
+[normal.all_reduce.intra]
+compressor = "dietgpu"
+
+[normal.all_reduce.intra.config]
+probBits = 10
+
+[normal.all_reduce.inter]
+compressor = "dietgpu"
+
+[normal.all_reduce.inter.config]
+probBits = 10
+[normal.reduce_scatter.default]
+compressor = "dietgpu"
+
+[normal.reduce_scatter.default.config]
+probBits = 10
+
+[normal.reduce_scatter.intra]
+compressor = "dietgpu"
+
+[normal.reduce_scatter.intra.config]
+probBits = 10
+
+[normal.reduce_scatter.inter]
+compressor = "dietgpu"
+
+[normal.reduce_scatter.inter.config]
+probBits = 10
+[normal.sendrecv.default]
+compressor = "dietgpu"
+
+[normal.sendrecv.default.config]
+probBits = 10

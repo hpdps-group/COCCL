@@ -1,4 +1,4 @@
-#include "coccl_frame_exchange.h"
+#include "core/pipeline/coccl_frame_exchange.h"
 
 ncclResult_t cocclBuildAllToAllFrameExchanges(
     const void*, void*, size_t, size_t, int,

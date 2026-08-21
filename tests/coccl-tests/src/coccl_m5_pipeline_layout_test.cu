@@ -5,7 +5,7 @@
 #include <cstring>
 #include <vector>
 
-#include "coccl_pipeline_layout.h"
+#include "core/pipeline/coccl_pipeline_layout.h"
 
 #ifdef COCCL_M15_LEGACY_LAYOUT_API
 ncclResult_t cocclLaunchPackSlice(

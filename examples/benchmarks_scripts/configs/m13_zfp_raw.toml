@@ -6,7 +6,7 @@ compression_threshold_bytes = 0
 
 [compressor_plugins]
 compressors = ["zfp"]
-library_path = "../../../build/obj/device/compress/libcompress"
+library_path = "../../../build/obj/coccl-extend/compressor_plugin/libcompress"
 
 [normal.sendrecv.default]
 compressor = "zfp"

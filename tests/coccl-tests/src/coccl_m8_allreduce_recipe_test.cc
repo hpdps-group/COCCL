@@ -1,7 +1,8 @@
-#include "coccl_allreduce.h"
+#include "core/runtime/coccl_primitive_dispatch.h"
 
-#include "coccl_pipeline.h"
-#include "coccl_prepared_call.h"
+#include "core/pipeline/coccl_pipeline.h"
+#include "core/runtime/coccl_comm.h"
+#include "core/runtime/coccl_prepared_call.h"
 #include "comm.h"
 #include "debug.h"
 
@@ -14,6 +15,7 @@ namespace {
 int pipelineCalls = 0;
 int serialPipelineCalls = 0;
 cocclAlgorithmKind expectedAlgorithm = cocclAlgorithmNone;
+cocclHierarchicalComms hierarchicalComms = {};
 
 void fail(const char* expression, int line) {
   std::fprintf(stderr, "line %d: %s\n", line, expression);
@@ -51,8 +53,6 @@ cocclPreparedCall makeCall(ncclComm_t comm, cocclAlgorithmKind algorithm,
 
 }  // namespace
 
-__thread ncclComm_t InterSubComm = nullptr;
-__thread ncclComm_t IntraSubComm = nullptr;
 thread_local int ncclDebugNoWarn = 0;
 
 void ncclDebugLog(ncclDebugLogLevel, unsigned long, const char*, int,
@@ -100,9 +100,10 @@ ncclResult_t cocclRunPipelineSerial(const cocclPipelineSpec* spec) {
   return cocclRunPipeline(spec);
 }
 
-ncclResult_t ncclCommSplit(ncclComm_t, int, int, ncclComm_t*,
-                           ncclConfig_t*) {
-  return ncclInternalError;
+ncclResult_t cocclCommGetHierarchicalComms(
+    ncclComm_t, cocclHierarchicalComms* comms) {
+  *comms = hierarchicalComms;
+  return ncclSuccess;
 }
 
 int main() {
@@ -125,8 +126,7 @@ int main() {
   inter.nRanks = 2;
   owner.localRanks = 2;
   owner.nNodes = 2;
-  IntraSubComm = &intra;
-  InterSubComm = &inter;
+  hierarchicalComms = {&owner, &intra, &inter};
   expectedAlgorithm = cocclAlgorithmAllReduceTripleShot;
   cocclPreparedCall triple = makeCall(
       &owner, cocclAlgorithmAllReduceTripleShot);
