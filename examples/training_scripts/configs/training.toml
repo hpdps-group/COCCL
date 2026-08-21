@@ -57,6 +57,10 @@ hadamard = true
 depth = 1
 
 [autotune]
-enabled = false
-reduce_scatter_algorithm = "oneshot"
-all_reduce_algorithm = "oneshot"
+enabled = true
+profile_min_bytes = 3145728
+profile_max_bytes = 201326592
+warmup = 3
+iterations = 10
+reduce_scatter_algorithm = "auto"
+all_reduce_algorithm = "auto"
