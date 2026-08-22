@@ -1,15 +1,19 @@
 # COCCL
 
-COCCL is an NCCL-compatible collective communication library with GPU
-compression. Existing NCCL applications can enable it with a shared library
-and a TOML file; collective call sites do not need to change.
+A collective communication library for easily integrating and configuring GPU
+compression.
 
-COCCL provides:
+## Introduction
 
-- compressed AllGather, ReduceScatter, AllReduce, AllToAll, Send, and Recv;
-- fixed-size and variable-length compressor plugins;
-- pipelined compression and communication with automatic algorithm selection;
-- training-aware policies for data, tensor, and pipeline parallel traffic.
+COCCL is a compression-aware GPU collective communication library built on
+NCCL 2.21.5. It keeps NCCL-compatible APIs and adds compressed AllGather,
+ReduceScatter, AllReduce, AllToAll, Send, and Recv pipelines. Existing NCCL
+applications enable COCCL with a shared library and a TOML file; collective
+call sites do not change.
+
+Its C++17 plugin model supports fixed-size and variable-length codecs. COCCL
+handles pipeline overlap, automatic algorithm selection, and training-aware
+policies for data, tensor, and pipeline parallel traffic.
 
 Bundled compressors include
 [SDP4Bit](https://github.com/ByteDance-Seed/SDP4Bit),
@@ -17,26 +21,15 @@ Bundled compressors include
 [ZFP](https://github.com/LLNL/zfp), and
 [dietGPU](https://github.com/facebookresearch/dietgpu).
 
-## Performance
+Copyright (C) 2025 Institute of Computing Technology, Chinese Academy of
+Sciences. See [LICENSE.txt](LICENSE.txt).
 
-The following results use 32 H800 GPUs, CUDA 12.6, NCCL 2.21.5, and
-InfiniBand. COCCL-SDP4Bit reaches up to 2.60x AllReduce, 2.58x ReduceScatter,
-5.66x AllGather, and 4.92x AllToAll speedup over FP32 NCCL.
+Developers: Xingchen Liu, Haoran Kong, Man Liu, Xingjian Tian, Daran Sun,
+Zheng Wei, Liyang Zhao, Yufan Wang, and Jingwu Yang.
 
-![Communication performance of COCCL](assets/results/communication_performance.png)
-
-End-to-end training preserves validation loss while improving throughput:
-
-| Model | Size | NCCL TFLOPS | COCCL TFLOPS | Speedup |
-| --- | ---: | ---: | ---: | ---: |
-| GPT | 2.7B | 88.5 | 94.5 | 1.06x |
-| GPT | 6.7B | 148.6 | 163.2 | 1.10x |
-| GPT | 13B | 158.8 | 197.1 | 1.24x |
-| Qwen2.5 | 7B | 222.3 | 234.2 | 1.05x |
-
-<p align="center">
-  <img src="assets/results/e2e_accuracy.png" alt="End-to-end validation loss with COCCL" width="50%">
-</p>
+Advisors: [Dingwen Tao](https://www.dingwentao.com/),
+[Guangming Tan](https://tanniu.github.io/), and
+[Hairui Zhao](https://hairui-zhao.github.io/).
 
 ## Quick Start
 
@@ -103,6 +96,17 @@ your_application
 ```
 
 Set `COCCL_ENABLE=0` or unset it to use native NCCL.
+
+## Integrating A Compressor
+
+The plugin SDK supports fixed-size, framed variable-length, stateful, and
+fused-reduction codecs. New plugins live under
+`src/coccl-extend/extensions/compressor_plugin/`; COCCL handles pipeline and
+collective scheduling.
+
+See the [compressor integration guide](src/coccl-extend/extensions/compressor_plugin/README.md)
+for the SDK contract, a minimal adapter, build rules, validation, and the
+Codex integration skill.
 
 ## Configuration
 
@@ -272,23 +276,70 @@ Available subsystems:
 - `COCCL_MEMORY`: workspace allocation;
 - `COCCL_TUNING`: autotuning and training classification.
 
-## Compressor Plugins
-
-The plugin SDK supports fixed-size, framed variable-length, stateful, and
-fused-reduction codecs. New plugins live under
-`src/coccl-extend/extensions/compressor_plugin/` and do not need pipeline or
-collective scheduling code.
-
-See the [compressor integration guide](src/coccl-extend/extensions/compressor_plugin/README.md)
-for the SDK contract, a minimal adapter, build rules, validation, and the
-Codex integration skill.
-
 ## More Examples
 
 - [Build](examples/build_scripts)
 - [Communication benchmarks](examples/benchmarks_scripts)
 - [Qwen training](examples/training_scripts)
 - [COCCL tests](tests/coccl-tests)
+
+## Performance
+
+The following results use 32 H800 GPUs, CUDA 12.6, NCCL 2.21.5, and
+InfiniBand. COCCL-SDP4Bit reaches up to 2.60x AllReduce, 2.58x ReduceScatter,
+5.66x AllGather, and 4.92x AllToAll speedup over FP32 NCCL.
+
+![Communication performance of COCCL](assets/results/communication_performance.png)
+
+End-to-end training preserves validation loss while improving throughput:
+
+<p align="center">
+  <img src="assets/results/e2e_accuracy.png" alt="End-to-end validation loss with COCCL" width="50%">
+</p>
+
+<div align="center">
+  <table>
+    <thead>
+      <tr>
+        <th align="left">Model</th>
+        <th align="right">Size</th>
+        <th align="right">NCCL TFLOPS</th>
+        <th align="right">COCCL TFLOPS</th>
+        <th align="right">Speedup</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td>GPT</td>
+        <td align="right">2.7B</td>
+        <td align="right">88.5</td>
+        <td align="right">94.5</td>
+        <td align="right">1.06x</td>
+      </tr>
+      <tr>
+        <td>GPT</td>
+        <td align="right">6.7B</td>
+        <td align="right">148.6</td>
+        <td align="right">163.2</td>
+        <td align="right">1.10x</td>
+      </tr>
+      <tr>
+        <td>GPT</td>
+        <td align="right">13B</td>
+        <td align="right">158.8</td>
+        <td align="right">197.1</td>
+        <td align="right">1.24x</td>
+      </tr>
+      <tr>
+        <td>Qwen2.5</td>
+        <td align="right">7B</td>
+        <td align="right">222.3</td>
+        <td align="right">234.2</td>
+        <td align="right">1.05x</td>
+      </tr>
+    </tbody>
+  </table>
+</div>
 
 ## Citation
 
@@ -310,15 +361,3 @@ Codex integration skill.
   url={https://arxiv.org/abs/2604.24088}
 }
 ```
-
-## License And Team
-
-Copyright (C) 2025 Institute of Computing Technology, Chinese Academy of
-Sciences. See [LICENSE.txt](LICENSE.txt).
-
-Developers: Xingchen Liu, Haoran Kong, Man Liu, Xingjian Tian, Daran Sun,
-Zheng Wei, Liyang Zhao, Yufan Wang, and Jingwu Yang.
-
-Advisors: [Dingwen Tao](https://www.dingwentao.com/),
-[Guangming Tan](https://tanniu.github.io/), and
-[Hairui Zhao](https://hairui-zhao.github.io/).
