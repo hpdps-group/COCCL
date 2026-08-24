@@ -1,101 +1,118 @@
 # COCCL
 
-A collective communication library for easily integrating and configuring GPU
-compression.
+A collective communication library supporting easy integration and
+configuration of customized compression.
 
 ## Introduction
 
-COCCL is a compression-aware GPU collective communication library built on
-NCCL 2.21.5. It keeps NCCL-compatible APIs and adds compressed AllGather,
-ReduceScatter, AllReduce, AllToAll, Send, and Recv pipelines. Existing NCCL
-applications enable COCCL with a shared library and a TOML file; collective
-call sites do not change.
+COCCL is a compression-aware GPU collective communication library built upon
+NCCL 2.21.5. It integrates compression into NCCL while preserving
+NCCL-compatible APIs, and provides compression-aware pipelines for AllGather,
+ReduceScatter, AllReduce, AllToAll, Send, and Recv.
 
-Its C++17 plugin model supports fixed-size and variable-length codecs. COCCL
-handles pipeline overlap, automatic algorithm selection, and training-aware
-policies for data, tensor, and pipeline parallel traffic.
-
-Bundled compressors include
+COCCL provides a unified C++17 plugin model for custom compression operators.
 [SDP4Bit](https://github.com/ByteDance-Seed/SDP4Bit),
 [TACO](src/coccl-extend/extensions/compressor_plugin/taco),
 [ZFP](https://github.com/LLNL/zfp), and
-[dietGPU](https://github.com/facebookresearch/dietgpu).
+[dietGPU](https://github.com/facebookresearch/dietgpu) are included by default.
+COCCL also provides pipeline overlap, automatic algorithm selection, and
+training-aware policies for data, tensor, and pipeline parallel traffic.
 
-Copyright (C) 2025 Institute of Computing Technology, Chinese Academy of
-Sciences. See [LICENSE.txt](LICENSE.txt).
+With SDP4Bit, COCCL achieves up to 2.60x, 2.58x, 5.66x, and 4.92x speedups on
+AllReduce, ReduceScatter, AllGather, and AllToAll, respectively, compared with
+FP32 communication. In end-to-end 3D-parallel training, COCCL improves
+training throughput by up to 1.24x while maintaining model accuracy.
 
-Developers: Xingchen Liu, Haoran Kong, Man Liu, Xingjian Tian, Daran Sun,
-Zheng Wei, Liyang Zhao, Yufan Wang, and Jingwu Yang.
+(C) 2025 by Institute of Computing Technology, Chinese Academy of Sciences. See [COPYRIGHT](LICENSE.txt) in the top-level directory.
 
-Advisors: [Dingwen Tao](https://www.dingwentao.com/),
-[Guangming Tan](https://tanniu.github.io/), and
-[Hairui Zhao](https://hairui-zhao.github.io/).
+
+- Developers: Xingchen Liu, Haoran Kong, Man Liu, Xingjian Tian, Daran Sun, Zheng Wei, Liyang Zhao, Yufan Wang, Jingwu Yang
+
+- Advisors: [Dingwen Tao](https://www.dingwentao.com/), [Guangming Tan](https://tanniu.github.io/), [Hairui Zhao](https://hairui-zhao.github.io/)
 
 ## Quick Start
 
 ### Requirements
 
-- Linux with NVIDIA GPUs
 - CUDA 12.4 or later
 - MPI for multi-process and multi-node tests
 - CMake for the bundled ZFP plugin
 
 ### Build
 
-```bash
-git clone --recurse-submodules https://github.com/hpdps-group/COCCL.git
+To build the COCCL library:
+
+```shell
+git clone https://github.com/hpdps-group/COCCL.git
+chmod 777 -R COCCL
 cd COCCL
-
-CUDA_HOME=/path/to/cuda \
-MPI_HOME=/path/to/mpi \
-CMAKE_HOME=/path/to/cmake-prefix \
-CUDA_ARCH=80 \
-bash examples/build_scripts/build.sh
+make -j src.build
 ```
 
-This builds COCCL, bundled plugins, the configuration checker, and
-MPI-enabled communication tests under `build/`. `CMAKE_HOME` is optional when
-`cmake` is already in `PATH`.
+If CUDA is not installed in the default `/usr/local/cuda` path, specify it
+when building:
 
-For build options, see
-[examples/build_scripts/README.md](examples/build_scripts/README.md).
-
-### Run A Benchmark
-
-Single node:
-
-```bash
-CUDA_HOME=/path/to/cuda MPI_HOME=/path/to/mpi GPUS_PER_NODE=4 \
-bash examples/benchmarks_scripts/communication_benchmarks.sh single
+```shell
+make -j src.build CUDA_HOME=<path to CUDA>
 ```
 
-Two nodes:
+By default, COCCL is compiled for all supported GPU architectures. To build
+only for the target architecture, set `NVCC_GENCODE`:
 
-```bash
-CUDA_HOME=/path/to/cuda \
-MPI_HOME=/path/to/mpi \
-HOSTFILE=/path/to/hostfile \
-NNODES=2 GPUS_PER_NODE=4 \
-bash examples/benchmarks_scripts/communication_benchmarks.sh multi
+```shell
+make -j src.build CUDA_HOME=<path to CUDA> \
+  NVCC_GENCODE="-gencode=arch=compute_80,code=sm_80"
 ```
 
-The default matrix compares native NCCL with SDP4Bit and ZFP at pipeline
-depths 1, 2, 4, and 8. See
-[examples/benchmarks_scripts](examples/benchmarks_scripts) for overrides.
+To clean the build:
 
-### Use COCCL In An Application
+```shell
+make clean
+```
 
-```bash
+For the automated build script, see
+[examples/build_scripts](examples/build_scripts).
+
+### After Build
+
+COCCL is installed in `build/` unless `BUILDDIR` is set. Point applications
+to the generated library and headers:
+
+```shell
 export COCCL_ROOT=/path/to/COCCL
-export LD_LIBRARY_PATH=$COCCL_ROOT/build/lib:${LD_LIBRARY_PATH:-}
+export NCCL_HOME=$COCCL_ROOT/build
+export LIBRARY_PATH=$NCCL_HOME/lib:${LIBRARY_PATH:-}
+export LD_LIBRARY_PATH=$NCCL_HOME/lib:${LD_LIBRARY_PATH:-}
+export C_INCLUDE_PATH=$NCCL_HOME/include:${C_INCLUDE_PATH:-}
+export CPLUS_INCLUDE_PATH=$NCCL_HOME/include:${CPLUS_INCLUDE_PATH:-}
+
 export COCCL_ENABLE=1
 export COCCL_CONFIG_FILE=$COCCL_ROOT/examples/benchmarks_scripts/configs/sdp4bit.toml
 
-$COCCL_ROOT/build/bin/coccl-config-check "$COCCL_CONFIG_FILE"
+$NCCL_HOME/bin/coccl-config-check "$COCCL_CONFIG_FILE"
 your_application
 ```
 
 Set `COCCL_ENABLE=0` or unset it to use native NCCL.
+
+### Tests
+
+To build [COCCL tests](tests/coccl-tests):
+
+```shell
+cd tests/coccl-tests
+make -j MPI=1 MPI_HOME=<path to MPI> CUDA_HOME=<path to CUDA> \
+  NCCL_HOME=$NCCL_HOME NVCC_GENCODE="$NVCC_GENCODE"
+```
+
+The test binaries are generated under `build/`. For example:
+
+```shell
+./build/alltoall_comp_perf -b 1M -e 1G -f 2 -t <number of GPUs> -g 1
+```
+
+For the provided single-node and multi-node test scripts, see
+[examples/benchmarks_scripts](examples/benchmarks_scripts).
 
 ## Integrating A Compressor
 
