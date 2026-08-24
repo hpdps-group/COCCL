@@ -8,20 +8,20 @@ configuration of customized compression.
 COCCL is a compression-aware GPU collective communication library built upon
 NCCL 2.21.5. It integrates compression into NCCL while preserving
 NCCL-compatible APIs, and provides compression-aware pipelines for AllGather,
-ReduceScatter, AllReduce, AllToAll, Send, and Recv.
-
-COCCL provides a unified C++17 plugin model for custom compression operators.
+ReduceScatter, AllReduce, AllToAll, Send, and Recv. Its unified C++17 plugin
+model supports custom compression operators and includes
 [SDP4Bit](https://github.com/ByteDance-Seed/SDP4Bit),
 [TACO](src/coccl-extend/extensions/compressor_plugin/taco),
 [ZFP](https://github.com/LLNL/zfp), and
-[dietGPU](https://github.com/facebookresearch/dietgpu) are included by default.
+[dietGPU](https://github.com/facebookresearch/dietgpu) by default.
 COCCL also provides pipeline overlap, automatic algorithm selection, and
 training-aware policies for data, tensor, and pipeline parallel traffic.
 
-With SDP4Bit, COCCL achieves up to 2.60x, 2.58x, 5.66x, and 4.92x speedups on
-AllReduce, ReduceScatter, AllGather, and AllToAll, respectively, compared with
-FP32 communication. In end-to-end 3D-parallel training, COCCL improves
-training throughput by up to 1.24x while maintaining model accuracy.
+For example, with SDP4Bit, COCCL achieves up to 2.60x, 2.58x, 5.66x, and
+4.92x speedups on AllReduce, ReduceScatter, AllGather, and AllToAll,
+respectively, compared with FP32 communication. In end-to-end 3D-parallel
+training, COCCL improves throughput by up to 1.24x while maintaining model
+accuracy.
 
 (C) 2025 by Institute of Computing Technology, Chinese Academy of Sciences. See [COPYRIGHT](LICENSE.txt) in the top-level directory.
 
