@@ -26,7 +26,7 @@
 #include <sys/stat.h>
 #include <unistd.h>
 #include "param.h"
-#include "compress.h"
+#include "runtime/coccl_init.h"
 #define STR2(v) #v
 #define STR(v) STR2(v)
 
@@ -1507,7 +1507,6 @@ static ncclResult_t ncclCommInitRankFunc(struct ncclAsyncJob* job_) {
   int cudaDev = job->cudaDev;
   int* parentRanks = NULL;
   int cudaArch;
-  const char* enableComp = getenv("NCCL_ENABLE_COMPRESS");
 
     // INFO(NCCL_INIT, "NCCL_ENABLE_COMPRESS Not set, defaulting to 1");
 
@@ -1556,9 +1555,7 @@ static ncclResult_t ncclCommInitRankFunc(struct ncclAsyncJob* job_) {
     NCCLCHECK(comm->tuner->init(comm->nRanks, comm->nNodes, ncclDebugLog, &comm->tunerContext));
   }
 
-  if (enableComp && strcmp(enableComp, "1") == 0) {
-    NCCLCHECKGOTO(ncclCompressInit(comm), res, fail);
-  }
+  NCCLCHECKGOTO(cocclInit(comm), res, fail);
   // update communicator state
   comm->initState = ncclSuccess;
 
@@ -1990,6 +1987,7 @@ static ncclResult_t commCleanup(ncclComm_t comm) {
     NCCLCHECK(ncclTunerPluginUnload(&comm->tuner));
   }
 
+  NCCLCHECK(cocclDestroy(comm));
   NCCLCHECK(commFree(comm));
 
   if (savedDevice != commDevice) {

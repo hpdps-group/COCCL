@@ -7,6 +7,8 @@
 #include "cuda_runtime.h"
 #include "common.h"
 
+#include <stdlib.h>
+
 void SendRecvGetCollByteCount(size_t *sendcount, size_t *recvcount, size_t *paramcount, size_t *sendInplaceOffset, size_t *recvInplaceOffset, size_t count, int nranks) {
   *sendcount = count;
   *recvcount = count;
@@ -57,18 +59,79 @@ testResult_t SendRecvRunColl(void* sendbuff, void* recvbuff, size_t count, ncclD
   NCCLCHECK(ncclCommCount(comm, &nRanks));
   int rank;
   NCCLCHECK(ncclCommUserRank(comm, &rank));
-  int recvPeer = (rank-1+nRanks) % nRanks;
-  int sendPeer = (rank+1) % nRanks;
+  int previous = (rank-1+nRanks) % nRanks;
+  int next = (rank+1) % nRanks;
 
-  // NCCLCHECK(ncclGroupStart());
-  if(rank == 0){
-    NCCLCHECK(ncclSendComp(sendbuff, count, type, sendPeer, comm, stream));
+  const char* sameStreamBidirectional =
+      getenv("COCCL_SENDRECV_SAME_STREAM_BIDIRECTIONAL");
+  const bool runSameStreamBidirectional =
+      sameStreamBidirectional != nullptr && sameStreamBidirectional[0] == '1';
+  const char* batchStress = getenv("COCCL_SENDRECV_BATCH_STRESS");
+  const bool runBatchStress =
+      batchStress != nullptr && batchStress[0] == '1';
+  if (!runSameStreamBidirectional && !runBatchStress) {
+    NCCLCHECK(ncclGroupStart());
+    NCCLCHECK(cocclRecvDecomp(
+        recvbuff, count, type, previous, comm, stream));
+    NCCLCHECK(cocclSendComp(
+        sendbuff, count, type, next, comm, stream));
+    NCCLCHECK(ncclGroupEnd());
+    return testSuccess;
   }
-  else{
-    NCCLCHECK(ncclRecvDecomp(recvbuff, count, type, recvPeer, comm, stream));
+
+  const size_t typeBytes = wordSize(type);
+  if (runSameStreamBidirectional) {
+    const size_t firstCount = count / 2;
+    const size_t secondCount = count - firstCount;
+    const size_t secondOffset = firstCount * typeBytes;
+
+    NCCLCHECK(ncclGroupStart());
+    NCCLCHECK(cocclRecvDecomp(
+        recvbuff, firstCount, type, previous, comm, stream));
+    NCCLCHECK(cocclSendComp(
+        sendbuff, firstCount, type, next, comm, stream));
+    NCCLCHECK(cocclRecvDecomp(
+        static_cast<char*>(recvbuff) + secondOffset, secondCount, type,
+        next, comm, stream));
+    NCCLCHECK(cocclSendComp(
+        static_cast<char*>(sendbuff) + secondOffset, secondCount, type,
+        previous, comm, stream));
+    NCCLCHECK(ncclGroupEnd());
+    return testSuccess;
   }
-  // NCCLCHECK(ncclSendComp(sendbuff, count, type, sendPeer, comm, stream));
-  // NCCLCHECK(ncclGroupEnd());
+
+  static thread_local cudaStream_t secondaryStream = nullptr;
+  static thread_local cudaEvent_t secondaryDone = nullptr;
+  if (secondaryStream == nullptr) {
+    CUDACHECK(cudaStreamCreateWithFlags(&secondaryStream,
+                                         cudaStreamNonBlocking));
+    CUDACHECK(cudaEventCreateWithFlags(&secondaryDone,
+                                        cudaEventDisableTiming));
+  }
+
+  const size_t segment = count / 4;
+  const size_t segmentCounts[4] = {
+      segment, segment, segment, count - 3 * segment};
+  const size_t segmentOffsets[4] = {
+      0, segment, 2 * segment, 3 * segment};
+
+  NCCLCHECK(ncclGroupStart());
+  for (int message = 0; message < 4; ++message) {
+    const bool forward = (message & 1) == 0;
+    const int recvPeer = forward ? previous : next;
+    const int sendPeer = forward ? next : previous;
+    cudaStream_t messageStream = forward ? stream : secondaryStream;
+    const size_t offset = segmentOffsets[message] * typeBytes;
+    NCCLCHECK(cocclRecvDecomp(
+        static_cast<char*>(recvbuff) + offset, segmentCounts[message], type,
+        recvPeer, comm, messageStream));
+    NCCLCHECK(cocclSendComp(
+        static_cast<char*>(sendbuff) + offset, segmentCounts[message], type,
+        sendPeer, comm, messageStream));
+  }
+  NCCLCHECK(ncclGroupEnd());
+  CUDACHECK(cudaEventRecord(secondaryDone, secondaryStream));
+  CUDACHECK(cudaStreamWaitEvent(stream, secondaryDone, 0));
   return testSuccess;
 }
 

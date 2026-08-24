@@ -18,12 +18,6 @@ OBJDIR := $(BUILDDIR)/obj/device
 
 MANIFEST := $(OBJDIR)/manifest
 DEVGLUE_OBJ  := $(OBJDIR)/device_glue.o
-# SUBDIR := compress/sdp4bit
-# SUBOBJDIR := $(OBJDIR)/$(SUBDIR)
-
-COMPSUBDIR := compress
-COMPSUBOBJDIR := $(OBJDIR)/$(COMPSUBDIR)
-
 INCFLAGS  = -I. -I.. -I$(BUILDDIR)/include -I../include
 NVCUFLAGS += $(INCFLAGS) --compiler-options "-fPIC -fvisibility=hidden"
 CXXFLAGS  += $(INCFLAGS)
@@ -51,7 +45,7 @@ define DEPENDS
  echo "$(patsubst %.d,%.o,$1) $1: " $$files > $1
 endef
 
-all: $(MANIFEST) compress.build
+all: $(MANIFEST)
 
 ifeq (1,1)
 # Case if the <gensrc> directory is generated on-demand:
@@ -61,7 +55,7 @@ $(OBJDIR)/gensrc: generate.py
 	  (bar='!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!'; \
 	   printf "\n$${bar}\nERROR: Building NCCL requires a Python 3 installation invokable as 'python3'.\n$${bar}\n\n" 1>&2; \
 	   exit 1)) \
-	&& ./generate.py $@ "$(ONLY_FUNCS)"
+	&& python3 ./generate.py $@ "$(ONLY_FUNCS)"
 else
 # Case if the <gensrc> directory is pre-generated and checked in the repo as ./gen:
 $(OBJDIR)/gensrc:
@@ -75,21 +69,9 @@ $(OBJDIR)/gensrc/rules.mk: $(OBJDIR)/gensrc ;
 -include $(OBJDIR)/gensrc/rules.mk
 # "gensrc/rules.mk" populates $(LIB_OBJS_GEN)
 
-#$(SUBOBJDIR):
-#	@mkdir -p $(SUBOBJDIR)
-#	$(MAKE) -C $(SUBDIR) OBJDIR=$(SUBOBJDIR)
+NCCL_SRCS = common.cu onerank.cu
 
-
-$(COMPSUBOBJDIR):
-	@mkdir -p $(COMPSUBOBJDIR)
-
-compress.build: | $(COMPSUBOBJDIR)
-	$(MAKE) -C $(COMPSUBDIR) SUBOBJDIR=$(COMPSUBOBJDIR)
-# SRCS = common.cu onerank.cu
-SRCS = common.cu onerank.cu compress/reduce_extend_kernel.cu
-
-#  $(SUBSO)
-LIB_OBJS = $(patsubst %, $(OBJDIR)/%.o, $(SRCS)) $(LIB_OBJS_GEN)
+LIB_OBJS = $(patsubst %, $(OBJDIR)/%.o, $(NCCL_SRCS)) $(LIB_OBJS_GEN)
 
 $(OBJDIR)/%.o: % $(OBJDIR)/%.d
 	$(call COMPILE,$@,$<)
@@ -112,6 +94,6 @@ $(MANIFEST): $(LIB_OBJS) $(DEVGLUE_OBJ)
 -include $(wildcard $(OBJDIR)/*.d)
 -include $(wildcard $(OBJDIR)/genobj/*.d)
 
-.PHONY: clean compress.build
+.PHONY: clean
 clean:
 	rm -rf $(OBJDIR)

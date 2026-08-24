@@ -1,0 +1,59 @@
+[runtime]
+mode = "normal"
+compression_threshold_bytes = 1048576
+
+[compressor_plugins]
+compressors = ["zfp"]
+library_path = "../../../build/obj/coccl-extend/compressor_plugin/libcompress"
+
+[normal.all_to_all.default]
+compressor = "zfp"
+
+[normal.all_to_all.default.config]
+rate = 4
+
+[normal.all_gather.default]
+compressor = "zfp"
+
+[normal.all_gather.default.config]
+rate = 8
+
+[normal.all_reduce.default]
+compressor = "zfp"
+
+[normal.all_reduce.default.config]
+rate = 8
+
+[normal.all_reduce.intra]
+compressor = "zfp"
+
+[normal.all_reduce.intra.config]
+rate = 8
+
+[normal.all_reduce.inter]
+compressor = "zfp"
+
+[normal.all_reduce.inter.config]
+rate = 8
+[normal.reduce_scatter.default]
+compressor = "zfp"
+
+[normal.reduce_scatter.default.config]
+rate = 8
+
+[normal.reduce_scatter.intra]
+compressor = "zfp"
+
+[normal.reduce_scatter.intra.config]
+rate = 8
+
+[normal.reduce_scatter.inter]
+compressor = "zfp"
+
+[normal.reduce_scatter.inter.config]
+rate = 8
+[normal.sendrecv.default]
+compressor = "zfp"
+
+[normal.sendrecv.default.config]
+rate = 8

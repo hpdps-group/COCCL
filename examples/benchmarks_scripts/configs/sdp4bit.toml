@@ -1,0 +1,87 @@
+[runtime]
+mode = "normal"
+compression_threshold_bytes = 1048576
+
+[compressor_plugins]
+compressors = ["sdp4bit"]
+library_path = "../../../build/obj/coccl-extend/compressor_plugin/libcompress"
+
+[normal.all_to_all.default]
+compressor = "sdp4bit"
+
+[normal.all_to_all.default.config]
+groupCount = 2048
+quantBits = 4
+quantType = "Symmetric"
+
+[normal.all_gather.default]
+compressor = "sdp4bit"
+
+[normal.all_gather.default.config]
+groupCount = 2048
+quantBits = 4
+quantType = "Symmetric"
+
+[normal.all_reduce.default]
+compressor = "sdp4bit"
+
+[normal.all_reduce.default.config]
+groupCount = 128
+quantBits = 4
+quantType = "Symmetric"
+hadamard = false
+
+[normal.all_reduce.intra]
+compressor = "sdp4bit"
+
+[normal.all_reduce.intra.config]
+groupCount = 128
+quantBits = 4
+quantType = "Symmetric"
+hadamard = false
+pipelineSize = 1
+
+[normal.all_reduce.inter]
+compressor = "sdp4bit"
+
+[normal.all_reduce.inter.config]
+groupCount = 128
+quantBits = 4
+quantType = "Symmetric"
+hadamard = false
+pipelineSize = 1
+[normal.reduce_scatter.default]
+compressor = "sdp4bit"
+
+[normal.reduce_scatter.default.config]
+groupCount = 128
+quantBits = 4
+quantType = "Symmetric"
+hadamard = true
+
+[normal.reduce_scatter.intra]
+compressor = "sdp4bit"
+
+[normal.reduce_scatter.intra.config]
+groupCount = 128
+quantBits = 4
+quantType = "Symmetric"
+hadamard = false
+pipelineSize = 1
+
+[normal.reduce_scatter.inter]
+compressor = "sdp4bit"
+
+[normal.reduce_scatter.inter.config]
+groupCount = 128
+quantBits = 4
+quantType = "Symmetric"
+hadamard = false
+pipelineSize = 1
+[normal.sendrecv.default]
+compressor = "sdp4bit"
+
+[normal.sendrecv.default.config]
+groupCount = 128
+quantBits = 4
+quantType = "Symmetric"

@@ -1,0 +1,66 @@
+[runtime]
+mode = "training"
+compression_threshold_bytes = 67108864
+
+[compressor_plugins]
+compressors = ["sdp4bit"]
+library_path = "../../../../build/obj/coccl-extend/compressor_plugin/libcompress"
+
+[training]
+observation_iterations = 5
+
+[training.classifier]
+data_parallel_size = 2
+tensor_parallel_size = 2
+pipeline_parallel_size = 2
+dp_strategy = "sdp"
+sequence_parallel = true
+
+[training.dp.all_gather.default]
+compressor = "sdp4bit"
+
+[training.dp.all_gather.default.config]
+groupCount = 2048
+quantBits = 8
+quantType = "Symmetric"
+subAdd = true
+pipelineSize = 1
+
+[training.dp.reduce_scatter.default]
+compressor = "sdp4bit"
+
+[training.dp.reduce_scatter.default.config]
+groupCount = 128
+quantBits = 4
+quantType = "Symmetric"
+hadamard = true
+
+[training.dp.reduce_scatter.intra]
+compressor = "sdp4bit"
+
+[training.dp.reduce_scatter.intra.config]
+groupCount = 128
+quantBits = 4
+quantType = "Symmetric"
+hadamard = true
+
+[training.dp.reduce_scatter.inter]
+compressor = "sdp4bit"
+
+[training.dp.reduce_scatter.inter.config]
+groupCount = 128
+quantBits = 4
+quantType = "Symmetric"
+hadamard = true
+
+[pipeline]
+depth = 1
+
+[autotune]
+enabled = true
+profile_min_bytes = 3145728
+profile_max_bytes = 201326592
+warmup = 3
+iterations = 10
+reduce_scatter_algorithm = "auto"
+all_reduce_algorithm = "auto"
