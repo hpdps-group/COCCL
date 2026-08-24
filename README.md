@@ -1,15 +1,11 @@
 # COCCL
 
-A collective communication library supporting easy integration and
-configuration of customized compression.
-
-## Introduction
-
-COCCL is a compression-aware GPU collective communication library built upon
-NCCL 2.21.5. It integrates compression into NCCL while preserving
-NCCL-compatible APIs, and provides compression-aware pipelines for AllGather,
-ReduceScatter, AllReduce, AllToAll, Send, and Recv. Its unified C++17 plugin
-model supports custom compression operators and includes
+COCCL is a compression-aware GPU collective communication library that makes
+customized compression easy to integrate and configure. Built upon NCCL
+2.21.5, it preserves NCCL-compatible APIs and provides compression-aware
+pipelines for AllGather, ReduceScatter, AllReduce, AllToAll, Send, and Recv.
+Its unified C++17 plugin model supports custom compression operators and
+includes
 [SDP4Bit](https://github.com/ByteDance-Seed/SDP4Bit),
 [TACO](src/coccl-extend/extensions/compressor_plugin/taco),
 [ZFP](https://github.com/LLNL/zfp), and
