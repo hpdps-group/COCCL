@@ -1,5 +1,7 @@
 # Add A Compressor To COCCL
 
+English | [简体中文](README_zh-CN.md)
+
 COCCL compressor plugins use the public C++17 SDK and build as independent
 shared libraries. A plugin implements encoding; COCCL owns slicing, Pack and
 Unpack, communication, workspace, and scheduling.

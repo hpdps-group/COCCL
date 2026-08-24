@@ -1,5 +1,7 @@
 # Qwen Training With COCCL
 
+English | [简体中文](README_zh-CN.md)
+
 This example runs Qwen2.5 or Qwen3 with COCCL through
 [Pai-Megatron-Patch](Pai-Megatron-Patch). The framework is pinned as a Git
 submodule.

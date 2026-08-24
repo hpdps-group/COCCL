@@ -1,5 +1,7 @@
 # NCCL Tests
 
+English | [简体中文](README_zh-CN.md)
+
 These tests check both the performance and the correctness of [NCCL](http://github.com/nvidia/nccl) operations.
 
 ## Build

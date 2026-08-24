@@ -1,5 +1,7 @@
 # TACO
 
+English | [简体中文](README_zh-CN.md)
+
 TACO compresses tensor-parallel communication with FP8 quantization. This
 directory contains its CUDA kernels and COCCL adapter. See the
 [compressor plugin guide](../README.md) for the common SDK and integration

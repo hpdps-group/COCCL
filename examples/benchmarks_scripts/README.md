@@ -1,5 +1,7 @@
 # Communication Benchmarks
 
+English | [简体中文](README_zh-CN.md)
+
 Build COCCL and `tests/coccl-tests` before running this script. Both modes
 require `MPI_HOME`; single-node mode does not invoke `mpirun`.
 

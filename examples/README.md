@@ -1,5 +1,7 @@
 # COCCL Examples
 
+English | [简体中文](README_zh-CN.md)
+
 The examples cover the normal user path: build COCCL, benchmark communication,
 then run Qwen training. Every script can be launched from any directory.
 

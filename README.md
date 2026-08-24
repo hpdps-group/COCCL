@@ -1,5 +1,7 @@
 # COCCL
 
+English | [简体中文](README_zh-CN.md)
+
 COCCL is a compression-aware GPU collective communication library that makes
 customized compression easy to integrate and configure. Built upon NCCL
 2.21.5, it preserves NCCL-compatible APIs and provides compression-aware
@@ -22,7 +24,7 @@ accuracy.
 (C) 2025 by Institute of Computing Technology, Chinese Academy of Sciences. See [COPYRIGHT](LICENSE.txt) in the top-level directory.
 
 
-- Developers: Xingchen Liu, Haoran Kong, Man Liu, Xingjian Tian, Daran Sun, Zheng Wei, Liyang Zhao, Yufan Wang, Jingwu Yang
+- Developers: Xingchen Liu, Haoran Kong, Man Liu, Xingjian Tian, Daran Sun, Zheng Wei, Liyang Zhao, Jingwu Yang
 
 - Advisors: [Dingwen Tao](https://www.dingwentao.com/), [Guangming Tan](https://tanniu.github.io/), [Hairui Zhao](https://hairui-zhao.github.io/)
 

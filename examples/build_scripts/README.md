@@ -1,5 +1,7 @@
 # Build COCCL
 
+English | [简体中文](README_zh-CN.md)
+
 Set the CUDA and MPI installation paths, then run the script from any
 directory:
 
