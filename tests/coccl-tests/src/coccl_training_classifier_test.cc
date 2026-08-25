@@ -313,6 +313,32 @@ static int testIterationDetection() {
     fprintf(stderr, "iteration detector accepted a flat inner-layer loop\n");
     return 1;
   }
+
+  std::vector<cocclTrainingTraceEvent> flatTpSequenceParallel(10);
+  std::vector<cocclTrainingTraceEvent> flatSdp(10);
+  for (size_t i = 0; i < flatTpSequenceParallel.size(); ++i) {
+    const bool allGather = (i & 1) != 0;
+    flatTpSequenceParallel[i].communicatorId = 3;
+    flatTpSequenceParallel[i].operation = allGather
+        ? ncclFuncAllGather : ncclFuncReduceScatter;
+    flatTpSequenceParallel[i].logicalBytes = 1ULL << 20;
+    flatTpSequenceParallel[i].timestampNs = i * 10;
+
+    flatSdp[i] = flatTpSequenceParallel[i];
+    flatSdp[i].communicatorId = 4;
+    if (!allGather) flatSdp[i].logicalBytes = 2ULL << 20;
+  }
+  detected.clear();
+  if (cocclTrainingDetectIterations(
+          flatTpSequenceParallel, 5, &detected)) {
+    fprintf(stderr, "iteration detector accepted flat TP RS/AG traffic\n");
+    return 1;
+  }
+  if (!cocclTrainingDetectIterations(flatSdp, 5, &detected) ||
+      detected.size() != 5 || detected[0].end - detected[0].begin != 2) {
+    fprintf(stderr, "iteration detector rejected stable SDP RS/AG traffic\n");
+    return 1;
+  }
   return 0;
 }
 
@@ -871,6 +897,9 @@ static int testRoleSpecificCompressorSelection() {
 }
 
 static int testRuntimeObservationMinimumBytes() {
+  const size_t savedThreshold =
+      testConfig.runtime.compressionThresholdBytes;
+  testConfig.runtime.compressionThresholdBytes = 0;
   int rankToNode[2] = {0, 0};
   ncclComm comm = {};
   comm.rank = 0;
@@ -909,7 +938,76 @@ static int testRuntimeObservationMinimumBytes() {
     return 1;
   }
   cocclTrainingAssistUnregister(&comm);
+  testConfig.runtime.compressionThresholdBytes = savedThreshold;
   return 0;
+}
+
+static int testObservationSkipsUncompressibleTpTraffic() {
+  const size_t savedThreshold =
+      testConfig.runtime.compressionThresholdBytes;
+  testConfig.runtime.compressionThresholdBytes = 64ULL << 20;
+
+  int rankToNode[2] = {0, 0};
+  ncclComm tp = {};
+  tp.rank = 0;
+  tp.nRanks = 2;
+  tp.nNodes = 1;
+  tp.localRanks = 2;
+  tp.rankToNode = rankToNode;
+  tp.commHash = 0x1020;
+  ncclComm dp = tp;
+  dp.commHash = 0x1021;
+
+  float buffer[1] = {};
+  constexpr size_t kTpCount = (1ULL << 20) / sizeof(uint16_t) / 2;
+  constexpr size_t kDpCount = (256ULL << 20) / sizeof(float) / 2;
+  cocclInfo tpReduceScatter = collectiveInfo(
+      &tp, cocclOperation::ReduceScatter, ncclFuncReduceScatter,
+      kTpCount, buffer, buffer);
+  cocclInfo tpAllGather = collectiveInfo(
+      &tp, cocclOperation::AllGather, ncclFuncAllGather,
+      kTpCount, buffer, buffer);
+  tpReduceScatter.datatype = ncclBfloat16;
+  tpAllGather.datatype = ncclBfloat16;
+  cocclInfo dpReduceScatter = collectiveInfo(
+      &dp, cocclOperation::ReduceScatter, ncclFuncReduceScatter,
+      kDpCount, buffer, buffer);
+  cocclInfo dpAllGather = collectiveInfo(
+      &dp, cocclOperation::AllGather, ncclFuncAllGather,
+      kDpCount, buffer, buffer);
+  dpAllGather.datatype = ncclBfloat16;
+
+  cocclTrainingAssistRegister(&tp);
+  cocclTrainingAssistRegister(&dp);
+  for (int layer = 0; layer < 128; ++layer) {
+    cocclTrainingAssistObserve(&tpReduceScatter, 0);
+    cocclTrainingAssistObserve(&tpAllGather, 0);
+  }
+  cocclTrainingClassification classification;
+  if (cocclTrainingAssistQuery(&tp, &classification) ||
+      cocclTrainingAssistQuery(&dp, &classification)) {
+    fprintf(stderr, "sub-threshold TP traffic entered role classification\n");
+    return 1;
+  }
+
+  for (int iteration = 0; iteration < 20; ++iteration) {
+    cocclTrainingAssistObserve(&dpReduceScatter, 0);
+    cocclTrainingAssistObserve(&dpAllGather, 0);
+    usleep(1000);
+  }
+  int result = expectCommittedRole(
+      &dp, cocclTrainingRoleDataParallel,
+      "DP after sub-threshold TP traffic");
+  if (cocclTrainingAssistQuery(&tp, &classification) &&
+      classification.role != cocclTrainingRoleUnknown) {
+    fprintf(stderr, "sub-threshold TP communicator received a role\n");
+    result = 1;
+  }
+
+  cocclTrainingAssistUnregister(&dp);
+  cocclTrainingAssistUnregister(&tp);
+  testConfig.runtime.compressionThresholdBytes = savedThreshold;
+  return result;
 }
 
 static int testImmediateConfiguredSizeClassification() {
@@ -1120,6 +1218,7 @@ static int testOperationDescriptors() {
 
 int main() {
   testConfig.runtime.mode = cocclRuntimeMode::Training;
+  testConfig.runtime.compressionThresholdBytes = 0;
   testConfig.training.observationIterations = 10;
   testConfig.training.dataParallelSize = 31;
   testConfig.training.tensorParallelSize = 29;
@@ -1144,6 +1243,7 @@ int main() {
       testQwenTp2Pp2Trace() ||
       testRoleSpecificCompressorSelection() ||
       testRuntimeObservationMinimumBytes() ||
+      testObservationSkipsUncompressibleTpTraffic() ||
       testImmediateConfiguredSizeClassification() ||
       testAmbiguousConstantCollective()) {
     return 1;

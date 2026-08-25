@@ -40,7 +40,8 @@ static __thread int tid = -1;
 static void ncclDebugInit() {
   const char* nccl_debug = ncclGetEnv("NCCL_DEBUG");
   int tempNcclDebugLevel = -1;
-  uint64_t tempNcclDebugMask = NCCL_INIT | NCCL_BOOTSTRAP | NCCL_ENV; // Default debug sub-system mask
+  uint64_t tempNcclDebugMask =
+      NCCL_INIT | NCCL_BOOTSTRAP | NCCL_ENV | COCCL_INIT; // Default debug sub-system mask
   if (ncclDebugLevel == NCCL_DEBUG_RESET_TRIGGERED && ncclDebugFile != stdout) {
     // Finish the reset initiated via ncclResetDebugInit().
     fclose(ncclDebugFile);
@@ -105,6 +106,20 @@ static void ncclDebugInit() {
         mask = NCCL_PROFILE;
       } else if (strcasecmp(subsys, "RAS") == 0) {
         mask = NCCL_RAS;
+      } else if (strcasecmp(subsys, "COCCL") == 0) {
+        mask = COCCL_ALL;
+      } else if (strcasecmp(subsys, "COCCL_INIT") == 0) {
+        mask = COCCL_INIT;
+      } else if (strcasecmp(subsys, "COCCL_RUNTIME") == 0) {
+        mask = COCCL_RUNTIME;
+      } else if (strcasecmp(subsys, "COCCL_PIPELINE") == 0) {
+        mask = COCCL_PIPELINE;
+      } else if (strcasecmp(subsys, "COCCL_COMPRESS") == 0) {
+        mask = COCCL_COMPRESS;
+      } else if (strcasecmp(subsys, "COCCL_MEMORY") == 0) {
+        mask = COCCL_MEMORY;
+      } else if (strcasecmp(subsys, "COCCL_TUNING") == 0) {
+        mask = COCCL_TUNING;
       } else if (strcasecmp(subsys, "ALL") == 0) {
         mask = NCCL_ALL;
       }

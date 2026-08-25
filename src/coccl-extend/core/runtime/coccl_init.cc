@@ -18,7 +18,15 @@ ncclResult_t cocclInit(ncclComm_t comm) {
   NCCLCHECK(cocclCompressorRuntimeInit(comm));
   if (!cocclCompressionEnabled()) return ncclSuccess;
   NCCLCHECK(cocclCommCreate(comm));
-  return cocclBufferCommInit(comm);
+  NCCLCHECK(cocclBufferCommInit(comm));
+
+  // NCCL 2.27 ignores unsupported images while probing its multi-arch kernels.
+  const cudaError_t probeError = cudaGetLastError();
+  if (probeError != cudaSuccess &&
+      probeError != cudaErrorNoKernelImageForDevice) {
+    CUDACHECK(probeError);
+  }
+  return ncclSuccess;
 }
 
 ncclResult_t cocclDestroy(ncclComm_t comm) {

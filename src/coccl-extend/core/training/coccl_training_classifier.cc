@@ -154,6 +154,47 @@ static bool ratioNear(double value, double target) {
   return target > 0.0 && std::fabs(value - target) / target <= 0.20;
 }
 
+static bool candidateHasStableAgRsRatio(
+    const std::vector<cocclTrainingTraceEvent>& events,
+    size_t start, size_t period, int iterations) {
+  std::set<uint64_t> communicators;
+  for (size_t i = start; i < start + period; ++i) {
+    if (events[i].operation == ncclFuncAllGather ||
+        events[i].operation == ncclFuncReduceScatter) {
+      communicators.insert(events[i].communicatorId);
+    }
+  }
+
+  for (uint64_t communicator : communicators) {
+    bool stable = true;
+    for (int iteration = 0; iteration < iterations; ++iteration) {
+      long double allGatherBytes = 0.0;
+      long double reduceScatterBytes = 0.0;
+      size_t begin = start + (size_t)iteration * period;
+      for (size_t i = begin; i < begin + period; ++i) {
+        const cocclTrainingTraceEvent& event = events[i];
+        if (event.communicatorId != communicator) continue;
+        if (event.operation == ncclFuncAllGather) {
+          allGatherBytes += (long double)event.logicalBytes;
+        } else if (event.operation == ncclFuncReduceScatter) {
+          reduceScatterBytes += (long double)event.logicalBytes;
+        }
+      }
+      if (allGatherBytes == 0.0 || reduceScatterBytes == 0.0) {
+        stable = false;
+        break;
+      }
+      const double ratio = (double)(allGatherBytes / reduceScatterBytes);
+      if (!ratioNear(ratio, 0.5) && !ratioNear(ratio, 0.25)) {
+        stable = false;
+        break;
+      }
+    }
+    if (stable) return true;
+  }
+  return false;
+}
+
 static void buildCommStats(
     const cocclTrainingTraceComm& descriptor,
     const std::vector<cocclTrainingTraceEvent>& events,
@@ -487,7 +528,12 @@ bool cocclTrainingDetectIterations(
     }
   }
 
-  if (bestPeriod == 0 || bestGapScore < kMinimumBoundaryGapScore) return false;
+  if (bestPeriod == 0 ||
+      (bestGapScore < kMinimumBoundaryGapScore &&
+       !candidateHasStableAgRsRatio(
+           events, bestStart, bestPeriod, targetIterations))) {
+    return false;
+  }
   iterations->reserve((size_t)targetIterations);
   for (int iteration = 0; iteration < targetIterations; ++iteration) {
     size_t begin = bestStart + (size_t)iteration * bestPeriod;

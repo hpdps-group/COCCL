@@ -496,21 +496,22 @@ static ncclResult_t cocclRunPipelineWithDepth(
   NCCLCHECK(cocclPreparePipeline(spec, requestedDepth, &context));
   CUDACHECK(cudaSetDevice(spec->ownerComm->cudaDev));
 
-  cocclBufferHandle registeredWorkspace = {};
-  NCCLCHECK(cocclGetBuffer(spec->ownerComm, context.plan.registeredBytes,
-                           spec->stream, &registeredWorkspace));
+  cocclBufferHandle coreWorkspace = {};
+  NCCLCHECK(cocclGetUnregisteredBuffer(
+      spec->ownerComm, context.plan.registeredBytes, spec->stream,
+      &coreWorkspace));
   cocclBufferHandle rawWorkspace = {};
   if (context.plan.rawBytes != 0) {
     const ncclResult_t rawResult = cocclGetUnregisteredBuffer(
         spec->ownerComm, context.plan.rawBytes, spec->stream,
         &rawWorkspace);
     if (rawResult != ncclSuccess) {
-      (void)cocclReleaseBuffer(&registeredWorkspace, spec->stream);
+      (void)cocclReleaseBuffer(&coreWorkspace, spec->stream);
       return rawResult;
     }
   }
   const cocclPipelineWorkspace workspace = {
-      registeredWorkspace.ptr, rawWorkspace.ptr};
+      coreWorkspace.ptr, rawWorkspace.ptr};
 
   ncclResult_t result = ncclSuccess;
   const bool framed = pipelineUsesFramedCompressor(spec);
@@ -535,10 +536,10 @@ static ncclResult_t cocclRunPipelineWithDepth(
   if (result != ncclSuccess) (void)cudaDeviceSynchronize();
   const ncclResult_t rawRelease =
       cocclReleaseBuffer(&rawWorkspace, spec->stream);
-  const ncclResult_t registeredRelease =
-      cocclReleaseBuffer(&registeredWorkspace, spec->stream);
+  const ncclResult_t coreRelease =
+      cocclReleaseBuffer(&coreWorkspace, spec->stream);
   if (result == ncclSuccess) result = rawRelease;
-  return result == ncclSuccess ? registeredRelease : result;
+  return result == ncclSuccess ? coreRelease : result;
 }
 
 ncclResult_t cocclRunPipeline(const cocclPipelineSpec* spec) {

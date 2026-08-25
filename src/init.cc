@@ -29,6 +29,7 @@
 #include <sys/stat.h>
 #include <unistd.h>
 #include "param.h"
+#include "runtime/coccl_init.h"
 #include "nvtx_payload_schemas.h"
 #include "utils.h"
 
@@ -1452,6 +1453,7 @@ static ncclResult_t ncclCommInitRankFunc(struct ncclAsyncJob* job_) {
     NCCLCHECK(comm->tuner->init(comm->nRanks, comm->nNodes, ncclDebugLog, &comm->tunerContext));
   }
 
+  NCCLCHECKGOTO(cocclInit(comm), res, fail);
   // update communicator state
   comm->initState = ncclSuccess;
   timers[TIMER_INIT_TOTAL] = clockNano() - timers[TIMER_INIT_TOTAL];
@@ -2057,6 +2059,7 @@ static ncclResult_t commCleanup(ncclComm_t comm) {
     NCCLCHECK(comm->tuner->destroy(comm->tunerContext));
     NCCLCHECK(ncclTunerPluginUnload(comm));
   }
+  NCCLCHECK(cocclDestroy(comm));
   NCCLCHECK(commFree(comm));
   return ncclSuccess;
 }

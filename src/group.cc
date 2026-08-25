@@ -5,6 +5,7 @@
  ************************************************************************/
 
 #include "group.h"
+#include "runtime/coccl_group.h"
 #include "debug.h"
 #include "enqueue.h"
 #include "transport.h"
@@ -21,6 +22,14 @@ __thread struct ncclComm* ncclGroupCommPreconnectHead = nullptr;
 __thread struct ncclIntruQueue<struct ncclAsyncJob, &ncclAsyncJob::next> ncclAsyncJobs;
 __thread int ncclGroupBlocking = -1; /* default mode */
 void* ncclAsyncJobMain(void* arg);
+
+static bool ncclGroupHasNativePendingWork() {
+  for (int type = 0; type < ncclGroupTaskTypeNum; ++type) {
+    if (ncclGroupCommHead[type] != nullptr) return true;
+  }
+  return ncclGroupCommPreconnectHead != nullptr ||
+         !ncclIntruQueueEmpty(&ncclAsyncJobs);
+}
 
 ncclResult_t ncclAsyncLaunch(
     struct ncclAsyncJob* job,
@@ -101,9 +110,21 @@ NCCL_API(ncclResult_t, ncclGroupEnd);
 ncclResult_t ncclGroupEnd() {
   ncclResult_t ret = ncclSuccess;
   NVTX3_FUNC_RANGE_IN(nccl_domain);
+
+  const bool outermost = ncclGroupDepth == 1;
+  if (outermost && cocclGroupHasPending()) {
+    const ncclResult_t prepareResult =
+        cocclGroupPrepareEnd(ncclGroupHasNativePendingWork());
+    if (ncclGroupError == ncclSuccess) ncclGroupError = prepareResult;
+  }
+
   NCCLCHECKGOTO(ncclGroupEndInternal(), ret, exit);
+  if (ret == ncclSuccess && outermost && cocclGroupHasPending()) {
+    NCCLCHECKGOTO(cocclGroupDrain(), ret, exit);
+  }
   TRACE_CALL("ncclGroupEnd()");
 exit:
+  if (ret != ncclSuccess) cocclGroupAbort();
   return ret;
 }
 

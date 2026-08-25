@@ -119,9 +119,8 @@ ncclResult_t cocclExecuteSendRecvBatch(
       ret = ncclInvalidArgument;
       goto exit;
     }
-    NCCLCHECKGOTO(cocclGetBufferForComm(
-                      info.comm, info.comm, allocationBytes, info.stream,
-                      &state.buffer),
+    NCCLCHECKGOTO(cocclGetUnregisteredBuffer(
+                      info.comm, allocationBytes, info.stream, &state.buffer),
                   ret, exit);
 
     cocclCompressorFrameMetadata* metadata = deviceMetadata(state);

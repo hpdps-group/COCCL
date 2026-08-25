@@ -6,6 +6,7 @@
 
 #include "argcheck.h" // Need some checks here since we access comm
 #include "collectives.h"
+#include "runtime/coccl_runtime.h"
 #include "enqueue.h"
 #include "nccl.h"
 #include "nvtx_payload_schemas.h"
@@ -78,6 +79,19 @@ NCCL_API(ncclResult_t, ncclAllGather, const void* sendbuff, void* recvbuff, size
     ncclDataType_t datatype, ncclComm_t comm, cudaStream_t stream);
 ncclResult_t ncclAllGather(const void* sendbuff, void* recvbuff, size_t sendcount,
     ncclDataType_t datatype, ncclComm_t comm, cudaStream_t stream) {
+  cocclInfo coccl = {};
+  coccl.sendbuff = sendbuff;
+  coccl.recvbuff = recvbuff;
+  coccl.count = sendcount;
+  coccl.datatype = datatype;
+  coccl.func = ncclFuncAllGather;
+  coccl.operation = cocclOperation::AllGather;
+  coccl.comm = comm;
+  coccl.stream = stream;
+  bool enqueued = false;
+  NCCLCHECK(cocclEnqueueCheck(&coccl, &enqueued));
+  if (enqueued) return ncclSuccess;
+
   // Just pass the size of one message and not the total bytes sent/received.
   NVTX3_FUNC_WITH_PARAMS(AllGather, NcclNvtxParamsAllGather,
     NVTX3_PAYLOAD(comm ? comm->commHash : 0, sendcount * ncclTypeSize(datatype)));
@@ -92,6 +106,20 @@ NCCL_API(ncclResult_t, ncclAllReduce, const void* sendbuff, void* recvbuff, size
     ncclDataType_t datatype, ncclRedOp_t op, ncclComm* comm, cudaStream_t stream);
 ncclResult_t ncclAllReduce(const void* sendbuff, void* recvbuff, size_t count,
     ncclDataType_t datatype, ncclRedOp_t op, ncclComm* comm, cudaStream_t stream) {
+  cocclInfo coccl = {};
+  coccl.sendbuff = sendbuff;
+  coccl.recvbuff = recvbuff;
+  coccl.count = count;
+  coccl.datatype = datatype;
+  coccl.op = op;
+  coccl.func = ncclFuncAllReduce;
+  coccl.operation = cocclOperation::AllReduce;
+  coccl.comm = comm;
+  coccl.stream = stream;
+  bool enqueued = false;
+  NCCLCHECK(cocclEnqueueCheck(&coccl, &enqueued));
+  if (enqueued) return ncclSuccess;
+
   NVTX3_FUNC_WITH_PARAMS(AllReduce, NcclNvtxParamsAllReduce,
     NVTX3_PAYLOAD(comm ? comm->commHash : 0, count * ncclTypeSize(datatype), op));
 
@@ -138,6 +166,20 @@ NCCL_API(ncclResult_t, ncclReduceScatter, const void* sendbuff, void* recvbuff, 
     ncclDataType_t datatype, ncclRedOp_t op, ncclComm* comm, cudaStream_t stream);
 ncclResult_t ncclReduceScatter(const void* sendbuff, void* recvbuff, size_t recvcount,
     ncclDataType_t datatype, ncclRedOp_t op, ncclComm* comm, cudaStream_t stream) {
+  cocclInfo coccl = {};
+  coccl.sendbuff = sendbuff;
+  coccl.recvbuff = recvbuff;
+  coccl.count = recvcount;
+  coccl.datatype = datatype;
+  coccl.op = op;
+  coccl.func = ncclFuncReduceScatter;
+  coccl.operation = cocclOperation::ReduceScatter;
+  coccl.comm = comm;
+  coccl.stream = stream;
+  bool enqueued = false;
+  NCCLCHECK(cocclEnqueueCheck(&coccl, &enqueued));
+  if (enqueued) return ncclSuccess;
+
   NVTX3_FUNC_WITH_PARAMS(ReduceScatter, NcclNvtxParamsReduceScatter,
     NVTX3_PAYLOAD(comm ? comm->commHash : 0, recvcount * ncclTypeSize(datatype), op));
 
@@ -154,6 +196,19 @@ ncclResult_t ncclSend(const void* sendbuff, size_t count, ncclDataType_t datatyp
   NVTX3_FUNC_WITH_PARAMS(Send, NcclNvtxParamsSendRecv,
     NVTX3_PAYLOAD(comm ? comm->commHash : 0, count * ncclTypeSize(datatype), peer));
 
+  cocclInfo coccl = {};
+  coccl.sendbuff = sendbuff;
+  coccl.count = count;
+  coccl.datatype = datatype;
+  coccl.peer = peer;
+  coccl.func = ncclFuncSend;
+  coccl.operation = cocclOperation::SendRecv;
+  coccl.comm = comm;
+  coccl.stream = stream;
+  bool enqueued = false;
+  NCCLCHECK(cocclEnqueueCheck(&coccl, &enqueued));
+  if (enqueued) return ncclSuccess;
+
   struct ncclInfo info = { ncclFuncSend, "Send",
     NULL, (void*)sendbuff, count, datatype, ncclSum, peer, comm, stream, /* Args */
     1, 1 };
@@ -167,6 +222,19 @@ ncclResult_t ncclRecv(void* recvbuff, size_t count, ncclDataType_t datatype, int
   NVTX3_FUNC_WITH_PARAMS(Recv, NcclNvtxParamsSendRecv,
     NVTX3_PAYLOAD(comm ? comm->commHash : 0, count * ncclTypeSize(datatype), peer));
 
+  cocclInfo coccl = {};
+  coccl.recvbuff = recvbuff;
+  coccl.count = count;
+  coccl.datatype = datatype;
+  coccl.peer = peer;
+  coccl.func = ncclFuncRecv;
+  coccl.operation = cocclOperation::SendRecv;
+  coccl.comm = comm;
+  coccl.stream = stream;
+  bool enqueued = false;
+  NCCLCHECK(cocclEnqueueCheck(&coccl, &enqueued));
+  if (enqueued) return ncclSuccess;
+
   struct ncclInfo info = { ncclFuncRecv, "Recv",
     NULL, recvbuff, count, datatype, ncclSum, peer, comm, stream, /* Args */
     1, 1 };
@@ -179,13 +247,44 @@ NCCL_API(ncclResult_t, ncclAllToAll, const void* sendbuff, void* recvbuff,
 ncclResult_t ncclAllToAll(const void* sendbuff, void* recvbuff,
     size_t sendcount, ncclDataType_t datatype, ncclComm_t comm,
     cudaStream_t stream) {
+  cocclInfo coccl = {};
+  coccl.sendbuff = sendbuff;
+  coccl.recvbuff = recvbuff;
+  coccl.count = sendcount;
+  coccl.datatype = datatype;
+  coccl.operation = cocclOperation::AllToAll;
+  coccl.comm = comm;
+  coccl.stream = stream;
+  bool enqueued = false;
+  NCCLCHECK(cocclEnqueueCheck(&coccl, &enqueued));
+  if (enqueued) return ncclSuccess;
+
   const size_t chunkBytes = sendcount * ncclTypeSize(datatype);
   NCCLCHECK(ncclGroupStart());
   for (int peer = 0; peer < comm->nRanks; ++peer) {
     char* send = (char*)sendbuff + peer * chunkBytes;
     char* recv = (char*)recvbuff + peer * chunkBytes;
-    NCCLCHECK(ncclRecv(recv, sendcount, datatype, peer, comm, stream));
-    NCCLCHECK(ncclSend(send, sendcount, datatype, peer, comm, stream));
+    cocclInfo recvCall = {};
+    recvCall.recvbuff = recv;
+    recvCall.count = sendcount;
+    recvCall.datatype = datatype;
+    recvCall.peer = peer;
+    recvCall.func = ncclFuncRecv;
+    recvCall.operation = cocclOperation::SendRecv;
+    recvCall.comm = comm;
+    recvCall.stream = stream;
+    NCCLCHECK(cocclReplayNativeCall(recvCall));
+
+    cocclInfo sendCall = {};
+    sendCall.sendbuff = send;
+    sendCall.count = sendcount;
+    sendCall.datatype = datatype;
+    sendCall.peer = peer;
+    sendCall.func = ncclFuncSend;
+    sendCall.operation = cocclOperation::SendRecv;
+    sendCall.comm = comm;
+    sendCall.stream = stream;
+    NCCLCHECK(cocclReplayNativeCall(sendCall));
   }
   return ncclGroupEnd();
 }
