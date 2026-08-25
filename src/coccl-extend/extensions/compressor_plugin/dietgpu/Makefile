@@ -10,6 +10,10 @@ CMAKE ?= cmake
 COCCL_CMAKE_JOBS ?= 8
 CUDA_HOME ?= $(if $(NVHPC_CUDA_HOME),$(NVHPC_CUDA_HOME),/usr/local/cuda)
 
+COCCL_CUDA_ARCHITECTURES ?= $(shell printf '%s\n' '$(NVCC_GENCODE)' | \
+	grep -oE 'code=sm_[0-9]+' | sed 's/code=sm_//' | sort -nu | paste -sd ';' -)
+COCCL_CUDA_ARCHITECTURES := $(if $(strip $(COCCL_CUDA_ARCHITECTURES)),$(strip $(COCCL_CUDA_ARCHITECTURES)),80)
+
 OBJDIR := $(SUBOBJDIR)/dietgpu/cmake
 LIBDIR := $(SUBOBJDIR)/libcompress
 PLUGIN_SO := $(LIBDIR)/libdietgpu.so
@@ -26,7 +30,7 @@ dietgpu.configure:
 	  -DCMAKE_ARCHIVE_OUTPUT_DIRECTORY=$(abspath $(OBJDIR)/lib) \
 	  -DCOCCL_INCLUDE_DIR=$(abspath $(COCCL_ROOT)/include) \
 	  -DCOCCL_NCCL_INCLUDE_DIR=$(abspath $(BUILDDIR)/include) \
-	  -DCOCCL_CUDA_ARCHITECTURES=80
+	  -DCOCCL_CUDA_ARCHITECTURES="$(COCCL_CUDA_ARCHITECTURES)"
 
 dietgpu.build: dietgpu.configure
 	+$(CMAKE) --build $(OBJDIR) --target dietgpu \

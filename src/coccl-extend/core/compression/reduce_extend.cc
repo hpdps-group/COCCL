@@ -1,7 +1,6 @@
 
 #include "core/compression/reduce_extend.h"
 #include "info.h"
-#include "align.h"
 
 extern "C"{
 

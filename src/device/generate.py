@@ -5,9 +5,9 @@ import sys
 # Order of redops, tys, protos, algos must match src/include/device.h
 all_colls =  ["Broadcast","Reduce","AllGather","ReduceScatter","AllReduce","SendRecv"]
 all_redops = ["Sum","Prod","MinMax","PreMulSum","SumPostDiv"]
-all_tys =    ["i8","u8","i32","u32","i64","u64","f16","f32","f64","bf16"]
+all_tys =    ["i8","u8","i32","u32","i64","u64","f16","f32","f64","bf16","f8e4m3","f8e5m2"]
 all_protos = ["LL","LL128","SIMPLE"]
-all_algos =  ["TREE","RING","COLLNET_DIRECT","COLLNET_CHAIN","NVLS","NVLS_TREE"]
+all_algos =  ["TREE","RING","COLLNET_DIRECT","COLLNET_CHAIN","NVLS","NVLS_TREE","PAT"]
 
 ################################################################################
 # The first command line argument is the path to the directory to generate and
@@ -74,11 +74,11 @@ else:
 ################################################################################
 
 algos_of_coll = {
-  "AllGather":     ["RING","COLLNET_DIRECT","NVLS"],
-  "AllReduce":     all_algos,
+  "AllGather":     ["RING","COLLNET_DIRECT","NVLS","PAT"],
+  "AllReduce":     ["TREE","RING","COLLNET_DIRECT","COLLNET_CHAIN","NVLS","NVLS_TREE"],
   "Broadcast":     ["RING"],
   "Reduce":        ["RING"],
-  "ReduceScatter": ["RING","COLLNET_DIRECT","NVLS"],
+  "ReduceScatter": ["RING","COLLNET_DIRECT","NVLS","PAT"],
   "SendRecv":      [None]
 }
 
@@ -107,6 +107,9 @@ def required_cuda(coll, redop, ty, algo, proto):
   if coll in ("AllReduce","Reduce","ReduceScatter"):
     if redop=="SumPostDiv" and ty[0] not in ("i","u"): return None
     if ty=="bf16": cudart = max(cudart, 11000)
+    if ty.startswith("f8"):
+      cudart = max(cudart, 11080)
+      arch = max(arch, 900)
 
   if "NVLS" in algo:
     if coll in ("AllReduce","Reduce","ReduceScatter"):
@@ -125,7 +128,7 @@ def required_cuda(coll, redop, ty, algo, proto):
 def equivalent_primary(coll, redop, ty, algo, proto):
   if coll in ("AllReduce", "Reduce", "ReduceScatter"):
     # map signed integer sum/prod to unsigned
-    if redop in ("Sum","Prod","PreMulSum") and ty[0]=="i":
+    if redop in ("Sum","Prod","PreMulSum","SumPostDiv") and ty[0]=="i":
       return (coll, redop, "u"+ty[1:], algo, proto)
     # map signed integer min/max to unsigned for non-NVLS
     if redop=="MinMax" and ty[0]=="i" and ("NVLS" not in algo):
@@ -233,6 +236,8 @@ with open(os.path.join(gensrc, "host_table.cc"), "w") as f:
   out('#include "device.h"\n')
   out("\n")
 
+  out("extern int const ncclDevFuncIdCount = %d;\n" % len(primary_funcs))
+
   # The mapping from function rows to valid primary function ids.
   out("extern int const ncclDevFuncRowToId[] = {\n")
   index = 0
@@ -251,7 +256,10 @@ with open(os.path.join(gensrc, "host_table.cc"), "w") as f:
     cudart, _ = required_cuda(*kfn)
     sym = paste("_", "ncclDevKernel", *kfn)
     if cudart != 0: out("#if CUDART_VERSION >= %d\n" % cudart)
-    out("__global__ void %s(struct ncclDevComm*, uint64_t, struct ncclWork*);\n" % sym)
+    # __global__ below gets removed by the host compiler, which results in
+    # Coverity diagnosing a specifiers inconsistency.
+    out("// coverity[declaration]\n")
+    out("__global__ void %s(ncclDevKernelArgs4K const);\n" % sym)
     if cudart != 0: out("#endif\n")
   out("\n")
 
@@ -319,7 +327,7 @@ with open(os.path.join(gensrc, "rules.mk"), "w") as f:
   out = f.write
   impl_names = sorted(name_to_funcs.keys())
   names = impl_names + ["host_table.cc", "device_table.cu"]
-  out("LIB_OBJS_GEN = $(patsubst %, $(OBJDIR)/genobj/%.o, {names})\n"
+  out("LIB_OBJS_GEN = $(patsubst %,$(OBJDIR)/genobj/%.o,{names})\n"
       .format(names=" ".join(names)))
   out("\n")
 
@@ -360,7 +368,9 @@ ty_to_cxx = {
   "f16": "half",
   "f32": "float",
   "f64": "double",
-  "bf16": "__nv_bfloat16"
+  "bf16": "__nv_bfloat16",
+  "f8e4m3": "__nv_fp8_e4m3",
+  "f8e5m2": "__nv_fp8_e5m2"
 }
 
 # Generate each <gensrc>/<impl>.cu:
@@ -380,15 +390,23 @@ for name in name_to_funcs.keys():
       sym = paste("_", coll, redop, ty, algo, proto)
       fn_id = primary_to_index[kfn]
       cudart, arch = required_cuda(*kfn)
+      s = "DEFINE_ncclDevKernel({sym}, ncclFunc{coll}, {redop_cxx}, {ty_cxx}, NCCL_ALGO_{algo}, NCCL_PROTO_{proto}, {fn_id})\n"
       if (cudart, arch) != (0, 0):
-        out("#if CUDART_VERSION >= %d && __CUDA_ARCH__ >= %d\n" % (cudart, arch))
-      out(
-        "DEFINE_ncclDevKernel({sym}, ncclFunc{coll}, {redop_cxx}, {ty_cxx}, NCCL_ALGO_{algo}, NCCL_PROTO_{proto}, {fn_id})\n"
-        .format(sym=sym, coll=coll, redop_cxx=redop_to_cxx[redop], ty_cxx=ty_to_cxx[ty],
-                algo=(algo or "RING"), proto=(proto or "SIMPLE"), fn_id=fn_id)
-      )
-      if (cudart, arch) != (0, 0):
-        out("#endif\n")
+        # Add conditional compilation logic around s. If CUDART_VERSION is satisfactory
+        # we must compile a kernel regardless of __CUDA_ARCH__ since the host code has
+        # to link against some stub.
+        s = "#if CUDART_VERSION >= {cudart}\n" \
+            "  #if __CUDA_ARCH__ < {arch}\n" \
+            "    DEFINE_ncclDevKernel_nop({sym}, ncclFunc{coll}, {redop_cxx}, {ty_cxx}, NCCL_ALGO_{algo}, NCCL_PROTO_{proto}, {fn_id})\n" \
+            "  #else\n" \
+            "    " + s + \
+            "  #endif\n" \
+            "#endif\n"
+      out(s.format(
+        cudart=cudart, arch=arch, sym=sym, coll=coll,
+        redop_cxx=redop_to_cxx[redop], ty_cxx=ty_to_cxx[ty],
+        algo=(algo or "RING"), proto=(proto or "SIMPLE"), fn_id=fn_id
+      ))
 
     for fn in fns:
       (coll, redop, ty, algo, proto) = fn

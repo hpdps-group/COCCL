@@ -12,7 +12,7 @@
 #include "common_kernel.h"
 #include "common.h"
 
-#define NCCL_SPINS_BEFORE_CHECK_ABORT 1000000
+#define NCCL_SPINS_BEFORE_CHECK_ABORT 10000
 
 /* Protocol classes: ProtoSimple, ProtoLL, ProtoLL128
  * We use these as template args to the Primtiives class instead of integral
@@ -103,7 +103,7 @@ struct FanSymmetric {
 };
 
 // The primitives class. Specialized per protocol in the other headers.
-template<typename T, typename RedOp, typename Fan, int Direct, typename Proto, int P2p>
+template<typename T, typename RedOp, typename Fan, int Direct, typename Proto, int P2p, bool isNetOffload = false>
 class Primitives;
 
 // Used by LL & LL128 to implement direct members in the naive way.
@@ -121,14 +121,35 @@ struct PrimitivesWithoutDirect {
   __device__ void directCopySend(intptr_t inpIx, intptr_t outIx, int eltN, bool postOp=false) {
     static_cast<RealPrimitives*>(this)->copySend(inpIx, outIx, eltN, postOp);
   }
-  __device__ void directRecvCopySend(intptr_t outIx, int eltN) {
+  __device__ void directRecvCopyDirectSend(intptr_t inpIx, intptr_t outIx, int eltN, bool postOp=false) {
     static_cast<RealPrimitives*>(this)->recvCopySend(outIx, eltN, /*postOp=*/false);
   }
-  __device__ void directRecvReduceCopySend(intptr_t inpIx, intptr_t outIx, int eltN, bool postOp=false) {
+  __device__ void directRecvDirectSend(intptr_t inpIx, intptr_t outIx, int eltN, bool postOp=false) {
+    return;
+  }
+  __device__ void recvReduceCopyDirectSend(intptr_t inpIx, intptr_t outIx, int eltN, bool postOp=false) {
     // Direct is only for the send part
     static_cast<RealPrimitives*>(this)->recvReduceCopySend(inpIx, outIx, eltN, postOp);
   }
+  __device__ __forceinline__ void directRecvReduceDirectSend(intptr_t inpIx, intptr_t outIx, ssize_t eltN, bool postOp=false) {
+    static_cast<RealPrimitives*>(this)->recvReduceSend(inpIx, eltN);
+  }
+  __device__ __forceinline__ void directRecvReduceCopyDirectSend(intptr_t inpIx, intptr_t outIx, ssize_t eltN, bool postOp=false) {
+    static_cast<RealPrimitives*>(this)->recvReduceCopySend(inpIx, outIx, eltN, postOp);
+  }
 };
+
+__device__ inline int checkAbort(int &abortCache, const int abortValue, int &spins) {
+  if (abortCache & abortValue) return 1;
+  if (++spins < NCCL_SPINS_BEFORE_CHECK_ABORT) return 0;
+  spins = 0;
+  int abort = *ncclShmem.comm.abortFlag;
+  if (abort) {
+    ncclShmem.aborted = abort;
+    abortCache |= abortValue;
+  }
+  return abort;
+}
 
 #include "prims_simple.h"
 #include "prims_ll.h"

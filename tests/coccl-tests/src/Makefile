@@ -107,7 +107,8 @@ COCCL_ROOT := $(COCCL_SRC)/coccl-extend
 COCCL_CORE := $(COCCL_ROOT)/core
 COCCL_EXTENSIONS := $(COCCL_ROOT)/extensions
 COCCL_INC := -I$(COCCL_ROOT)/include -I$(COCCL_ROOT) \
-	-I$(COCCL_SRC)/include -I$(NCCL_HOME)/include -I$(CUDA_INC)
+	-I$(COCCL_SRC)/include -I$(COCCL_SRC)/include/plugin \
+	-I$(NCCL_HOME)/include -I$(CUDA_INC)
 TEST_CXXFLAGS := $(filter-out -std=c++11,$(CXXFLAGS)) -std=c++17
 SDK_TEST := $(DST_DIR)/coccl_compressor_sdk_test
 CONFIG_READER_TEST := $(DST_DIR)/coccl_config_reader_test

@@ -10,18 +10,27 @@ include coccl-extend/Makefile
 COCCL_MAKEFILE_INCLUDE_ONLY :=
 
 ##### src files
-INCEXPORTS  := nccl.h nccl_net.h
+INCEXPORTS  := nccl.h
 LIBSRCFILES := \
 	bootstrap.cc channel.cc collectives.cc debug.cc enqueue.cc group.cc \
-	init.cc init_nvtx.cc net.cc proxy.cc transport.cc register.cc\
+	init.cc init_nvtx.cc proxy.cc transport.cc mnnvl.cc allocator.cc symmetric.cc \
 	$(COCCL_HOST_SRCFILES) \
 	$(wildcard graph/*.cc) \
 	$(wildcard misc/*.cc) \
-	$(wildcard transport/*.cc)
+	$(wildcard transport/*.cc) \
+	$(wildcard register/*.cc) \
+	$(wildcard plugin/*.cc) \
+	$(wildcard plugin/net/*.cc) \
+	$(wildcard plugin/tuner/*.cc) \
+	$(wildcard plugin/profiler/*.cc) \
+	$(filter-out ras/client.cc,$(wildcard ras/*.cc))
+BINSRCFILES := ras/client.cc
 
 ##### lib files
 LIBNAME     := libnccl.so
 STATICLIBNAME := libnccl_static.a
+##### binaries
+BINNAME := ncclras
 ##### pkgconfig files
 PKGCONFIGFILE := nccl.pc
 ##### dirs
@@ -30,11 +39,12 @@ INCDIR := $(BUILDDIR)/include
 LIBDIR := $(BUILDDIR)/lib
 OBJDIR := $(BUILDDIR)/obj
 PKGDIR := $(BUILDDIR)/lib/pkgconfig
+BINDIR := $(BUILDDIR)/bin
 ##### target files
 CUDARTLIB  ?= cudart_static
 
+# Use compatibility shim only with static cudart; see https://github.com/NVIDIA/nccl/issues/658
 ifeq ($(CUDARTLIB), cudart_static)
-	# Use compatibility shim only with static cudart; see https://github.com/NVIDIA/nccl/issues/658
 	LIBSRCFILES += enhcompat.cc
 endif
 
@@ -42,20 +52,24 @@ INCTARGETS := $(INCEXPORTS:%=$(INCDIR)/%)
 LIBSONAME  := $(LIBNAME:%=%.$(NCCL_MAJOR))
 LIBTARGET  := $(LIBNAME:%=%.$(NCCL_MAJOR).$(NCCL_MINOR).$(NCCL_PATCH))
 STATICLIBTARGET := $(STATICLIBNAME)
-PKGTARGET  := $(PKGCONFIGFILE)
 $(COCCL_CUDA_OBJFILES): $(INCDIR)/nccl.h
+PKGTARGET  := $(PKGCONFIGFILE)
 LIBOBJ     := $(LIBSRCFILES:%.cc=$(OBJDIR)/%.o) $(COCCL_CUDA_OBJFILES)
-DEPFILES   := $(LIBSRCFILES:%.cc=$(OBJDIR)/%.d) $(COCCL_CUDA_DEPFILES)
+BINOBJ     := $(BINSRCFILES:%.cc=$(OBJDIR)/%.o)
+DEPFILES   := $(LIBOBJ:%.o=%.d) $(BINOBJ:%.o=%.d) $(COCCL_CUDA_DEPFILES)
 LDFLAGS    += -L${CUDA_LIB} -l$(CUDARTLIB) -lpthread -lrt -ldl
+INCPLUGIN  := include/plugin
 
 DEVMANIFEST := $(BUILDDIR)/obj/device/manifest
 
 ##### rules
-build : $(COCCL_BUILD_TARGET) lib staticlib
+build : $(COCCL_BUILD_TARGET) lib staticlib binary
 
 lib : $(INCTARGETS) $(LIBDIR)/$(LIBTARGET) $(PKGDIR)/$(PKGTARGET)
 
 staticlib : $(LIBDIR)/$(STATICLIBTARGET)
+
+binary : $(BINDIR)/$(BINNAME)
 
 .PHONY: $(COCCL_BUILD_TARGET)
 $(COCCL_BUILD_TARGET): $(INCTARGETS)
@@ -94,8 +108,12 @@ $(LIBDIR)/$(LIBTARGET): $(LIBOBJ) $(DEVMANIFEST)
 $(LIBDIR)/$(STATICLIBTARGET): $(LIBOBJ) $(DEVMANIFEST)
 	@printf "Archiving  %-35s > %s\n" $(STATICLIBTARGET) $@
 	mkdir -p $(LIBDIR)
-	rm -f $@
 	ar cr $@ $(LIBOBJ) $$(cat $(DEVMANIFEST))
+
+$(BINDIR)/$(BINNAME): $(BINOBJ)
+	@printf "Linking    %-35s > %s\n" $(BINNAME) $@
+	mkdir -p $(BINDIR)
+	$(CXX) $(CXXFLAGS) $^ -o $@
 
 $(PKGDIR)/nccl.pc : nccl.pc.in
 	mkdir -p $(PKGDIR)
@@ -124,8 +142,8 @@ $(PKGDIR)/%.pc : %.pc
 $(OBJDIR)/%.o : %.cc $(INCTARGETS)
 	@printf "Compiling  %-35s > %s\n" $< $@
 	mkdir -p `dirname $@`
-	$(CXX) -I. -I$(INCDIR) $(CXXFLAGS) -Iinclude $(COCCL_INCFLAGS) -c $< -o $@
-	@$(CXX) -I. -I$(INCDIR) $(CXXFLAGS) -Iinclude $(COCCL_INCFLAGS) -M $< > $(@:%.o=%.d.tmp)
+	$(CXX) -I. -I$(INCDIR) $(CXXFLAGS) -Iinclude -I$(INCPLUGIN) $(COCCL_INCFLAGS) -c $< -o $@
+	@$(CXX) -I. -I$(INCDIR) $(CXXFLAGS) -Iinclude -I$(INCPLUGIN) $(COCCL_INCFLAGS) -M $< > $(@:%.o=%.d.tmp)
 	@sed "0,/^.*:/s//$(subst /,\/,$@):/" $(@:%.o=%.d.tmp) > $(@:%.o=%.d)
 	@sed -e 's/.*://' -e 's/\\$$//' < $(@:%.o=%.d.tmp) | fmt -1 | \
                 sed -e 's/^ *//' -e 's/$$/:/' >> $(@:%.o=%.d)
@@ -133,15 +151,17 @@ $(OBJDIR)/%.o : %.cc $(INCTARGETS)
 
 clean :
 	$(MAKE) -C device clean
-	rm -rf ${INCDIR} ${LIBDIR} ${PKGDIR} ${OBJDIR}
+	rm -rf ${BINDIR} ${INCDIR} ${LIBDIR} ${PKGDIR} ${OBJDIR}
 
 install : build
 	mkdir -p $(PREFIX)/lib
 	mkdir -p $(PREFIX)/lib/pkgconfig
 	mkdir -p $(PREFIX)/include
+	mkdir -p $(PREFIX)/bin
 	cp -P -v $(BUILDDIR)/lib/lib* $(PREFIX)/lib/
 	cp -P -v $(BUILDDIR)/lib/pkgconfig/* $(PREFIX)/lib/pkgconfig/
 	cp -v $(BUILDDIR)/include/* $(PREFIX)/include/
+	cp -v $(BUILDDIR)/bin/ncclras $(PREFIX)/bin/
 
 FILESTOFORMAT := $(shell find . -name ".\#*" -prune -o \( -name "*.cc" -o -name "*.h" \) -print | grep -v -E 'ibvwrap.h|nvmlwrap.h|gdrwrap.h|nccl.h')
 # Note that formatting.mk defines a new target so in order to not overwrite the default target,
