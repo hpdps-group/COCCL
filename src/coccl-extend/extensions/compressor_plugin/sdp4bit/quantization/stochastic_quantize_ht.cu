@@ -46,6 +46,7 @@ __global__ void cached_quantization_ht(int8_t* __restrict__ output_data,
     const int64_t chunk_offset = padding_offset / elems_per_chunk_padding;
     const int64_t elem_offset_chunk = padding_offset % elems_per_chunk_padding;
     const int64_t base_offset = chunk_offset * elems_per_chunk + elem_offset_chunk;
+    const int64_t group_offset_chunk = elem_offset_chunk - elem_offset_group;
 
     const int stride = tb.size() * quantize::h_per_load;
 
@@ -88,8 +89,10 @@ __global__ void cached_quantization_ht(int8_t* __restrict__ output_data,
         __half* iteration_cast = reinterpret_cast<__half*>(iteration_buffer);
         for (int j = 0; j < internal_unroll; j++) {
             const int iteration = i * internal_unroll + j;
-            if ((elem_offset_group + iteration * stride < elems_per_group) && 
-                (elem_offset_chunk + iteration * stride < elems_per_chunk)) {
+            const int64_t iteration_offset =
+                static_cast<int64_t>(iteration) * stride;
+            if (iteration_offset < elems_per_group &&
+                group_offset_chunk + iteration_offset < elems_per_chunk) {
                 __half* transform = iteration_cast + j * quantize::h_per_load;
                 hadamard_forward_scale_32(transform, kNElts);
                 hadamard_mult_thread_quant<kLogNElts, kNChunks>(transform);
@@ -136,6 +139,7 @@ __global__ void cached_quantization_ht(int8_t* __restrict__ output_data,
     const int64_t chunk_offset = padding_offset / elems_per_chunk_padding;
     const int64_t elem_offset_chunk = padding_offset % elems_per_chunk_padding;
     const int64_t base_offset = chunk_offset * elems_per_chunk + elem_offset_chunk;
+    const int64_t group_offset_chunk = elem_offset_chunk - elem_offset_group;
     
     const int stride = tb.size() * quantize::bf_per_load;
 
@@ -177,8 +181,10 @@ __global__ void cached_quantization_ht(int8_t* __restrict__ output_data,
         __nv_bfloat16* iteration_cast = reinterpret_cast<__nv_bfloat16*>(iteration_buffer);
         for (int j = 0; j < internal_unroll; j++) {
             const int iteration = i * internal_unroll + j;
-            if ((elem_offset_group + iteration * stride < elems_per_group) &&
-                (elem_offset_chunk + iteration * stride < elems_per_chunk)) {
+            const int64_t iteration_offset =
+                static_cast<int64_t>(iteration) * stride;
+            if (iteration_offset < elems_per_group &&
+                group_offset_chunk + iteration_offset < elems_per_chunk) {
                 __nv_bfloat16* transform =
                     iteration_cast + j * quantize::bf_per_load;
                 hadamard_mult_thread_quant<kLogNElts, kNChunks>(transform);
@@ -224,6 +230,7 @@ __global__ void cached_quantization_ht(int8_t* __restrict__ output_data,
     const int64_t chunk_offset = padding_offset / elems_per_chunk_padding;
     const int64_t elem_offset_chunk = padding_offset % elems_per_chunk_padding;
     const int64_t base_offset = chunk_offset * elems_per_chunk + elem_offset_chunk;
+    const int64_t group_offset_chunk = elem_offset_chunk - elem_offset_group;
 
     const int stride = tb.size() * quantize::f_per_load;
 
@@ -264,8 +271,10 @@ __global__ void cached_quantization_ht(int8_t* __restrict__ output_data,
         float* iteration_buffer = local_buffer + i * internal_unroll * quantize::f_per_load;
         for (int j = 0; j < internal_unroll; j++) {
             const int iteration = i * internal_unroll + j;
-            if ((elem_offset_group + iteration * stride < elems_per_group) &&
-                (elem_offset_chunk + iteration * stride < elems_per_chunk)) {
+            const int64_t iteration_offset =
+                static_cast<int64_t>(iteration) * stride;
+            if (iteration_offset < elems_per_group &&
+                group_offset_chunk + iteration_offset < elems_per_chunk) {
                 float* transform =
                     iteration_buffer + j * quantize::f_per_load;
                 hadamard_mult_thread_quant<kLogNElts, kNChunks>(transform);

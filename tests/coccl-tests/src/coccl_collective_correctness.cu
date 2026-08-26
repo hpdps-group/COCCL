@@ -14,7 +14,7 @@
 
 namespace {
 
-constexpr size_t kElementsPerRank = 4096;
+constexpr size_t kRawChunkElements = 2048;
 int gWorldRank = 0;
 
 enum class Operation {
@@ -36,7 +36,7 @@ struct Options {
   std::string operation;
   std::string algorithm;
   int depth = 1;
-  size_t rawChunkElements = 0;
+  size_t rawChunkElements = kRawChunkElements;
 };
 
 void fail(const char* expression, const char* detail, int rank,
@@ -143,7 +143,6 @@ bool selectedOperation(const Options& options, Operation operation,
 
 size_t inputElements(Operation operation, int ranks,
                      size_t rawChunkElements) {
-  if (rawChunkElements == 0) return kElementsPerRank;
   switch (operation) {
     case Operation::AllGather:
     case Operation::SendRecv:
