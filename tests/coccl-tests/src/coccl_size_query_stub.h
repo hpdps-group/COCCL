@@ -16,6 +16,7 @@ void cocclConfigureSizeQueryStub(
     size_t drcNumerator, size_t drcDenominator, bool supportsDrc);
 void cocclConfigureFramedSizeQueryStub(bool framed);
 void cocclConfigureFusedSwizzleStub(bool fusedSwizzle);
+void cocclConfigureSameCompressorStub(bool sameCompressor);
 const cocclSizeQueryObservation& cocclCompressQueryObservation();
 const cocclSizeQueryObservation& cocclDrcQueryObservation();
 

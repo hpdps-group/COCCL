@@ -247,7 +247,8 @@ ncclResult_t planStageOutput(
       size_t plannedBytes = genericBytes < rawOutput.bytes
           ? genericBytes : rawOutput.bytes;
 
-      if (input.compressor == stage.compressor &&
+      if (cocclCompressorDescriptor(input.compressor) ==
+              cocclCompressorDescriptor(stage.compressor) &&
           cocclCompressorSupports(
               stage.compressor,
               cocclCompressorCapabilityDecompressReduceCompress)) {

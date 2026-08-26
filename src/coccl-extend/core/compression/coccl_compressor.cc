@@ -325,8 +325,10 @@ int rankForDevice(int cudaDev) {
   return value;
 }
 
-ncclResult_t execute(CompressorPolicy* policy, cocclCompressorCall* call,
-                     int rank, cudaStream_t stream) {
+ncclResult_t execute(CompressorPolicy* policy,
+                     const CompressorPolicy* inputPolicy,
+                     cocclCompressorCall* call, int rank,
+                     cudaStream_t stream) {
   int cudaDev = 0;
   CUDACHECK(cudaGetDevice(&cudaDev));
   ExecutionResources resources = {policy, cudaDev, stream};
@@ -336,6 +338,7 @@ ncclResult_t execute(CompressorPolicy* policy, cocclCompressorCall* call,
       runtimeDevicesPerNode};
   call->config = policy->config;
   call->execution = &execution;
+  call->inputConfig = inputPolicy->config;
   ncclResult_t result = policy->plugin->execute(call);
   if (resources.scratchBytes != 0) {
     std::lock_guard<std::mutex> guard(policy->resourceLock);
@@ -423,12 +426,17 @@ const cocclCompressorPlugin* cocclCompressorDescriptor(void* compressor) {
 }
 
 ncclResult_t cocclExecuteCompressor(
-    void* compressor, cocclCompressorOperation operation,
+    void* compressor, void* inputCompressor,
+    cocclCompressorOperation operation,
     const cocclCompressorView& input, cocclCompressorView* output, int rank,
     size_t reduceChunks, ncclDataType_t originalDatatype,
     size_t originalElements, cudaStream_t stream) {
   CompressorPolicy* policy = static_cast<CompressorPolicy*>(compressor);
-  if (policy == nullptr || output == nullptr) return ncclInvalidArgument;
+  CompressorPolicy* inputPolicy =
+      static_cast<CompressorPolicy*>(inputCompressor);
+  if (policy == nullptr || inputPolicy == nullptr || output == nullptr) {
+    return ncclInvalidArgument;
+  }
   if (rank < 0) {
     int cudaDev = 0;
     CUDACHECK(cudaGetDevice(&cudaDev));
@@ -436,8 +444,9 @@ ncclResult_t cocclExecuteCompressor(
   }
   cocclCompressorCall call = {
       sizeof(cocclCompressorCall), operation, input, output, rank,
-      reduceChunks, originalDatatype, originalElements, nullptr, nullptr};
-  NCCLCHECK(execute(policy, &call, rank, stream));
+      reduceChunks, originalDatatype, originalElements, nullptr, nullptr,
+      nullptr};
+  NCCLCHECK(execute(policy, inputPolicy, &call, rank, stream));
   if (operation == cocclCompressorOperationCompress) {
     return validateEncodedOutput(*output, input.chunks);
   }

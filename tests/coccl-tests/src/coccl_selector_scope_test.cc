@@ -1,5 +1,6 @@
 #include "core/tuning/coccl_autotune_internal.h"
 
+#include "core/compression/coccl_compressor_runtime.h"
 #include "core/config/coccl_config.h"
 #include "comm.h"
 #include "debug.h"
@@ -65,6 +66,14 @@ void checkSelection(cocclPreparedCall* prepared,
 thread_local int ncclDebugNoWarn = 0;
 void ncclDebugLog(ncclDebugLogLevel, unsigned long, const char*, int,
                   const char*, ...) {}
+
+const cocclCompressorPlugin* cocclCompressorDescriptor(void* compressor) {
+  return reinterpret_cast<const cocclCompressorPlugin*>(compressor);
+}
+
+bool cocclCompressorSupports(void*, cocclCompressorCapability) {
+  return false;
+}
 
 const cocclConfig& cocclGetConfig() {
   return config;

@@ -129,6 +129,8 @@ struct cocclAutotuneCodecSet {
   cocclAutotunePhaseCodec defaultScope;
   cocclAutotunePhaseCodec intra;
   cocclAutotunePhaseCodec inter;
+  bool fusedIntraToInter = false;
+  bool fusedInterToDefault = false;
 };
 
 inline const cocclAutotuneCandidateSpec* cocclAutotuneFindCandidateSpec(

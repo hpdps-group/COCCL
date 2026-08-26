@@ -8,7 +8,7 @@ COCCL 压缩器插件使用公开的 C++17 SDK，并构建为独立共享库。�
 #include "compressor_plugin/coccl_compressor_plugin.h"
 ```
 
-当前压缩器 ABI 版本为 v8。插件只能包含公开 SDK 和自身源码，不能包含 `core/` 头文件。
+当前压缩器 ABI 版本为 v9。插件只能包含公开 SDK 和自身源码，不能包含 `core/` 头文件。
 
 ## 选择编码布局
 

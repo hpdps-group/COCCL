@@ -30,7 +30,8 @@ bool cocclCompressorSupports(
 const cocclCompressorPlugin* cocclCompressorDescriptor(void* compressor);
 
 ncclResult_t cocclExecuteCompressor(
-    void* compressor, cocclCompressorOperation operation,
+    void* compressor, void* inputCompressor,
+    cocclCompressorOperation operation,
     const cocclCompressorView& input, cocclCompressorView* output, int rank,
     size_t reduceChunks, ncclDataType_t originalDatatype,
     size_t originalElements, cudaStream_t stream);

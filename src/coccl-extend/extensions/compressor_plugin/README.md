@@ -10,7 +10,7 @@ Unpack, communication, workspace, and scheduling.
 #include "compressor_plugin/coccl_compressor_plugin.h"
 ```
 
-The current compressor ABI is v8. Plugins include only the public SDK and
+The current compressor ABI is v9. Plugins include only the public SDK and
 their own sources, never `core/` headers.
 
 ## Pick A Layout

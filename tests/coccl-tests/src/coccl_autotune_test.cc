@@ -165,6 +165,18 @@ void testCostModel() {
     fail("allreduce oneshot must include intra-node and inter-node phases");
   }
 
+  const cocclAutotuneCodecSet fusedCodecs = {
+      {true, &codec}, {true, &codec}, {true, &codec}, true, true};
+  const double regularTwoShot = cocclAutotuneEvaluateCost(
+      cocclAutotuneCostKind::ReduceScatterTwoShot, performance,
+      codecs, 1024.0, 4, 2);
+  const double fusedTwoShot = cocclAutotuneEvaluateCost(
+      cocclAutotuneCostKind::ReduceScatterTwoShot, performance,
+      fusedCodecs, 1024.0, 4, 2);
+  if (std::abs((regularTwoShot - fusedTwoShot) - 3.768) > 1e-9) {
+    fail("fused DRC must not charge a second full codec pass");
+  }
+
   const cocclCodecModel invalidCodec;
   const cocclAutotuneCodecSet invalidCodecs = {
       {true, &invalidCodec}, {true, &codec}, {true, &codec}};

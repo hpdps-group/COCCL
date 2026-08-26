@@ -1,6 +1,6 @@
 ---
 name: coccl-integrate-compressor
-description: Integrate or migrate fixed-size or framed variable-length CUDA compression algorithms into the COCCL C++17 compressor SDK and ABI v8 while preserving the plugin's existing Makefile or CMake build. Use when Codex must adapt an external compressor, generate Config/Compressor glue, replace legacy descriptors, connect scratch/persistent/state resources, add TOML policy parameters, vendor an offline codec, or validate a compressor shared library with COCCL.
+description: Integrate or migrate fixed-size or framed variable-length CUDA compression algorithms into the COCCL C++17 compressor SDK and ABI v9 while preserving the plugin's existing Makefile or CMake build. Use when Codex must adapt an external compressor, generate Config/Compressor glue, replace legacy descriptors, connect scratch/persistent/state resources, add TOML policy parameters, vendor an offline codec, or validate a compressor shared library with COCCL.
 ---
 
 # Integrate a COCCL Compressor
@@ -71,6 +71,11 @@ the plugin's build system; add only the adapter and build bridge COCCL needs.
   acquire SDK resources. Omit it when no safe bound is available; COCCL then
   plans the corresponding uncompressed size. For DRC, the supplied shape is
   the reduced raw output and the estimate must use recompress parameters.
+- A fused DRC implementation reads the previous stage's typed configuration
+  with `context.inputConfig<Config>()` and the recompress configuration with
+  `context.config<Config>()`. Return `ncclInvalidUsage` before launching work
+  when the compressor supports DRC but that configuration pair cannot be
+  fused; Core then uses the generic fallback.
 - Return `ncclInvalidArgument` for unsupported datatypes, shapes, or parameter
   combinations. Return CUDA failures through `coccl::fromCuda()`.
 - Keep config defaults in the typed `Config`; let `ConfigReader::finish()`

@@ -133,7 +133,8 @@ struct Sdp4BitDrcLayout {
 };
 
 template <typename Shape>
-bool drcLayout(const Shape& input, const Sdp4BitConfig& config,
+bool drcLayout(const Shape& input, const Sdp4BitConfig& inputConfig,
+               const Sdp4BitConfig& outputConfig,
                size_t reduceChunks, ncclDataType_t originalDatatype,
                size_t originalElements, Sdp4BitDrcLayout* layout) {
   if (layout == nullptr || reduceChunks == 0 || input.chunks() == 0 ||
@@ -147,10 +148,10 @@ bool drcLayout(const Shape& input, const Sdp4BitConfig& config,
     return false;
   }
 
-  const int inputGroupCount = config.kernelGroupCount(false);
-  const int outputGroupCount = config.kernelGroupCount(false);
-  const int inputBits = config.quantBits;
-  const int outputBits = config.quantBits;
+  const int inputGroupCount = inputConfig.kernelGroupCount();
+  const int outputGroupCount = outputConfig.kernelGroupCount();
+  const int inputBits = inputConfig.quantBits;
+  const int outputBits = outputConfig.quantBits;
   if (inputGroupCount <= 0 || outputGroupCount <= 0 ||
       !validQuantBits(inputBits, false) ||
       !validQuantBits(outputBits, false)) {
@@ -158,7 +159,7 @@ bool drcLayout(const Shape& input, const Sdp4BitConfig& config,
   }
   Sdp4BitEncodedLayout outputLayout;
   if (!encodedLayout(originalElements, outputChunks, originalDatatype,
-                     outputGroupCount, outputBits, config.quantType,
+                     outputGroupCount, outputBits, outputConfig.quantType,
                      &outputLayout)) {
     return false;
   }
@@ -262,13 +263,12 @@ struct Sdp4BitCompressor {
         cocclCompressorOperationDecompressReduceCompress) {
       return ncclInvalidUsage;
     }
-    if (config.hadamard ||
-        config.quantType != quantize::Type::Symmetric) {
+    if (config.quantType != quantize::Type::Symmetric) {
       return ncclInvalidArgument;
     }
     Sdp4BitEncodedLayout layout;
     if (!encodedLayout(input.elements(), input.chunks(), input.datatype(),
-                       config.kernelGroupCount(false), config.quantBits,
+                       config.kernelGroupCount(), config.quantBits,
                        config.quantType, &layout)) {
       return ncclInvalidArgument;
     }
@@ -491,22 +491,30 @@ struct Sdp4BitCompressor {
   static coccl::Status decompressReduceCompress(
       const coccl::Input& input, coccl::Output& output,
       coccl::Context& context) {
-    const Config& config = context.config<Config>();
+    const Config& inputConfig = context.inputConfig<Config>();
+    const Config& outputConfig = context.config<Config>();
     const size_t reduceChunks = context.reduceChunks();
     size_t paramsBytes = 0;
+    if (inputConfig.quantType != quantize::Type::Symmetric ||
+        outputConfig.quantType != quantize::Type::Symmetric ||
+        inputConfig.hadamard != outputConfig.hadamard ||
+        (inputConfig.hadamard &&
+         inputConfig.kernelGroupCount() !=
+             outputConfig.kernelGroupCount())) {
+      return ncclInvalidUsage;
+    }
     if (reduceChunks == 0 || input.chunks() % reduceChunks != 0 ||
         input.elements() % reduceChunks != 0 || reduceChunks > INT_MAX ||
-        config.hadamard ||
-        config.quantType != quantize::Type::Symmetric ||
-        !parameterBytes(context.originalDatatype(), config.quantType,
+        !parameterBytes(context.originalDatatype(),
+                        outputConfig.quantType,
                         &paramsBytes)) {
       return ncclInvalidArgument;
     }
 
-    const int inQuantBits = config.quantBits;
-    const int outQuantBits = config.quantBits;
+    const int inQuantBits = inputConfig.quantBits;
+    const int outQuantBits = outputConfig.quantBits;
     Sdp4BitDrcLayout layout;
-    if (!drcLayout(input, config, reduceChunks,
+    if (!drcLayout(input, inputConfig, outputConfig, reduceChunks,
                    context.originalDatatype(), context.originalElements(),
                    &layout) ||
         layout.inputGroups > INT_MAX || layout.outputGroups > INT_MAX ||
@@ -518,9 +526,12 @@ struct Sdp4BitCompressor {
     }
     if (layout.outputBytes > output.capacityBytes()) return ncclInvalidUsage;
 
+    // Hadamard is linear, so DRC can reduce and requantize transformed values
+    // directly; the final DecompressReduce applies the inverse transform.
     launch_dequant_reduce_quant(
         output.dataAs<int8_t>(), nullptr, input.dataAs<int8_t>(), nullptr,
-        (int)reduceChunks, inQuantBits, outQuantBits, config.quantType,
+        (int)reduceChunks, inQuantBits, outQuantBits,
+        outputConfig.quantType,
         (int)layout.outputGroups, (int)layout.outputGroupDataBytes,
         (int)layout.inputGroups, (int)layout.inputGroupDataBytes,
         (int64_t)layout.inputTensorDataBytes,

@@ -27,6 +27,8 @@
   checked arithmetic with execution.
 - DRC estimates use reduced raw output shape and actual recompress parameters;
   exact output capacity is checked before launch.
+- Fused DRC reads its input layout from `inputConfig<T>()`, writes the layout
+  described by `config<T>()`, and rejects an unfusable pair before launch.
 - Size estimation is Host-only and does not consume scratch, persistent state,
   streams, or kernels; an unavailable estimate falls back to raw size.
 - Scratch, persistent memory, and state lifetimes match actual use.
@@ -37,7 +39,7 @@
 
 - Existing Makefile or CMake remains authoritative.
 - Directory Makefile honors the COCCL bridge contract.
-- DSO is named `lib<descriptor-name>.so` and exposes the ABI v8 fixed entry.
+- DSO is named `lib<descriptor-name>.so` and exposes the ABI v9 fixed entry.
 - Vendored sources record exact commits, retain licenses, and build offline
   without unrelated frameworks, benchmarks, or tests.
 - TOML catalog includes the plugin; a policy independently selects it.

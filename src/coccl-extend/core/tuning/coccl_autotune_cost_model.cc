@@ -22,11 +22,13 @@ double compressionRatio(const cocclAutotunePhaseCodec& codec) {
 
 double pccaCost(const cocclLinearModel& p2p,
                 const cocclAutotunePhaseCodec& codec,
-                double messageBytes, int ranks) {
-  const double codecUs = codecTime(codec, messageBytes);
+                double messageBytes, int ranks,
+                bool includeCodec = true) {
+  double codecUs = codecTime(codec, messageBytes);
   if (!std::isfinite(codecUs) || messageBytes < 0.0) {
     return std::numeric_limits<double>::infinity();
   }
+  if (!includeCodec) codecUs = 0.0;
   if (ranks <= 1) return codecUs;
   const double wireBytes = messageBytes /
       (compressionRatio(codec) * (double)ranks);
@@ -36,11 +38,13 @@ double pccaCost(const cocclLinearModel& p2p,
 double globalPccaCost(const cocclSelectionPerformanceModel& model,
                       const cocclAutotunePhaseCodec& codec,
                       double messageBytes,
-                      int localRanks, int nodes) {
-  const double codecUs = codecTime(codec, messageBytes);
+                      int localRanks, int nodes,
+                      bool includeCodec = true) {
+  double codecUs = codecTime(codec, messageBytes);
   if (!std::isfinite(codecUs)) {
     return std::numeric_limits<double>::infinity();
   }
+  if (!includeCodec) codecUs = 0.0;
   double communicationUs = 0.0;
   bool hasBranch = false;
   if (localRanks > 1) {
@@ -64,10 +68,13 @@ double reduceScatterTwoShotCost(
     const cocclSelectionPerformanceModel& model,
     const cocclAutotuneCodecSet& codecs, double messageBytes,
     int localRanks, int nodes) {
+  // Fused DRC replaces the intermediate full decode/encode pass. The first
+  // phase still accounts for the codec work at the raw pipeline boundaries.
   return pccaCost(model.intraP2p, codecs.intra,
                   messageBytes, localRanks) +
          pccaCost(model.interP2p, codecs.inter,
-                  messageBytes / (double)localRanks, nodes);
+                  messageBytes / (double)localRanks, nodes,
+                  !codecs.fusedIntraToInter);
 }
 
 double allReduceOneShotCost(const cocclSelectionPerformanceModel& model,
@@ -161,7 +168,7 @@ double cocclAutotuneEvaluateCost(
                  model, codecs, messageBytes, localRanks, nodes) +
              globalPccaCost(
                  model, codecs.defaultScope, messageBytes,
-                 localRanks, nodes);
+                 localRanks, nodes, !codecs.fusedInterToDefault);
   }
   return std::numeric_limits<double>::infinity();
 }

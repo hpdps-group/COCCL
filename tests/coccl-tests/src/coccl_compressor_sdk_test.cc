@@ -171,7 +171,7 @@ int testMinimalPlugin() {
   }
 
   cocclCompressorPlugin incompatible = *plugin;
-  const uint32_t legacyVersions[] = {5u, 6u, 7u};
+  const uint32_t legacyVersions[] = {5u, 6u, 7u, 8u};
   for (uint32_t legacyVersion : legacyVersions) {
     incompatible = *plugin;
     incompatible.abiVersion = legacyVersion;
@@ -386,7 +386,18 @@ int testOptionalResources() {
       sizeof(inputData),
       config,
       &execution,
+      config,
   };
+  ResourceCompressor::Config inputConfig = {8, false};
+  call.inputConfig = &inputConfig;
+  coccl::Context drcContext(&call);
+  if (drcContext.inputConfig<ResourceCompressor::Config>().bits != 8 ||
+      drcContext.config<ResourceCompressor::Config>().bits != 4) {
+    fprintf(stderr, "DRC input/output configs were not kept separate\n");
+    plugin->destroyConfig(config);
+    return 1;
+  }
+  call.inputConfig = config;
   cocclCompressorHostApi invalidHostApi = kHostApi;
   --invalidHostApi.abiVersion;
   execution.hostApi = &invalidHostApi;

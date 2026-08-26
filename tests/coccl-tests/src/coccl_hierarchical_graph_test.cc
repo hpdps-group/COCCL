@@ -73,12 +73,12 @@ void checkGraph(bool intraEnabled, bool interEnabled, bool finalEnabled,
   EXPECT(chunks == (size_t)owner->nRanks);
 }
 
-void checkDrcPlanning(ncclComm_t owner, ncclComm_t intra,
-                      bool sameCompressor) {
+void checkDrcPlanning(ncclComm_t owner, ncclComm_t intra, void* encoder,
+                      bool sameCompressor, int expectedDrcQueries) {
   cocclConfigureSizeQueryStub(1, 4, 1, 8, true);
+  cocclConfigureSameCompressorStub(sameCompressor);
   const void* input = reinterpret_cast<const void*>(0x100000000ULL);
   void* output = reinterpret_cast<void*>(0x200000000ULL);
-  void* const encoder = sameCompressor ? kIntra : kInter;
   const cocclPipelineStage stages[] = {
       cocclPipelineCompress(kIntra),
       cocclPipelineAllToAll(intra),
@@ -92,8 +92,7 @@ void checkDrcPlanning(ncclComm_t owner, ncclComm_t intra,
   cocclPipelineContext context = {};
   EXPECT(cocclPreparePipeline(&spec, 1, &context) == ncclSuccess);
   EXPECT(cocclCompressQueryObservation().calls == 2);
-  EXPECT(cocclDrcQueryObservation().calls ==
-         (sameCompressor ? 1 : 0));
+  EXPECT(cocclDrcQueryObservation().calls == expectedDrcQueries);
 }
 
 }  // namespace
@@ -175,8 +174,9 @@ int main() {
   };
   checkGraph(false, false, true, &owner, &intra, &inter, rawFinal, 3);
 
-  checkDrcPlanning(&owner, &intra, true);
-  checkDrcPlanning(&owner, &intra, false);
+  checkDrcPlanning(&owner, &intra, kIntra, false, 1);
+  checkDrcPlanning(&owner, &intra, kInter, true, 1);
+  checkDrcPlanning(&owner, &intra, kInter, false, 0);
 
   std::printf("coccl hierarchical graphs: PASS\n");
   return 0;

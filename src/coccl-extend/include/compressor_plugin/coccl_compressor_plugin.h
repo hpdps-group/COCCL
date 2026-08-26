@@ -463,6 +463,11 @@ class Context {
     return *static_cast<const Config*>(call_->config);
   }
 
+  template <typename Config>
+  const Config& inputConfig() const {
+    return *static_cast<const Config*>(call_->inputConfig);
+  }
+
   Status scratch(size_t bytes, Buffer* buffer) {
     cocclCompressorBufferView view = {};
     Status result = call_->execution->hostApi->allocateScratch(
