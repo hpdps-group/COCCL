@@ -96,41 +96,6 @@ static bool checkedLogicalBytes(const cocclInfo* args, size_t* bytes) {
   return true;
 }
 
-static size_t configuredObservationThreshold(cocclOperation operation) {
-  const cocclConfig& config = cocclGetConfig();
-  size_t threshold = config.runtime.compressionThresholdBytes;
-  auto includePolicy = [&](const cocclPrimitivePolicy& policy) {
-    for (const cocclCompressorScopeEntry& scope : policy.scopes) {
-      if (!scope.enabled) continue;
-      threshold = std::min(threshold, policy.thresholdBytes);
-      break;
-    }
-  };
-
-  switch (operation) {
-    case cocclOperation::AllGather:
-      includePolicy(config.trainingPolicies.dataParallel.allGather);
-      includePolicy(config.trainingPolicies.tensorParallel.allGather);
-      break;
-    case cocclOperation::ReduceScatter:
-      includePolicy(config.trainingPolicies.dataParallel.reduceScatter);
-      includePolicy(config.trainingPolicies.tensorParallel.reduceScatter);
-      break;
-    case cocclOperation::AllReduce:
-      includePolicy(config.trainingPolicies.dataParallel.allReduce);
-      includePolicy(config.trainingPolicies.tensorParallel.allReduce);
-      break;
-    case cocclOperation::SendRecv:
-      includePolicy(config.trainingPolicies.pipelineSendRecvForward);
-      includePolicy(config.trainingPolicies.pipelineSendRecvBackward);
-      break;
-    case cocclOperation::AllToAll:
-    case cocclOperation::Count:
-      break;
-  }
-  return threshold;
-}
-
 static bool allCommsCommittedLocked() {
   for (const auto& entry : cocclTrainingAssistComms) {
     if (!entry.second->classification.committed) return false;
@@ -324,8 +289,7 @@ void cocclTrainingAssistObserve(
   size_t logicalBytes = 0;
   if (topologyRole == cocclTrainingRoleUnknown &&
       (!checkedLogicalBytes(args, &logicalBytes) ||
-       logicalBytes < kCocclTrainingMinimumObservedBytes ||
-       logicalBytes <= configuredObservationThreshold(args->operation))) {
+       logicalBytes < kCocclTrainingMinimumObservedBytes)) {
     return;
   }
 

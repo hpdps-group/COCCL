@@ -12,6 +12,7 @@ constexpr int kCocclPipelineStageKindCount = 9;
 constexpr int kCocclPipelineMaxTemps = 8;
 constexpr int kCocclPipelineMaxDepth = 16;
 constexpr int kCocclPipelineRawRingSlots = 2;
+constexpr size_t kCocclPipelineSliceAlignment = 16;
 constexpr size_t kCocclPipelineAlignment = 256;
 
 struct cocclPipelineEdge {

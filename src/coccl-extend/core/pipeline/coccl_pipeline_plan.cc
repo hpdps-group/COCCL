@@ -492,13 +492,25 @@ ncclResult_t cocclPreparePipeline(const cocclPipelineSpec* spec,
       spec->inPlaceLayout, &requireSerial));
   if (requireSerial) context->depth = 1;
 
-  const size_t quotient = spec->rawChunkCount / (size_t)context->depth;
-  const size_t remainder = spec->rawChunkCount % (size_t)context->depth;
+  const size_t alignmentElements =
+      kCocclPipelineSliceAlignment / (size_t)typeBytes;
+  size_t regularSliceCount =
+      spec->rawChunkCount / (size_t)context->depth;
+  if (context->depth > 1) {
+    regularSliceCount =
+        regularSliceCount / alignmentElements * alignmentElements;
+    if (regularSliceCount == 0) {
+      context->depth = 1;
+      regularSliceCount = spec->rawChunkCount;
+    }
+  }
+
   for (int slice = 0; slice < context->depth; ++slice) {
     cocclPipelineSliceShape& shape = context->slices[slice];
-    shape.elementOffset = (size_t)slice * quotient;
-    shape.elementCount = quotient +
-        (slice + 1 == context->depth ? remainder : 0);
+    shape.elementOffset = (size_t)slice * regularSliceCount;
+    shape.elementCount = slice + 1 == context->depth
+        ? spec->rawChunkCount - shape.elementOffset
+        : regularSliceCount;
     if (!cocclPipelineCheckedMultiply(
             shape.elementOffset, (size_t)typeBytes, &shape.byteOffset) ||
         !cocclPipelineCheckedMultiply(

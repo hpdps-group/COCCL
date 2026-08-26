@@ -625,6 +625,21 @@ void cocclTrainingClassifyTrace(
     if (tensorAllReduce) {
       evidence.tp = stats.patternSupport * calibrationCoverage;
     }
+
+    // Sequence-parallel TP can become active before the distributed-optimizer
+    // communicator is registered. Its stable equal-size RS/AG pair has no SDP
+    // 1:2 or 1:4 AG/RS byte-ratio evidence, so it can be identified directly.
+    bool tensorSequenceParallel =
+        config.sequenceParallel &&
+        config.dataParallelStrategy == cocclDataParallelStrategy::Sdp &&
+        stats.descriptor.nNodes == 1 && stats.allReduceCalls == 0 &&
+        stats.allGatherCalls != 0 && stats.reduceScatterCalls != 0 &&
+        stats.stableCollectivePattern && stats.callsPerIteration >= 2.0 &&
+        stats.sizeConsistency >= 0.90 &&
+        stats.ratioSupport < kRoleEvidenceThreshold;
+    if (tensorSequenceParallel) {
+      evidence.tp = stats.patternSupport * calibrationCoverage;
+    }
   }
 
   std::set<uint64_t> ppComms;

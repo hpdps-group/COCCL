@@ -49,25 +49,37 @@ void expectSlices(size_t count, int requestedDepth) {
   cocclPipelineContext context = {};
   EXPECT(cocclPreparePipeline(&spec, requestedDepth, &context) ==
          ncclSuccess);
-  const int expectedDepth = count < (size_t)requestedDepth
+  int expectedDepth = count < (size_t)requestedDepth
       ? (int)count : requestedDepth;
+  const size_t alignmentElements =
+      kCocclPipelineSliceAlignment / sizeof(float);
+  size_t regularCount = count / (size_t)expectedDepth;
+  if (expectedDepth > 1) {
+    regularCount = regularCount / alignmentElements * alignmentElements;
+    if (regularCount == 0) {
+      expectedDepth = 1;
+      regularCount = count;
+    }
+  }
   EXPECT(context.depth == expectedDepth);
 
-  const size_t quotient = count / (size_t)expectedDepth;
-  const size_t remainder = count % (size_t)expectedDepth;
   size_t elements = 0;
   for (int slice = 0; slice < context.depth; ++slice) {
     const cocclPipelineSliceShape& shape = context.slices[slice];
-    const size_t expectedCount = quotient +
-        (slice + 1 == context.depth ? remainder : 0);
+    const size_t expectedCount = slice + 1 == context.depth
+        ? count - elements : regularCount;
     EXPECT(shape.elementOffset == elements);
     EXPECT(shape.elementCount == expectedCount);
     EXPECT(shape.byteOffset == elements * sizeof(float));
     EXPECT(shape.bytes == expectedCount * sizeof(float));
+    if (slice + 1 != context.depth) {
+      EXPECT(shape.bytes % kCocclPipelineSliceAlignment == 0);
+    }
     elements += shape.elementCount;
   }
   EXPECT(elements == count);
-  EXPECT(context.maxSliceCount == quotient + remainder);
+  EXPECT(context.maxSliceCount ==
+         context.slices[context.depth - 1].elementCount);
   EXPECT(context.maxSliceBytes ==
          context.maxSliceCount * sizeof(float));
 }
@@ -75,14 +87,17 @@ void expectSlices(size_t count, int requestedDepth) {
 void checkRemainders() {
   expectSlices(1, 8);
   expectSlices(8, 8);
-  expectSlices(32, 8);
-  expectSlices(17, 2);
+  expectSlices(512, 8);
+  expectSlices(129, 2);
   for (size_t remainder = 1; remainder < 4; ++remainder) {
-    expectSlices(4 * 16 + remainder, 4);
+    expectSlices(4 * 64 + remainder, 4);
   }
   for (size_t remainder = 1; remainder < 8; ++remainder) {
-    expectSlices(8 * 16 + remainder, 8);
+    expectSlices(8 * 64 + remainder, 8);
   }
+  expectSlices(4099, 2);
+  expectSlices(4099, 4);
+  expectSlices(4099, 8);
 }
 
 void checkTailCapacity() {
@@ -93,29 +108,29 @@ void checkTailCapacity() {
       cocclPipelineAllToAll(&comm),
       cocclPipelineDecompress(),
   };
-  cocclPipelineSpec spec = makeAllToAllSpec(&comm, 17, stages);
+  cocclPipelineSpec spec = makeAllToAllSpec(&comm, 257, stages);
   cocclConfigureSizeQueryStub(1, 4, 1, 1, false);
 
   cocclPipelineContext context = {};
   EXPECT(cocclPreparePipeline(&spec, 4, &context) == ncclSuccess);
   EXPECT(cocclCompressQueryObservation().calls == 2);
-  EXPECT(cocclCompressQueryObservation().elements == 20);
-  EXPECT(context.plan.stageOutputCapacityBytes[0] == 20);
-  EXPECT(context.plan.stageOutputCapacityBytes[1] == 20);
-  EXPECT(context.plan.stageOutputCapacityBytes[2] == 80);
+  EXPECT(cocclCompressQueryObservation().elements == 260);
+  EXPECT(context.plan.stageOutputCapacityBytes[0] == 260);
+  EXPECT(context.plan.stageOutputCapacityBytes[1] == 260);
+  EXPECT(context.plan.stageOutputCapacityBytes[2] == 1040);
   for (int slice = 0; slice < 3; ++slice) {
-    EXPECT(context.sliceStageOutputBytes[slice][0] == 16);
-    EXPECT(context.sliceStageOutputBytes[slice][1] == 16);
-    EXPECT(context.sliceStageOutputBytes[slice][2] == 64);
+    EXPECT(context.sliceStageOutputBytes[slice][0] == 256);
+    EXPECT(context.sliceStageOutputBytes[slice][1] == 256);
+    EXPECT(context.sliceStageOutputBytes[slice][2] == 1024);
   }
-  EXPECT(context.sliceStageOutputBytes[3][0] == 20);
-  EXPECT(context.sliceStageOutputBytes[3][1] == 20);
-  EXPECT(context.sliceStageOutputBytes[3][2] == 80);
-  EXPECT(context.plan.temps[0].payloadBytes == 80);
-  EXPECT(context.plan.temps[1].payloadBytes == 20);
-  EXPECT(context.plan.temps[2].payloadBytes == 20);
-  EXPECT(context.plan.temps[3].payloadBytes == 80);
-  EXPECT(context.plan.totalBytes == 2048);
+  EXPECT(context.sliceStageOutputBytes[3][0] == 260);
+  EXPECT(context.sliceStageOutputBytes[3][1] == 260);
+  EXPECT(context.sliceStageOutputBytes[3][2] == 1040);
+  EXPECT(context.plan.temps[0].payloadBytes == 1040);
+  EXPECT(context.plan.temps[1].payloadBytes == 260);
+  EXPECT(context.plan.temps[2].payloadBytes == 260);
+  EXPECT(context.plan.temps[3].payloadBytes == 1040);
+  EXPECT(context.plan.totalBytes == 7168);
 }
 
 void checkDivisiblePlan() {
@@ -126,16 +141,16 @@ void checkDivisiblePlan() {
       cocclPipelineAllToAll(&comm),
       cocclPipelineDecompress(),
   };
-  cocclPipelineSpec spec = makeAllToAllSpec(&comm, 16, stages);
+  cocclPipelineSpec spec = makeAllToAllSpec(&comm, 256, stages);
   cocclConfigureSizeQueryStub(1, 4, 1, 1, false);
 
   cocclPipelineContext context = {};
   EXPECT(cocclPreparePipeline(&spec, 4, &context) == ncclSuccess);
   EXPECT(cocclCompressQueryObservation().calls == 1);
-  EXPECT(context.plan.stageOutputCapacityBytes[0] == 16);
-  EXPECT(context.plan.stageOutputCapacityBytes[1] == 16);
-  EXPECT(context.plan.stageOutputCapacityBytes[2] == 64);
-  EXPECT(context.plan.totalBytes == 2048);
+  EXPECT(context.plan.stageOutputCapacityBytes[0] == 256);
+  EXPECT(context.plan.stageOutputCapacityBytes[1] == 256);
+  EXPECT(context.plan.stageOutputCapacityBytes[2] == 1024);
+  EXPECT(context.plan.totalBytes == 5120);
 }
 
 void checkFramedTail() {
@@ -146,7 +161,7 @@ void checkFramedTail() {
       cocclPipelineAllToAll(&comm),
       cocclPipelineDecompress(),
   };
-  cocclPipelineSpec spec = makeAllToAllSpec(&comm, 17, stages);
+  cocclPipelineSpec spec = makeAllToAllSpec(&comm, 257, stages);
   cocclConfigureSizeQueryStub(1, 1, 1, 1, false);
   cocclConfigureFramedSizeQueryStub(true);
 
@@ -157,17 +172,17 @@ void checkFramedTail() {
   EXPECT(compressTemp >= 0 && allToAllTemp >= 0);
   for (int tempIndex : {compressTemp, allToAllTemp}) {
     const cocclPipelineTempPlan& temp = context.plan.temps[tempIndex];
-    EXPECT(temp.payloadBytes == 80);
-    EXPECT(temp.frameStrideBytes == 20);
+    EXPECT(temp.payloadBytes == 1040);
+    EXPECT(temp.frameStrideBytes == 260);
     EXPECT(temp.frameMetadataBytes ==
            4 * sizeof(cocclCompressorFrameMetadata));
   }
-  EXPECT(context.sliceStageOutputBytes[0][0] == 64);
-  EXPECT(context.sliceStageOutputBytes[3][0] == 80);
-  EXPECT(context.sliceStageFrameStrideBytes[0][0] == 16);
-  EXPECT(context.sliceStageFrameStrideBytes[0][1] == 16);
-  EXPECT(context.sliceStageFrameStrideBytes[3][0] == 20);
-  EXPECT(context.sliceStageFrameStrideBytes[3][1] == 20);
+  EXPECT(context.sliceStageOutputBytes[0][0] == 1024);
+  EXPECT(context.sliceStageOutputBytes[3][0] == 1040);
+  EXPECT(context.sliceStageFrameStrideBytes[0][0] == 256);
+  EXPECT(context.sliceStageFrameStrideBytes[0][1] == 256);
+  EXPECT(context.sliceStageFrameStrideBytes[3][0] == 260);
+  EXPECT(context.sliceStageFrameStrideBytes[3][1] == 260);
 }
 
 void checkMixedHierarchicalTail() {
@@ -188,7 +203,7 @@ void checkMixedHierarchicalTail() {
       "inter-only-reducescatter",
       reinterpret_cast<const void*>(0x100000000ULL),
       reinterpret_cast<void*>(0x400000000ULL),
-      17,
+      257,
       8,
       ncclFloat32,
       &owner,
@@ -203,18 +218,18 @@ void checkMixedHierarchicalTail() {
   cocclPipelineContext context = {};
   EXPECT(cocclPreparePipeline(&spec, 4, &context) == ncclSuccess);
   EXPECT(context.plan.finalChunks == 1);
-  EXPECT(context.sliceStageOutputBytes[0][0] == 32);
-  EXPECT(context.sliceStageOutputBytes[0][1] == 8);
-  EXPECT(context.sliceStageOutputBytes[0][2] == 8);
-  EXPECT(context.sliceStageOutputBytes[0][3] == 16);
-  EXPECT(context.sliceStageOutputBytes[3][0] == 40);
-  EXPECT(context.sliceStageOutputBytes[3][1] == 10);
-  EXPECT(context.sliceStageOutputBytes[3][2] == 10);
-  EXPECT(context.sliceStageOutputBytes[3][3] == 20);
-  EXPECT(context.plan.stageOutputCapacityBytes[0] == 40);
-  EXPECT(context.plan.stageOutputCapacityBytes[1] == 10);
-  EXPECT(context.plan.stageOutputCapacityBytes[2] == 10);
-  EXPECT(context.plan.stageOutputCapacityBytes[3] == 20);
+  EXPECT(context.sliceStageOutputBytes[0][0] == 512);
+  EXPECT(context.sliceStageOutputBytes[0][1] == 128);
+  EXPECT(context.sliceStageOutputBytes[0][2] == 128);
+  EXPECT(context.sliceStageOutputBytes[0][3] == 256);
+  EXPECT(context.sliceStageOutputBytes[3][0] == 520);
+  EXPECT(context.sliceStageOutputBytes[3][1] == 130);
+  EXPECT(context.sliceStageOutputBytes[3][2] == 130);
+  EXPECT(context.sliceStageOutputBytes[3][3] == 260);
+  EXPECT(context.plan.stageOutputCapacityBytes[0] == 520);
+  EXPECT(context.plan.stageOutputCapacityBytes[1] == 130);
+  EXPECT(context.plan.stageOutputCapacityBytes[2] == 130);
+  EXPECT(context.plan.stageOutputCapacityBytes[3] == 260);
 }
 
 }  // namespace

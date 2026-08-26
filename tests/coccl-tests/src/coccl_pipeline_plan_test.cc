@@ -166,6 +166,7 @@ int main(int argc, char** argv) {
   EXPECT(context.depth == 8);
   EXPECT(context.slices[7].elementCount ==
          context.slices[0].elementCount + 1);
+  EXPECT(context.slices[0].bytes % kCocclPipelineSliceAlignment == 0);
 
   std::printf("coccl pipeline plan: PASS\n");
   return 0;
