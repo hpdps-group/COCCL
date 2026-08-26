@@ -95,7 +95,7 @@ NVLDFLAGS   += ${GCOV_FLAGS:%=-Xcompiler %}
 # $(warning GCOV_FLAGS=${GCOV_FLAGS})
 ########## GCOV ##########
 
-ifeq ($(DEBUG), 0)
+ifneq ($(filter 0 release,$(DEBUG)),)
 NVCUFLAGS += -O3
 CXXFLAGS  += -O3 -g
 else

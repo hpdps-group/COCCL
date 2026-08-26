@@ -54,7 +54,7 @@ CXXFLAGS   := -std=c++11
 LDFLAGS    := -L${CUDA_LIB} -lcudart -lrt
 NVLDFLAGS  := -L${CUDA_LIB} -l${CUDARTLIB} -lrt
 
-ifeq ($(DEBUG), 0)
+ifneq ($(filter 0 release,$(DEBUG)),)
 NVCUFLAGS += -O3 -g
 CXXFLAGS  += -O3 -g
 else

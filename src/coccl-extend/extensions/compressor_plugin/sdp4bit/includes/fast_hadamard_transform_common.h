@@ -149,19 +149,34 @@ __device__ __forceinline__ void hadamard_mult_thread_quant(float x[kNChunks * (1
 template<int kLogN, int kNChunks>
 __device__ __forceinline__ void hadamard_mult_thread_quant(__half x[kNChunks * (1 << kLogN)]) {
     constexpr int N = 1 << kLogN;
+    constexpr int kPairs = N / 2;
+    __half2* pairs = reinterpret_cast<__half2*>(x);
+
     #pragma unroll
-    for (int i = 0; i < kLogN; ++i) {
-        const int stride = 1 << i;
+    for (int c = 0; c < kNChunks; ++c) {
         #pragma unroll
-        for (int j = 0; j < N / 2; ++j) {
+        for (int j = 0; j < kPairs; ++j) {
+            const __half2 values = pairs[c * kPairs + j];
+            const __half a = __low2half(values);
+            const __half b = __high2half(values);
+            pairs[c * kPairs + j] =
+                __halves2half2(__hadd(a, b), __hsub(a, b));
+        }
+    }
+
+    #pragma unroll
+    for (int i = 1; i < kLogN; ++i) {
+        const int stride = 1 << (i - 1);
+        #pragma unroll
+        for (int j = 0; j < kPairs / 2; ++j) {
             const int lo = j & (stride - 1);
             const int idx = (j - lo) * 2 + lo;
             #pragma unroll
             for (int c = 0; c < kNChunks; ++c) {
-                const float a = __half2float(x[c * N + idx]);
-                const float b = __half2float(x[c * N + idx + stride]);
-                x[c * N + idx] = __float2half(a + b);
-                x[c * N + idx + stride] = __float2half(a - b);
+                const __half2 a = pairs[c * kPairs + idx];
+                const __half2 b = pairs[c * kPairs + idx + stride];
+                pairs[c * kPairs + idx] = __hadd2(a, b);
+                pairs[c * kPairs + idx + stride] = __hsub2(a, b);
             }
         }
     }
@@ -170,19 +185,34 @@ __device__ __forceinline__ void hadamard_mult_thread_quant(__half x[kNChunks * (
 template<int kLogN, int kNChunks>
 __device__ __forceinline__ void hadamard_mult_thread_quant(__nv_bfloat16 x[kNChunks * (1 << kLogN)]) {
     constexpr int N = 1 << kLogN;
+    constexpr int kPairs = N / 2;
+    __nv_bfloat162* pairs = reinterpret_cast<__nv_bfloat162*>(x);
+
     #pragma unroll
-    for (int i = 0; i < kLogN; ++i) {
-        const int stride = 1 << i;
+    for (int c = 0; c < kNChunks; ++c) {
         #pragma unroll
-        for (int j = 0; j < N / 2; ++j) {
+        for (int j = 0; j < kPairs; ++j) {
+            const __nv_bfloat162 values = pairs[c * kPairs + j];
+            const __nv_bfloat16 a = __low2bfloat16(values);
+            const __nv_bfloat16 b = __high2bfloat16(values);
+            pairs[c * kPairs + j] =
+                __halves2bfloat162(__hadd(a, b), __hsub(a, b));
+        }
+    }
+
+    #pragma unroll
+    for (int i = 1; i < kLogN; ++i) {
+        const int stride = 1 << (i - 1);
+        #pragma unroll
+        for (int j = 0; j < kPairs / 2; ++j) {
             const int lo = j & (stride - 1);
             const int idx = (j - lo) * 2 + lo;
             #pragma unroll
             for (int c = 0; c < kNChunks; ++c) {
-                const float a = __bfloat162float(x[c * N + idx]);
-                const float b = __bfloat162float(x[c * N + idx + stride]);
-                x[c * N + idx] = __float2bfloat16(a + b);
-                x[c * N + idx + stride] = __float2bfloat16(a - b);
+                const __nv_bfloat162 a = pairs[c * kPairs + idx];
+                const __nv_bfloat162 b = pairs[c * kPairs + idx + stride];
+                pairs[c * kPairs + idx] = __hadd2(a, b);
+                pairs[c * kPairs + idx + stride] = __hsub2(a, b);
             }
         }
     }
@@ -210,17 +240,22 @@ __device__ __forceinline__ void hadamard_mult_warp_quant(float x[kNChunks * kNIt
 template<int kLogWarpSize, int kStepStart, int kNChunks, int kNItems>
 __device__ __forceinline__ void hadamard_mult_warp_quant(__half x[kNChunks * kNItems]) {
     constexpr int N = 1 << kLogWarpSize;
+    constexpr int kPairItems = kNItems / 2;
+    __half2* pairs = reinterpret_cast<__half2*>(x);
     int lane_id = threadIdx.x % N;
     #pragma unroll
     for (int step = kStepStart; step < kLogWarpSize; ++step) {
         const int lane_mask = 1 << step;
-        const float sign = (lane_id & lane_mask) ? -1.f : 1.f;
         #pragma unroll
         for (int c = 0; c < kNChunks; ++c) {
             #pragma unroll
-            for (int i = 0; i < kNItems; ++i) {
-                float x_val_other = __half2float(__shfl_xor_sync(FULL_MASK, x[c * kNItems + i], lane_mask));
-                x[c * kNItems + i] = __float2half(sign * __half2float(x[c * kNItems + i]) + x_val_other);
+            for (int i = 0; i < kPairItems; ++i) {
+                const int index = c * kPairItems + i;
+                const __half2 self = pairs[index];
+                const __half2 other =
+                    __shfl_xor_sync(FULL_MASK, self, lane_mask);
+                pairs[index] = (lane_id & lane_mask)
+                    ? __hsub2(other, self) : __hadd2(self, other);
             }
         }
     }
@@ -229,17 +264,22 @@ __device__ __forceinline__ void hadamard_mult_warp_quant(__half x[kNChunks * kNI
 template<int kLogWarpSize, int kStepStart, int kNChunks, int kNItems>
 __device__ __forceinline__ void hadamard_mult_warp_quant(__nv_bfloat16 x[kNChunks * kNItems]) {
     constexpr int N = 1 << kLogWarpSize;
+    constexpr int kPairItems = kNItems / 2;
+    __nv_bfloat162* pairs = reinterpret_cast<__nv_bfloat162*>(x);
     int lane_id = threadIdx.x % N;
     #pragma unroll
     for (int step = kStepStart; step < kLogWarpSize; ++step) {
         const int lane_mask = 1 << step;
-        const float sign = (lane_id & lane_mask) ? -1.f : 1.f;
         #pragma unroll
         for (int c = 0; c < kNChunks; ++c) {
             #pragma unroll
-            for (int i = 0; i < kNItems; ++i) {
-                float x_val_other = __bfloat162float(__shfl_xor_sync(FULL_MASK, x[c * kNItems + i], lane_mask));
-                x[c * kNItems + i] = __float2bfloat16(sign * __bfloat162float(x[c * kNItems + i]) + x_val_other);
+            for (int i = 0; i < kPairItems; ++i) {
+                const int index = c * kPairItems + i;
+                const __nv_bfloat162 self = pairs[index];
+                const __nv_bfloat162 other =
+                    __shfl_xor_sync(FULL_MASK, self, lane_mask);
+                pairs[index] = (lane_id & lane_mask)
+                    ? __hsub2(other, self) : __hadd2(self, other);
             }
         }
     }
