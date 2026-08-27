@@ -40,6 +40,16 @@ void algorithmScopes(const cocclPreparedCall& prepared,
   }
 }
 
+bool hasCompression(const cocclPreparedCall& prepared, bool useDefault,
+                    bool useIntra, bool useInter) {
+  return (useDefault && prepared.compressors.get(
+                            cocclCompressionScope::Default) != nullptr) ||
+      (useIntra && prepared.compressors.get(
+                       cocclCompressionScope::Intra) != nullptr) ||
+      (useInter && prepared.compressors.get(
+                       cocclCompressionScope::Inter) != nullptr);
+}
+
 }  // namespace
 
 bool cocclPreparedAlgorithmHasCompression(
@@ -49,12 +59,7 @@ bool cocclPreparedAlgorithmHasCompression(
   bool useInter = false;
   algorithmScopes(
       *prepared, algorithm, &useDefault, &useIntra, &useInter);
-  return (useDefault && prepared->compressors.get(
-                            cocclCompressionScope::Default) != nullptr) ||
-      (useIntra && prepared->compressors.get(
-                       cocclCompressionScope::Intra) != nullptr) ||
-      (useInter && prepared->compressors.get(
-                       cocclCompressionScope::Inter) != nullptr);
+  return hasCompression(*prepared, useDefault, useIntra, useInter);
 }
 
 bool cocclPreparedAlgorithmSupported(
@@ -64,7 +69,7 @@ bool cocclPreparedAlgorithmSupported(
   bool useInter = false;
   algorithmScopes(
       *prepared, algorithm, &useDefault, &useIntra, &useInter);
-  if (!cocclPreparedAlgorithmHasCompression(prepared, algorithm)) {
+  if (!hasCompression(*prepared, useDefault, useIntra, useInter)) {
     return false;
   }
   return (!useDefault ||

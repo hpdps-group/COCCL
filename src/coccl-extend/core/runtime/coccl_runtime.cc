@@ -86,13 +86,6 @@ bool sendRecvForward(const cocclInfo& info) {
       : info.comm->rank > info.peer;
 }
 
-cocclTrainingRole trainingRole(ncclComm_t comm) {
-  if (!cocclTrainingAssistEnabled()) return cocclTrainingRoleUnknown;
-  cocclTrainingClassification classification;
-  return cocclTrainingAssistQuery(comm, &classification)
-      ? classification.role : cocclTrainingRoleUnknown;
-}
-
 cocclPolicyKey preparedPolicy(const cocclPreparedCall& prepared) {
   if (prepared.info.operation == cocclOperation::SendRecv &&
       prepared.trainingRole == cocclTrainingRolePipelineParallel) {
@@ -156,6 +149,22 @@ ncclResult_t resolvePreparedCompressors(cocclPreparedCall* prepared) {
       ? ncclSuccess : ncclInvalidUsage;
 }
 
+ncclResult_t prepareCall(const cocclInfo& info,
+                         const cocclOperationDescriptor* descriptor,
+                         cocclPreparedCall* prepared) {
+  prepared->info = info;
+  prepared->descriptor = descriptor;
+  if (cocclTrainingAssistEnabled()) {
+    cocclTrainingClassification classification;
+    if (!cocclTrainingAssistQuery(info.comm, &classification) ||
+        classification.role == cocclTrainingRoleUnknown) {
+      return ncclInvalidUsage;
+    }
+    prepared->trainingRole = classification.role;
+  }
+  return resolvePreparedCompressors(prepared);
+}
+
 bool callSupported(const cocclInfo& info,
                    const cocclOperationDescriptor& descriptor) {
   if (info.comm->nRanks <= 1) return false;
@@ -201,14 +210,7 @@ ncclResult_t cocclEnqueueCheck(const cocclInfo* info, bool* isEnqueued) {
   }
 
   cocclPreparedCall prepared;
-  prepared.info = *info;
-  prepared.descriptor = descriptor;
-  prepared.trainingRole = trainingRole(info->comm);
-  if (cocclTrainingAssistEnabled() &&
-      prepared.trainingRole == cocclTrainingRoleUnknown) {
-    return routeNativeGroupedSendRecv(*info, isEnqueued);
-  }
-  if (resolvePreparedCompressors(&prepared) != ncclSuccess) {
+  if (prepareCall(*info, descriptor, &prepared) != ncclSuccess) {
     return routeNativeGroupedSendRecv(*info, isEnqueued);
   }
   if (bytes <= prepared.compressors.thresholdBytes) {
@@ -241,15 +243,8 @@ ncclResult_t cocclEnqueueExplicitCall(
   }
 
   cocclPreparedCall prepared;
-  prepared.info = *info;
-  prepared.descriptor = descriptor;
-  prepared.trainingRole = trainingRole(info->comm);
-  if (cocclTrainingAssistEnabled() &&
-      prepared.trainingRole == cocclTrainingRoleUnknown) {
-    return ncclInvalidUsage;
-  }
+  NCCLCHECK(prepareCall(*info, descriptor, &prepared));
   prepared.algorithm = algorithm;
-  NCCLCHECK(resolvePreparedCompressors(&prepared));
   if (algorithm == cocclAlgorithmNone &&
       tunableReduction(info->operation)) {
     NCCLCHECK(cocclSelectAlgorithm(&prepared));

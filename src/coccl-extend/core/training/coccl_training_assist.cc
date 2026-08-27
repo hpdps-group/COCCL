@@ -20,6 +20,7 @@ namespace {
 
 constexpr size_t kMinimumCycleEvents = 2;
 constexpr size_t kLoggedEventsPerIteration = 32;
+constexpr uint64_t kLocalCollectiveActivationIterations = 20;
 
 struct cocclTrainingAssistCommState {
   ncclComm_t comm = nullptr;
@@ -27,6 +28,7 @@ struct cocclTrainingAssistCommState {
   cocclTrainingClassification classification;
   uint64_t observedCalls = 0;
   uint64_t routingActivationCall = 0;
+  std::vector<cocclTrainingTraceEvent> events;
 };
 
 pthread_mutex_t cocclTrainingAssistLock = PTHREAD_MUTEX_INITIALIZER;
@@ -96,9 +98,10 @@ static bool checkedLogicalBytes(const cocclInfo* args, size_t* bytes) {
   return true;
 }
 
-static bool allCommsCommittedLocked() {
+static bool allObservedCommsCommittedLocked() {
   for (const auto& entry : cocclTrainingAssistComms) {
-    if (!entry.second->classification.committed) return false;
+    if (entry.second->observedCalls != 0 &&
+        !entry.second->classification.committed) return false;
   }
   return true;
 }
@@ -144,6 +147,57 @@ static void logIterationSequencesLocked(
   }
 }
 
+static void commitClassificationLocked(
+    cocclTrainingAssistCommState* state,
+    const cocclTrainingClassification& classification,
+    int targetIterations, uint64_t minimumActivationIterations) {
+  state->classification = classification;
+  state->classification.committed = true;
+  const uint64_t callsPerIteration = std::max<uint64_t>(
+      1, (uint64_t)state->classification.callsPerIteration);
+  const uint64_t activationIterations = std::max<uint64_t>(
+      2ULL * (uint64_t)targetIterations, minimumActivationIterations);
+  state->routingActivationCall =
+      activationIterations * callsPerIteration;
+  std::vector<cocclTrainingTraceEvent>().swap(state->events);
+  INFO(COCCL_TUNING,
+       "COCCL training comm=%p hash=%llu rank=%d nodes=%d ranks=%d role=%s "
+       "confidence=%.3f calls=%llu medianBytes=%zu sizeConsistency=%.3f "
+       "cycleSupport=%.3f overlapSupport=%.3f orderSupport=%.3f AG/RS=%.3f "
+       "activateCall=%llu",
+       state->comm, (unsigned long long)state->descriptor.commHash,
+       state->descriptor.rank, state->descriptor.nNodes,
+       state->descriptor.nRanks,
+       cocclTrainingRoleName(state->classification.role),
+       state->classification.confidence,
+       (unsigned long long)state->classification.observedCalls,
+       state->classification.medianBytes,
+       state->classification.sizeConsistency,
+       state->classification.cycleSupport,
+       state->classification.overlapPatternSupport,
+       state->classification.orderSupport,
+       state->classification.agToRsRatio,
+       (unsigned long long)state->routingActivationCall);
+}
+
+static void classifyCommTraceLocked(
+    cocclTrainingAssistCommState* state, int targetIterations) {
+  if (state->events.empty() ||
+      !isCollective(state->events.back().operation)) return;
+  std::vector<cocclTrainingIterationRange> iterations;
+  if (!cocclTrainingDetectIterations(
+          state->events, targetIterations, &iterations)) return;
+  std::vector<cocclTrainingTraceResult> results;
+  cocclTrainingClassifyTrace({state->descriptor}, state->events, iterations,
+                             targetIterations, cocclGetConfig().training,
+                             &results);
+  if (results.empty() ||
+      results.front().classification.role == cocclTrainingRoleUnknown) return;
+  commitClassificationLocked(
+      state, results.front().classification, targetIterations,
+      kLocalCollectiveActivationIterations);
+}
+
 static void commitTraceLocked(
     const std::vector<cocclTrainingIterationRange>& iterations,
     int targetIterations) {
@@ -168,34 +222,11 @@ static void commitTraceLocked(
     cocclTrainingAssistCommState* state = entry.second.get();
     if (state->classification.committed) continue;
     auto result = byId.find(state->descriptor.communicatorId);
-    if (result != byId.end()) state->classification = result->second;
-    state->classification.committed = true;
-    if (state->classification.role != cocclTrainingRoleUnknown) {
-      const uint64_t callsPerIteration = std::max<uint64_t>(
-          1, (uint64_t)state->classification.callsPerIteration);
-      state->routingActivationCall =
-          2ULL * (uint64_t)targetIterations * callsPerIteration;
-    }
-    INFO(COCCL_TUNING,
-         "COCCL training comm=%p hash=%llu rank=%d nodes=%d ranks=%d role=%s "
-         "confidence=%.3f calls=%llu medianBytes=%zu sizeConsistency=%.3f "
-         "cycleSupport=%.3f overlapSupport=%.3f orderSupport=%.3f AG/RS=%.3f "
-         "activateCall=%llu",
-         state->comm, (unsigned long long)state->descriptor.commHash,
-         state->descriptor.rank, state->descriptor.nNodes,
-         state->descriptor.nRanks,
-         cocclTrainingRoleName(state->classification.role),
-         state->classification.confidence,
-         (unsigned long long)state->classification.observedCalls,
-         state->classification.medianBytes,
-         state->classification.sizeConsistency,
-         state->classification.cycleSupport,
-         state->classification.overlapPatternSupport,
-         state->classification.orderSupport,
-         state->classification.agToRsRatio,
-         (unsigned long long)state->routingActivationCall);
+    if (result == byId.end() ||
+        result->second.role == cocclTrainingRoleUnknown) continue;
+    commitClassificationLocked(state, result->second, targetIterations, 0);
   }
-  if (allCommsCommittedLocked()) releaseTraceLocked();
+  if (allObservedCommsCommittedLocked()) releaseTraceLocked();
 }
 
 static int configuredIterations() {
@@ -338,7 +369,7 @@ void cocclTrainingAssistObserve(
          state->second->descriptor.rank, state->second->descriptor.nNodes,
          state->second->descriptor.nRanks,
          cocclTrainingRoleName(topologyRole));
-    if (allCommsCommittedLocked()) releaseTraceLocked();
+    if (allObservedCommsCommittedLocked()) releaseTraceLocked();
     pthread_mutex_unlock(&cocclTrainingAssistLock);
     return;
   }
@@ -346,8 +377,10 @@ void cocclTrainingAssistObserve(
   event.communicatorId = state->second->descriptor.communicatorId;
   event.sequence = cocclTrainingNextSequence++;
   cocclTrainingEvents.push_back(event);
+  state->second->events.push_back(event);
 
   int targetIterations = configuredIterations();
+  classifyCommTraceLocked(state->second.get(), targetIterations);
   bool reachedLimit = cocclTrainingEvents.size() >= kMaxTrainingEvents;
   size_t firstDetectionPoint =
       (size_t)targetIterations * kMinimumCycleEvents;

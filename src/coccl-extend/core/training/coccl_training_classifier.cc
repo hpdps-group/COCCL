@@ -585,9 +585,12 @@ void cocclTrainingClassifyTrace(
     }
     double overlapEvidence = stats.overlapPatternSupport * calibrationCoverage;
     double ratioEvidence = stats.ratioSupport * calibrationCoverage;
-    bool reduceScatterBuckets = stats.reduceScatterCalls != 0 &&
-                                stats.allGatherCalls == 0 &&
-                                stats.allReduceCalls == 0;
+    // BF16 gradient reduction makes SDP ReduceScatter and AllGather buckets
+    // equal in bytes. Multiple stable bucket sizes distinguish that flow from
+    // sequence-parallel TP's equal-size RS/AG pair.
+    bool distributedOptimizerBuckets =
+        stats.reduceScatterCalls != 0 && stats.allReduceCalls == 0 &&
+        (stats.allGatherCalls == 0 || stats.sizeConsistency < 0.90);
     if (config.dataParallelStrategy == cocclDataParallelStrategy::Ddp) {
       bool ddpBuckets = stats.descriptor.nNodes > 1 &&
                         stats.allReduceCalls != 0 &&
@@ -608,7 +611,7 @@ void cocclTrainingClassifyTrace(
         evidence.dp = stats.patternSupport * calibrationCoverage;
       }
     } else {
-      if (!reduceScatterBuckets ||
+      if (!distributedOptimizerBuckets ||
           overlapEvidence < kOverlapPatternThreshold) {
         overlapEvidence = 0.0;
       }
