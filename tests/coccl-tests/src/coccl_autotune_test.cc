@@ -143,8 +143,16 @@ void testCostModel() {
     fail("linear model mismatch");
   }
 
+  const cocclLinearModel sampled = cocclAutotuneFitLinearModel(
+      {{1.0, 1.0}, {2.0, 2.0}, {4.0, 10.0}});
+  if (!sampled.valid || sampled.sampleCount != 3 ||
+      std::abs(cocclAutotunePredict(sampled, 3.0) - 6.0) > 1e-12) {
+    fail("sampled latency interpolation mismatch");
+  }
+
   const cocclSelectionPerformanceModel performance = {
-      {1.0, 0.001, true}, {2.0, 0.002, true}};
+      {1.0, 0.001, true}, {2.0, 0.002, true},
+      {5.0, 0.005, true}, {7.0, 0.007, true}};
   const cocclCodecModel codec = {
       {3.0, 0.003, true}, 2.0, true};
   const cocclAutotuneCodecSet codecs = {
@@ -184,6 +192,55 @@ void testCostModel() {
           cocclAutotuneCostKind::AllReduceOneShot, performance,
           invalidCodecs, 1024.0, 4, 2))) {
     fail("invalid model returned finite cost");
+  }
+
+  cocclSelectionPerformanceModel sampledPerformance = performance;
+  sampledPerformance.intraP2p.sampleCount = 2;
+  sampledPerformance.intraP2p.sampleBytes[0] = 256.0;
+  sampledPerformance.intraP2p.sampleBytes[1] = 1024.0;
+  sampledPerformance.intraP2p.sampleTimeUs[0] = 40.0;
+  sampledPerformance.intraP2p.sampleTimeUs[1] = 80.0;
+  sampledPerformance.interP2p = sampledPerformance.intraP2p;
+  sampledPerformance.allGather = {5.0, 0.02, true};
+  sampledPerformance.allToAll = {7.0, 0.001, true};
+  cocclCodecModel sampledCodec = codec;
+  sampledCodec.drcTime = {1.0, 0.0005, true};
+  const cocclAutotuneCodecSet sampledCodecs = {
+      {true, &sampledCodec}, {true, &sampledCodec},
+      {true, &sampledCodec}};
+
+  const double smallOne = cocclAutotuneEvaluateCost(
+      cocclAutotuneCostKind::AllReduceOneShot, sampledPerformance,
+      sampledCodecs, 512.0, 4, 1);
+  const double smallTwo = cocclAutotuneEvaluateCost(
+      cocclAutotuneCostKind::AllReduceTwoShot, sampledPerformance,
+      sampledCodecs, 512.0, 4, 1);
+  const double largeOne = cocclAutotuneEvaluateCost(
+      cocclAutotuneCostKind::AllReduceOneShot, sampledPerformance,
+      sampledCodecs, 4096.0, 4, 1);
+  const double largeTwo = cocclAutotuneEvaluateCost(
+      cocclAutotuneCostKind::AllReduceTwoShot, sampledPerformance,
+      sampledCodecs, 4096.0, 4, 1);
+  if (!(smallOne < smallTwo && largeTwo < largeOne)) {
+    fail("single-node crossover model mismatch");
+  }
+
+  const double rsOne = cocclAutotuneEvaluateCost(
+      cocclAutotuneCostKind::ReduceScatterOneShot, sampledPerformance,
+      codecs, 1024.0, 4, 2);
+  const double rsTwo = cocclAutotuneEvaluateCost(
+      cocclAutotuneCostKind::ReduceScatterTwoShot, sampledPerformance,
+      codecs, 1024.0, 4, 2);
+  if (!(rsTwo < rsOne)) fail("hierarchical reducescatter model mismatch");
+
+  const double triple = cocclAutotuneEvaluateCost(
+      cocclAutotuneCostKind::AllReduceTripleShot, sampledPerformance,
+      codecs, 1024.0, 4, 2);
+  const double one = cocclAutotuneEvaluateCost(
+      cocclAutotuneCostKind::AllReduceOneShot, sampledPerformance,
+      codecs, 1024.0, 4, 2);
+  if (!(triple < one)) {
+    fail("hierarchical allreduce model mismatch");
   }
   rows.push_back({"cost_model_and_invalid_infinity", "all", "all", 1, 0,
                   "PASS"});

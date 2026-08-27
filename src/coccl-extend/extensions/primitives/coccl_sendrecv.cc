@@ -119,7 +119,7 @@ ncclResult_t cocclExecuteSendRecvBatch(
       ret = ncclInvalidArgument;
       goto exit;
     }
-    NCCLCHECKGOTO(cocclGetUnregisteredBuffer(
+    NCCLCHECKGOTO(cocclGetBuffer(
                       info.comm, allocationBytes, info.stream, &state.buffer),
                   ret, exit);
 

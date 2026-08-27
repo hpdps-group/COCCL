@@ -86,7 +86,7 @@ struct VmmBlock : BufferBlock {
   int cudaDev = -1;
   void* ptr = nullptr;
   size_t capacity = 0;
-  std::vector<CUmemGenericAllocationHandle> handles;
+  CUmemGenericAllocationHandle handle = 0;
   std::list<VmmSlice> slices;
   std::vector<VmmRegistration> registrations;
 };

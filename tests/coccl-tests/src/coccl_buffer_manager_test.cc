@@ -171,6 +171,11 @@ int main() {
   cocclBufferHandle concurrent;
   EXPECT(cocclGetBuffer(&firstComm, 1024, firstStream, &first) ==
          ncclSuccess);
+  EXPECT(registrations.size() == 1);
+  EXPECT(cocclRegisterBufferForComm(&first, &secondComm) == ncclSuccess);
+  EXPECT(registrations.size() == 2);
+  EXPECT(cocclRegisterBufferForComm(&first, &secondComm) == ncclSuccess);
+  EXPECT(registrations.size() == 2);
   EXPECT(cocclGetBuffer(&firstComm, 1024, secondStream, &concurrent) ==
          ncclSuccess);
   EXPECT(first.ptr != concurrent.ptr);
@@ -196,11 +201,12 @@ int main() {
          ncclSuccess);
   EXPECT(independent.ptr != reusablePtr);
   EXPECT(cocclReleaseBuffer(&independent, firstStream) == ncclSuccess);
-  const size_t allocationsBeforeFirstDestroy = allocations.size();
-  EXPECT(cocclBufferCommDestroy(&firstComm) == ncclSuccess);
-  EXPECT(allocations.size() < allocationsBeforeFirstDestroy);
-  EXPECT(!allocations.empty());
+  const size_t allocationsBeforeSecondDestroy = allocations.size();
   EXPECT(cocclBufferCommDestroy(&secondComm) == ncclSuccess);
+  EXPECT(allocations.size() < allocationsBeforeSecondDestroy);
+  EXPECT(!allocations.empty());
+  EXPECT(registrations.size() == 3);
+  EXPECT(cocclBufferCommDestroy(&firstComm) == ncclSuccess);
   EXPECT(allocations.empty() && registrations.empty() && events.empty());
 
   EXPECT(cocclBufferCommInit(&firstComm) == ncclSuccess);

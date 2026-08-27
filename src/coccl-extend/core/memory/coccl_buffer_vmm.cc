@@ -102,11 +102,11 @@ ncclResult_t setPeerAccess(VmmPool* pool, CUdeviceptr ptr, size_t bytes) {
 }
 
 ncclResult_t createPhysicalHandle(
-    VmmPool* pool, CUmemGenericAllocationHandle* handle) {
+    VmmPool* pool, size_t bytes, CUmemGenericAllocationHandle* handle) {
   CUmemAllocationProp prop = {};
   buildAllocationProp(pool, &prop);
-  CUCHECK(cuMemCreate(handle, pool->chunkBytes, &prop, 0));
-  pool->physicalBytes += pool->chunkBytes;
+  CUCHECK(cuMemCreate(handle, bytes, &prop, 0));
+  pool->physicalBytes += bytes;
   return ncclSuccess;
 }
 
@@ -153,26 +153,21 @@ ncclResult_t createBlock(VmmPool* pool, size_t requested,
                          VmmBlock** result) {
   ncclResult_t ret = ncclSuccess;
   const size_t capacity = alignUpTo(requested, pool->chunkBytes);
-  const size_t chunks = capacity / pool->chunkBytes;
-  size_t mapped = 0;
+  bool mapped = false;
   CUdeviceptr reservation = 0;
   std::unique_ptr<VmmBlock> block(new VmmBlock());
   block->pool = pool;
   block->cudaDev = pool->cudaDev;
   block->capacity = capacity;
-  block->handles.reserve(chunks);
 
   CUCHECKGOTO(cuMemAddressReserve(&reservation, capacity, pool->granularity,
                                    0, 0), ret, fail);
   block->ptr = reinterpret_cast<void*>(reservation);
-  for (size_t i = 0; i < chunks; ++i) {
-    CUmemGenericAllocationHandle handle = 0;
-    NCCLCHECKGOTO(createPhysicalHandle(pool, &handle), ret, fail);
-    block->handles.push_back(handle);
-    CUCHECKGOTO(cuMemMap(reservation + i * pool->chunkBytes,
-                         pool->chunkBytes, 0, handle, 0), ret, fail);
-    ++mapped;
-  }
+  NCCLCHECKGOTO(createPhysicalHandle(pool, capacity, &block->handle), ret,
+                fail);
+  CUCHECKGOTO(cuMemMap(reservation, capacity, 0, block->handle, 0), ret,
+               fail);
+  mapped = true;
   NCCLCHECKGOTO(setPeerAccess(pool, reservation, capacity), ret, fail);
 
   resetSlices(block.get());
@@ -186,12 +181,12 @@ ncclResult_t createBlock(VmmPool* pool, size_t requested,
   return ncclSuccess;
 
 fail:
-  if (reservation != 0 && mapped != 0) {
-    CUCHECKIGNORE(cuMemUnmap(reservation, mapped * pool->chunkBytes));
+  if (reservation != 0 && mapped) {
+    CUCHECKIGNORE(cuMemUnmap(reservation, capacity));
   }
-  for (CUmemGenericAllocationHandle handle : block->handles) {
-    CUCHECKIGNORE(cuMemRelease(handle));
-    pool->physicalBytes -= pool->chunkBytes;
+  if (block->handle != 0) {
+    CUCHECKIGNORE(cuMemRelease(block->handle));
+    pool->physicalBytes -= capacity;
   }
   if (reservation != 0) CUCHECKIGNORE(cuMemAddressFree(reservation, capacity));
   return ret;
@@ -201,37 +196,33 @@ ncclResult_t growBlock(VmmBlock* block, size_t requested) {
   VmmPool* pool = block->pool;
   const size_t oldCapacity = block->capacity;
   const size_t newCapacity = alignUpTo(requested, pool->chunkBytes);
-  const size_t oldChunks = block->handles.size();
-  const size_t newChunks = newCapacity / pool->chunkBytes;
+  ncclResult_t ret = ncclSuccess;
   CUdeviceptr newReservation = 0;
+  CUmemGenericAllocationHandle newHandle = 0;
+  bool newMapped = false;
 
   CUDACHECK(cudaSetDevice(block->cudaDev));
   NCCLCHECK(waitForBlock(block));
-  CUCHECK(cuMemAddressReserve(&newReservation, newCapacity,
-                              pool->granularity, 0, 0));
+  CUCHECKGOTO(cuMemAddressReserve(&newReservation, newCapacity,
+                                  pool->granularity, 0, 0), ret, fail);
+  NCCLCHECKGOTO(createPhysicalHandle(pool, newCapacity, &newHandle), ret,
+                fail);
+  CUCHECKGOTO(cuMemMap(newReservation, newCapacity, 0, newHandle, 0), ret,
+               fail);
+  newMapped = true;
+  NCCLCHECKGOTO(setPeerAccess(pool, newReservation, newCapacity), ret, fail);
 
-  for (size_t i = oldChunks; i < newChunks; ++i) {
-    CUmemGenericAllocationHandle handle = 0;
-    ncclResult_t ret = createPhysicalHandle(pool, &handle);
-    if (ret != ncclSuccess) {
-      CUCHECKIGNORE(cuMemAddressFree(newReservation, newCapacity));
-      return ret;
-    }
-    block->handles.push_back(handle);
-  }
-
-  NCCLCHECK(deregisterAll(block));
-  CUCHECK(cuMemUnmap(reinterpret_cast<CUdeviceptr>(block->ptr), oldCapacity));
-  for (size_t i = 0; i < newChunks; ++i) {
-    CUCHECK(cuMemMap(newReservation + i * pool->chunkBytes,
-                     pool->chunkBytes, 0, block->handles[i], 0));
-  }
-  NCCLCHECK(setPeerAccess(pool, newReservation, newCapacity));
-  CUCHECK(cuMemAddressFree(reinterpret_cast<CUdeviceptr>(block->ptr),
-                           oldCapacity));
+  NCCLCHECKGOTO(deregisterAll(block), ret, fail);
+  CUCHECKGOTO(cuMemUnmap(reinterpret_cast<CUdeviceptr>(block->ptr),
+                         oldCapacity), ret, fail);
+  CUCHECKGOTO(cuMemRelease(block->handle), ret, fail);
+  pool->physicalBytes -= oldCapacity;
+  CUCHECKGOTO(cuMemAddressFree(reinterpret_cast<CUdeviceptr>(block->ptr),
+                               oldCapacity), ret, fail);
 
   block->ptr = reinterpret_cast<void*>(newReservation);
   block->capacity = newCapacity;
+  block->handle = newHandle;
   pool->virtualBytes += newCapacity - oldCapacity;
   resetSlices(block);
   INFO(COCCL_MEMORY,
@@ -239,6 +230,17 @@ ncclResult_t growBlock(VmmBlock* block, size_t requested) {
        pool->ownerComm, requested, newCapacity, pool->virtualBytes,
        pool->physicalBytes, pool->registeredBytes);
   return ncclSuccess;
+
+fail:
+  if (newMapped) CUCHECKIGNORE(cuMemUnmap(newReservation, newCapacity));
+  if (newHandle != 0) {
+    CUCHECKIGNORE(cuMemRelease(newHandle));
+    pool->physicalBytes -= newCapacity;
+  }
+  if (newReservation != 0) {
+    CUCHECKIGNORE(cuMemAddressFree(newReservation, newCapacity));
+  }
+  return ret;
 }
 
 ncclResult_t acquireFromBlock(VmmBlock* block, size_t bytes,
@@ -294,10 +296,8 @@ ncclResult_t releaseBlock(VmmBlock* block) {
   }
   CUCHECK(cuMemUnmap(reinterpret_cast<CUdeviceptr>(block->ptr),
                      block->capacity));
-  for (CUmemGenericAllocationHandle handle : block->handles) {
-    CUCHECK(cuMemRelease(handle));
-    pool->physicalBytes -= pool->chunkBytes;
-  }
+  CUCHECK(cuMemRelease(block->handle));
+  pool->physicalBytes -= block->capacity;
   CUCHECK(cuMemAddressFree(reinterpret_cast<CUdeviceptr>(block->ptr),
                            block->capacity));
   pool->virtualBytes -= block->capacity;

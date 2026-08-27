@@ -2083,6 +2083,7 @@ ncclResult_t ncclCommFinalize(ncclComm_t comm) {
     goto fail;
   }
 
+  NCCLCHECKGOTO(cocclPrepareDestroy(comm), ret, fail);
   comm->finalizeCalled = true;
   /* launch async thread to finalize comm. */
   NCCLCHECKGOTO(ncclCalloc(&job, 1), ret, fail);
@@ -2183,6 +2184,7 @@ ncclResult_t ncclCommDestroy(ncclComm_t comm) {
   comm->destroyFlag = 1;
   /* init thread must be joined before we destroy the comm. */
   NCCLCHECK(ncclCommEnsureReady(comm));
+  NCCLCHECKGOTO(cocclPrepareDestroy(comm), res, fail);
   NCCLCHECKGOTO(ncclCalloc(&job, 1), res, fail);
   job->comm = comm;
   NCCLCHECKGOTO(ncclAsyncLaunch((struct ncclAsyncJob*)job, commReclaim, NULL, free, comm), res, fail);

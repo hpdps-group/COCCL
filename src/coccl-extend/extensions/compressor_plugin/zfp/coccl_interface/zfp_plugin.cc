@@ -2,6 +2,7 @@
 #include "zfp.h"
 #include "zfp/internal/zfp/macros.h"
 
+#include <algorithm>
 #include <climits>
 #include <cuda_runtime.h>
 #include <stdint.h>
@@ -49,6 +50,16 @@ bool checkedMultiply(size_t lhs, size_t rhs, size_t* result) {
   if (lhs != 0 && rhs > SIZE_MAX / lhs) return false;
   *result = lhs * rhs;
   return true;
+}
+
+size_t cudaBatchChunks(size_t elementsPerChunk, size_t chunks) {
+  if (elementsPerChunk > UINT_MAX) return 0;
+  if (elementsPerChunk % kZfpBlockElements != 0) return 1;
+
+  size_t batchChunks = std::min(
+      chunks, static_cast<size_t>(UINT_MAX) / elementsPerChunk);
+  while (chunks % batchChunks != 0) --batchChunks;
+  return batchChunks;
 }
 
 struct ZfpCompressor {
@@ -109,7 +120,12 @@ struct ZfpCompressor {
 
     const size_t elementsPerChunk = input.elementsPerChunk();
     const size_t chunksPerBatch =
-        elementsPerChunk % kZfpBlockElements == 0 ? input.chunks() : 1;
+        cudaBatchChunks(elementsPerChunk, input.chunks());
+    if (chunksPerBatch == 0) {
+      zfp_field_free(field);
+      zfp_stream_close(stream);
+      return ncclInvalidArgument;
+    }
     const size_t batches = input.chunks() / chunksPerBatch;
     size_t batchElements = 0;
     if (!checkedMultiply(
@@ -217,7 +233,12 @@ struct ZfpCompressor {
     const size_t outputChunkElements =
         output.elements() / output.chunks();
     const size_t chunksPerBatch =
-        outputChunkElements % kZfpBlockElements == 0 ? output.chunks() : 1;
+        cudaBatchChunks(outputChunkElements, output.chunks());
+    if (chunksPerBatch == 0) {
+      zfp_field_free(field);
+      zfp_stream_close(stream);
+      return ncclInvalidArgument;
+    }
     const size_t batches = output.chunks() / chunksPerBatch;
     const size_t inputBatchBytes = inputChunkBytes * chunksPerBatch;
     const size_t outputBatchElements =

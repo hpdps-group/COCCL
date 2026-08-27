@@ -117,6 +117,7 @@ ncclResult_t selectCandidate(cocclPreparedCall* prepared) {
             prepared->compressors.get(cocclCompressionScope::Default),
             prepared->compressors.get(cocclCompressionScope::Intra),
             prepared->compressors.get(cocclCompressionScope::Inter),
+            info.datatype,
             &defaultCodecModel, &intraCodecModel, &interCodecModel);
     const cocclAutotuneCodecSet codecs = {
         {prepared->compressors.get(cocclCompressionScope::Default) !=

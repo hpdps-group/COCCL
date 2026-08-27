@@ -66,6 +66,10 @@ int main() {
          std::strtod(fields[7].c_str(), nullptr), true},
         {std::strtod(fields[8].c_str(), nullptr),
          std::strtod(fields[9].c_str(), nullptr), true},
+        {std::strtod(fields[6].c_str(), nullptr),
+         std::strtod(fields[7].c_str(), nullptr), true},
+        {std::strtod(fields[6].c_str(), nullptr),
+         std::strtod(fields[7].c_str(), nullptr), true},
     };
     const cocclCodecModel baseCodec = {
         {std::strtod(fields[10].c_str(), nullptr),

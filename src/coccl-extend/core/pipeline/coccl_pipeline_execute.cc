@@ -187,6 +187,20 @@ bool pipelineUsesFramedCompressor(const cocclPipelineSpec* spec) {
   return false;
 }
 
+int collectCommunicationComms(const cocclPipelineSpec* spec,
+                              ncclComm_t* comms) {
+  int count = 0;
+  for (int stage = 0; stage < spec->stageCount; ++stage) {
+    ncclComm_t comm = spec->stages[stage].comm;
+    if (comm == nullptr) continue;
+
+    int existing = 0;
+    while (existing < count && comms[existing] != comm) ++existing;
+    if (existing == count) comms[count++] = comm;
+  }
+  return count;
+}
+
 cocclPipelineStageOutput stageOutput(const cocclPipelineContext& context,
                                      const cocclPipelineWorkspace& workspace,
                                      int stage, int slice) {
@@ -496,10 +510,23 @@ static ncclResult_t cocclRunPipelineWithDepth(
   NCCLCHECK(cocclPreparePipeline(spec, requestedDepth, &context));
   CUDACHECK(cudaSetDevice(spec->ownerComm->cudaDev));
 
+  ncclComm_t communicationComms[kCocclPipelineExplicitStages] = {};
+  const int communicationCommCount =
+      collectCommunicationComms(spec, communicationComms);
   cocclBufferHandle coreWorkspace = {};
-  NCCLCHECK(cocclGetUnregisteredBuffer(
-      spec->ownerComm, context.plan.registeredBytes, spec->stream,
-      &coreWorkspace));
+  ncclResult_t result = cocclGetBufferForComm(
+      spec->ownerComm, communicationComms[0], context.plan.registeredBytes,
+      spec->stream, &coreWorkspace);
+  if (result != ncclSuccess) return result;
+  for (int i = 1; i < communicationCommCount; ++i) {
+    result = cocclRegisterBufferForComm(&coreWorkspace,
+                                        communicationComms[i]);
+    if (result != ncclSuccess) {
+      (void)cocclReleaseBuffer(&coreWorkspace, spec->stream);
+      return result;
+    }
+  }
+
   cocclBufferHandle rawWorkspace = {};
   if (context.plan.rawBytes != 0) {
     const ncclResult_t rawResult = cocclGetUnregisteredBuffer(
@@ -513,7 +540,7 @@ static ncclResult_t cocclRunPipelineWithDepth(
   const cocclPipelineWorkspace workspace = {
       coreWorkspace.ptr, rawWorkspace.ptr};
 
-  ncclResult_t result = ncclSuccess;
+  result = ncclSuccess;
   const bool framed = pipelineUsesFramedCompressor(spec);
   if (context.depth == 1 && !framed) {
     result = runSerial(context, workspace);

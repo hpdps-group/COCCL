@@ -24,10 +24,12 @@ void* const kIntra = reinterpret_cast<void*>(0x11);
 void* const kInter = reinterpret_cast<void*>(0x12);
 cocclConfig config;
 cocclSelectionPerformanceModel performance = {
-    {1.0, 1e-6, true}, {4.0, 4e-6, true}};
+    {1.0, 1e-6, true}, {4.0, 4e-6, true},
+    {1.0, 1e-6, true}, {1.0, 1e-6, true}};
 cocclCodecModel defaultModel = {{2.0, 2e-6, true}, 4.0, true};
 cocclCodecModel intraModel = {{1.0, 1e-6, true}, 8.0, true};
 cocclCodecModel interModel = {{3.0, 3e-6, true}, 4.0, true};
+ncclDataType_t snapshotDatatype = ncclNumTypes;
 
 void setScope(cocclPreparedCall* prepared, cocclCompressionScope scope,
               void* compressor, bool datatypeSupported = true) {
@@ -81,8 +83,10 @@ const cocclConfig& cocclGetConfig() {
 
 cocclSelectionPerformanceModel cocclAutotuneSnapshotPerformanceModel(
     void* defaultCompressor, void* intraCompressor, void* interCompressor,
+    ncclDataType_t datatype,
     cocclCodecModel* defaultCodec, cocclCodecModel* intraCodec,
     cocclCodecModel* interCodec) {
+  snapshotDatatype = datatype;
   if (defaultCompressor != nullptr) *defaultCodec = modelFor(defaultCompressor);
   if (intraCompressor != nullptr) *intraCodec = modelFor(intraCompressor);
   if (interCompressor != nullptr) *interCodec = modelFor(interCompressor);
@@ -106,6 +110,7 @@ int main() {
   setScope(&prepared, cocclCompressionScope::Inter, kInter);
   checkSelection(&prepared, cocclAlgorithmReduceScatterTwoShot, true);
   EXPECT(std::isinf(prepared.oneShotUs));
+  EXPECT(snapshotDatatype == ncclFloat32);
   EXPECT(std::isfinite(prepared.twoShotUs));
 
   prepared = makePrepared(&comm, cocclOperation::ReduceScatter);
@@ -147,6 +152,12 @@ int main() {
   prepared = makePrepared(&comm, cocclOperation::ReduceScatter);
   setScope(&prepared, cocclCompressionScope::Inter, kInter, false);
   EXPECT(cocclSelectAlgorithm(&prepared) == ncclInvalidArgument);
+
+  prepared = makePrepared(&comm, cocclOperation::ReduceScatter);
+  prepared.info.datatype = ncclBfloat16;
+  setScope(&prepared, cocclCompressionScope::Inter, kInter);
+  checkSelection(&prepared, cocclAlgorithmReduceScatterTwoShot, true);
+  EXPECT(snapshotDatatype == ncclBfloat16);
 
   std::printf("coccl selector scopes: PASS\n");
   return 0;

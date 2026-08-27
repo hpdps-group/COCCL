@@ -19,6 +19,10 @@ struct cocclAutotuneProfilePoint {
 struct cocclSelectionPerformanceModel {
   cocclLinearModel intraP2p;
   cocclLinearModel interP2p;
+  // Native communication stages used by flat AllReduce. AllGather is keyed
+  // by bytes sent per rank; AllToAll by total bytes sent per rank.
+  cocclLinearModel allGather;
+  cocclLinearModel allToAll;
 };
 
 enum class cocclAutotuneCostKind : uint8_t {
@@ -264,6 +268,7 @@ double cocclAutotuneEvaluateCost(
 
 cocclSelectionPerformanceModel cocclAutotuneSnapshotPerformanceModel(
     void* defaultCompressor, void* intraCompressor, void* interCompressor,
+    ncclDataType_t datatype,
     cocclCodecModel* defaultModel, cocclCodecModel* intraModel,
     cocclCodecModel* interModel);
 

@@ -29,11 +29,17 @@ ncclResult_t cocclInit(ncclComm_t comm) {
   return ncclSuccess;
 }
 
-ncclResult_t cocclDestroy(ncclComm_t comm) {
+ncclResult_t cocclPrepareDestroy(ncclComm_t comm) {
   ncclResult_t result = ncclSuccess;
-  keepFirstError(cocclCommDestroy(comm), &result);
   keepFirstError(cocclPipelineCommDestroy(comm), &result);
   keepFirstError(cocclBufferCommDestroy(comm), &result);
+  return result;
+}
+
+ncclResult_t cocclDestroy(ncclComm_t comm) {
+  ncclResult_t result = ncclSuccess;
+  keepFirstError(cocclPrepareDestroy(comm), &result);
+  keepFirstError(cocclCommDestroy(comm), &result);
   keepFirstError(cocclCompressorRuntimeDestroy(comm), &result);
   return result;
 }

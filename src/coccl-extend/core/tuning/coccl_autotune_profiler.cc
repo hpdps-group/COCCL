@@ -21,6 +21,7 @@ enum cocclProfileNeed : uint32_t {
   cocclProfileNeedIntra = 1u << 0,
   cocclProfileNeedInter = 1u << 1,
   cocclProfileNeedCompressors = 1u << 2,
+  cocclProfileNeedFlatCollectives = 1u << 3,
 };
 
 struct cocclProfileObservation {
@@ -38,8 +39,11 @@ struct cocclProfiledCompressor {
 struct cocclProcessPerformanceModel {
   cocclLinearModel intraP2p;
   cocclLinearModel interP2p;
+  cocclLinearModel allGather;
+  cocclLinearModel allToAll;
   std::vector<cocclProfiledCompressor> enabledCompressors;
-  std::map<void*, cocclCodecModel> compressorModels;
+  std::map<void*, std::map<ncclDataType_t, cocclCodecModel>>
+      compressorModels;
   uint32_t attemptedProfiles = 0;
 };
 
@@ -76,6 +80,11 @@ uint32_t localProfileNeeds(ncclComm_t comm) {
       (cocclPerformanceModel.attemptedProfiles &
        cocclProfileNeedCompressors) == 0) {
     needs |= cocclProfileNeedCompressors;
+  }
+  if (hasCompressors && comm->nNodes == 1 && comm->nRanks > 1 &&
+      (cocclPerformanceModel.attemptedProfiles &
+       cocclProfileNeedFlatCollectives) == 0) {
+    needs |= cocclProfileNeedFlatCollectives;
   }
   pthread_mutex_unlock(&cocclAutotuneLock);
   return needs;
@@ -137,6 +146,56 @@ ncclResult_t buildSampleSizes(ncclComm_t comm,
   if (sampleSizes->back() < effectiveMax) {
     sampleSizes->push_back((size_t)effectiveMax);
   }
+  return ncclSuccess;
+}
+
+ncclResult_t buildCollectiveSampleSizes(
+    ncclComm_t comm, const std::vector<size_t>& rawSampleSizes,
+    std::vector<size_t>* sampleSizes) {
+  size_t freeBytes = 0;
+  size_t totalBytes = 0;
+  CUDACHECK(cudaMemGetInfo(&freeBytes, &totalBytes));
+
+  const uint64_t localMax = (uint64_t)freeBytes /
+      (2u * ((uint64_t)comm->nRanks + 1u));
+  std::vector<uint64_t> allMax((size_t)comm->nRanks, 0);
+  allMax[(size_t)comm->rank] = localMax;
+  NCCLCHECK(bootstrapAllGather(
+      comm->bootstrap, allMax.data(), sizeof(uint64_t)));
+  uint64_t effectiveMax = localMax;
+  for (uint64_t rankMax : allMax) {
+    effectiveMax = std::min(effectiveMax, rankMax);
+  }
+
+  std::vector<double> ratios;
+  pthread_mutex_lock(&cocclAutotuneLock);
+  for (const auto& compressor : cocclPerformanceModel.compressorModels) {
+    for (const auto& typed : compressor.second) {
+      if (typed.second.valid) {
+        ratios.push_back(typed.second.compressionRatio);
+      }
+    }
+  }
+  pthread_mutex_unlock(&cocclAutotuneLock);
+
+  for (double ratio : ratios) {
+    for (size_t rawBytes : rawSampleSizes) {
+      const size_t encodedBytes =
+          (size_t)std::ceil((double)rawBytes / ratio);
+      for (size_t divisor : {(size_t)1, (size_t)comm->nRanks}) {
+        size_t bytes = (encodedBytes + divisor - 1) / divisor;
+        bytes = (bytes + (size_t)comm->nRanks - 1) /
+            (size_t)comm->nRanks * (size_t)comm->nRanks;
+        if (bytes > 0 && bytes <= effectiveMax) {
+          sampleSizes->push_back(bytes);
+        }
+      }
+    }
+  }
+  std::sort(sampleSizes->begin(), sampleSizes->end());
+  sampleSizes->erase(
+      std::unique(sampleSizes->begin(), sampleSizes->end()),
+      sampleSizes->end());
   return ncclSuccess;
 }
 
@@ -311,14 +370,108 @@ fail:
   goto exit;
 }
 
+enum class cocclProfileCollective : uint8_t {
+  AllGather,
+  AllToAll,
+};
+
+ncclResult_t enqueueCollective(ncclComm_t comm,
+                               cocclProfileCollective collective,
+                               const void* sendBuffer, void* recvBuffer,
+                               size_t bytes, cudaStream_t stream) {
+  cocclInfo info;
+  info.sendbuff = sendBuffer;
+  info.recvbuff = recvBuffer;
+  info.count = collective == cocclProfileCollective::AllGather
+      ? bytes : bytes / (size_t)comm->nRanks;
+  info.datatype = ncclInt8;
+  info.operation = collective == cocclProfileCollective::AllGather
+      ? cocclOperation::AllGather : cocclOperation::AllToAll;
+  info.comm = comm;
+  info.stream = stream;
+  return cocclReplayNativeCall(info);
+}
+
+ncclResult_t profileCollective(
+    ncclComm_t comm, cocclProfileCollective collective,
+    const std::vector<size_t>& sampleSizes, cocclLinearModel* model) {
+  ncclResult_t ret = ncclSuccess;
+  void* sendBuffer = nullptr;
+  void* recvBuffer = nullptr;
+  cudaStream_t stream = nullptr;
+  cudaEvent_t start = nullptr;
+  cudaEvent_t stop = nullptr;
+  const size_t recvCapacity = collective == cocclProfileCollective::AllGather
+      ? sampleSizes.back() * (size_t)comm->nRanks : sampleSizes.back();
+  const cocclAutotuneConfig& config = cocclGetConfig().autotune;
+  std::vector<cocclAutotuneProfilePoint> points;
+
+  CUDACHECKGOTO(cudaSetDevice(comm->cudaDev), ret, fail);
+  CUDACHECKGOTO(cudaMalloc(&sendBuffer, sampleSizes.back()), ret, fail);
+  CUDACHECKGOTO(cudaMalloc(&recvBuffer, recvCapacity), ret, fail);
+  CUDACHECKGOTO(cudaMemset(sendBuffer, 0x3f, sampleSizes.back()), ret, fail);
+  CUDACHECKGOTO(
+      cudaStreamCreateWithFlags(&stream, cudaStreamNonBlocking), ret, fail);
+  CUDACHECKGOTO(cudaEventCreate(&start), ret, fail);
+  CUDACHECKGOTO(cudaEventCreate(&stop), ret, fail);
+
+  for (size_t bytes : sampleSizes) {
+    for (int i = 0; i < config.warmup; ++i) {
+      NCCLCHECKGOTO(
+          enqueueCollective(
+              comm, collective, sendBuffer, recvBuffer, bytes, stream),
+          ret, fail);
+    }
+    CUDACHECKGOTO(cudaStreamSynchronize(stream), ret, fail);
+
+    std::vector<double> times;
+    for (int i = 0; i < config.iterations; ++i) {
+      CUDACHECKGOTO(cudaEventRecord(start, stream), ret, fail);
+      NCCLCHECKGOTO(
+          enqueueCollective(
+              comm, collective, sendBuffer, recvBuffer, bytes, stream),
+          ret, fail);
+      CUDACHECKGOTO(cudaEventRecord(stop, stream), ret, fail);
+      CUDACHECKGOTO(cudaEventSynchronize(stop), ret, fail);
+      float elapsedMs = 0.0f;
+      CUDACHECKGOTO(
+          cudaEventElapsedTime(&elapsedMs, start, stop), ret, fail);
+      times.push_back((double)elapsedMs * 1000.0);
+    }
+
+    cocclProfileObservation local = {};
+    local.active = 1;
+    local.timeUs = median(std::move(times));
+    local.valid = local.timeUs > 0.0 ? 1u : 0u;
+    cocclProfileObservation aggregate = {};
+    NCCLCHECKGOTO(
+        aggregateObservation(comm, local, &aggregate), ret, fail);
+    if (aggregate.valid) {
+      points.push_back({(double)bytes, aggregate.timeUs});
+    }
+  }
+  *model = cocclAutotuneFitLinearModel(points);
+
+exit:
+  if (stop != nullptr) (void)cudaEventDestroy(stop);
+  if (start != nullptr) (void)cudaEventDestroy(start);
+  if (stream != nullptr) (void)cudaStreamDestroy(stream);
+  if (recvBuffer != nullptr) (void)cudaFree(recvBuffer);
+  if (sendBuffer != nullptr) (void)cudaFree(sendBuffer);
+  return ret;
+fail:
+  goto exit;
+}
+
 bool runCompressorIteration(
     ncclComm_t comm, void* compressor, void* rawBuffer,
     void* compressedBuffer, size_t bytes, size_t compressedCapacity,
+    ncclDataType_t datatype,
     cudaStream_t stream, cocclCompressorFrameMetadata* frameMetadata,
     size_t* compressedBytes) {
-  const size_t elements = bytes / sizeof(float);
+  const size_t elements = bytes / ncclTypeSize(datatype);
   const cocclCompressorView input = {
-      rawBuffer, bytes, bytes, elements, 1, ncclFloat32, nullptr, 0};
+      rawBuffer, bytes, bytes, elements, 1, datatype, nullptr, 0};
   cocclCompressorView compressed = {
       compressedBuffer, compressedCapacity, 0, 0, 1, ncclInt8,
       frameMetadata, frameMetadata == nullptr ? 0 : bytes};
@@ -334,35 +487,61 @@ bool runCompressorIteration(
       compressed.elements, compressed.chunks, compressed.datatype,
       compressed.frameMetadata, compressed.frameStrideBytes};
   cocclCompressorView decompressed = {
-      rawBuffer, bytes, 0, elements, 1, ncclFloat32, nullptr, 0};
+      rawBuffer, bytes, 0, elements, 1, datatype, nullptr, 0};
   return ncclDecompress(
              compressor, compressedInput, &decompressed, stream) ==
       ncclSuccess;
 }
 
+bool runDrcIteration(
+    void* compressor, const cocclCompressorView& input, void* outputBuffer,
+    size_t outputCapacity, size_t reduceChunks,
+    ncclDataType_t originalDatatype, size_t originalElements,
+    cudaStream_t stream) {
+  cocclCompressorView output = {
+      outputBuffer, outputCapacity, 0, 0, input.chunks / reduceChunks,
+      ncclInt8, nullptr, 0};
+  return cocclExecuteCompressor(
+             compressor, compressor,
+             cocclCompressorOperationDecompressReduceCompress,
+             input, &output, -1, reduceChunks, originalDatatype,
+             originalElements, stream) == ncclSuccess;
+}
+
 ncclResult_t profileCompressor(
     ncclComm_t comm, void* compressor,
-    const std::vector<size_t>& sampleSizes, cocclCodecModel* model) {
+    const std::vector<size_t>& sampleSizes, ncclDataType_t datatype,
+    cocclCodecModel* model) {
   ncclResult_t ret = ncclSuccess;
   void* rawBuffer = nullptr;
   void* compressedBuffer = nullptr;
+  void* drcBuffer = nullptr;
   cocclCompressorFrameMetadata* deviceFrameMetadata = nullptr;
   cocclCompressorFrameMetadata* hostFrameMetadata = nullptr;
   cudaStream_t stream = nullptr;
   cudaEvent_t start = nullptr;
   cudaEvent_t stop = nullptr;
   std::vector<cocclAutotuneProfilePoint> points;
+  std::vector<cocclAutotuneProfilePoint> drcPoints;
   std::vector<double> ratios;
   bool framed = false;
   const cocclAutotuneConfig& config = cocclGetConfig().autotune;
 
   framed = cocclCompressorSupports(
       compressor, cocclCompressorCapabilityFramed);
+  const bool fusedDrc = !framed && cocclCompressorSupports(
+      compressor, cocclCompressorCapabilityDecompressReduceCompress);
 
   CUDACHECKGOTO(cudaSetDevice(comm->cudaDev), ret, fail);
   CUDACHECKGOTO(cudaMalloc(&rawBuffer, sampleSizes.back()), ret, fail);
   CUDACHECKGOTO(
       cudaMalloc(&compressedBuffer, sampleSizes.back()), ret, fail);
+  if (fusedDrc) {
+    CUDACHECKGOTO(
+        cudaMalloc(&drcBuffer,
+                   sampleSizes.back() / (size_t)comm->nRanks),
+        ret, fail);
+  }
   if (framed) {
     CUDACHECKGOTO(
         cudaMalloc(&deviceFrameMetadata,
@@ -388,7 +567,7 @@ ncclResult_t profileCompressor(
       valid = cudaMemsetAsync(rawBuffer, 0x3f, bytes, stream) == cudaSuccess &&
           runCompressorIteration(
               comm, compressor, rawBuffer, compressedBuffer, bytes,
-              sampleSizes.back(), stream, deviceFrameMetadata,
+              sampleSizes.back(), datatype, stream, deviceFrameMetadata,
               &compressedBytes);
     }
     if (valid) valid = cudaStreamSynchronize(stream) == cudaSuccess;
@@ -399,7 +578,7 @@ ncclResult_t profileCompressor(
           cudaEventRecord(start, stream) == cudaSuccess &&
           runCompressorIteration(
               comm, compressor, rawBuffer, compressedBuffer, bytes,
-              sampleSizes.back(), stream, deviceFrameMetadata,
+              sampleSizes.back(), datatype, stream, deviceFrameMetadata,
               &compressedBytes) &&
           cudaEventRecord(stop, stream) == cudaSuccess &&
           cudaEventSynchronize(stop) == cudaSuccess;
@@ -435,9 +614,68 @@ ncclResult_t profileCompressor(
       points.push_back({(double)bytes, aggregate.timeUs});
       ratios.push_back(aggregate.compressionRatio);
     }
+
+    if (fusedDrc) {
+      cocclProfileObservation drcLocal = {};
+      drcLocal.active = 1;
+      const size_t elements = bytes / (size_t)ncclTypeSize(datatype);
+      const size_t outputElements = elements / (size_t)comm->nRanks;
+      const size_t outputCapacity = bytes / (size_t)comm->nRanks;
+      const cocclCompressorView input = {
+          rawBuffer, bytes, bytes, elements, (size_t)comm->nRanks,
+          datatype, nullptr, 0};
+      cocclCompressorView compressed = {
+          compressedBuffer, bytes, 0, 0, (size_t)comm->nRanks,
+          ncclInt8, nullptr, 0};
+      bool drcValid = elements % (size_t)comm->nRanks == 0 &&
+          cudaMemsetAsync(rawBuffer, 0x3f, bytes, stream) == cudaSuccess &&
+          ncclCompress(
+              compressor, input, &compressed, comm->rank, stream) ==
+              ncclSuccess &&
+          compressed.datatype != COCCL_COMPRESSOR_RAW_PASSTHROUGH &&
+          cudaStreamSynchronize(stream) == cudaSuccess;
+      const cocclCompressorView compressedInput = {
+          compressed.data, compressed.bytes, compressed.bytes,
+          compressed.elements, compressed.chunks, compressed.datatype,
+          nullptr, 0};
+      for (int i = 0; i < config.warmup && drcValid; ++i) {
+        drcValid = runDrcIteration(
+            compressor, compressedInput, drcBuffer, outputCapacity,
+            (size_t)comm->nRanks, datatype, outputElements, stream);
+      }
+      if (drcValid) {
+        drcValid = cudaStreamSynchronize(stream) == cudaSuccess;
+      }
+
+      std::vector<double> drcTimes;
+      for (int i = 0; i < config.iterations && drcValid; ++i) {
+        drcValid = cudaEventRecord(start, stream) == cudaSuccess &&
+            runDrcIteration(
+                compressor, compressedInput, drcBuffer, outputCapacity,
+                (size_t)comm->nRanks, datatype, outputElements, stream) &&
+            cudaEventRecord(stop, stream) == cudaSuccess &&
+            cudaEventSynchronize(stop) == cudaSuccess;
+        if (!drcValid) break;
+        float elapsedMs = 0.0f;
+        drcValid =
+            cudaEventElapsedTime(&elapsedMs, start, stop) == cudaSuccess;
+        if (drcValid) drcTimes.push_back((double)elapsedMs * 1000.0);
+      }
+      if (drcValid && !drcTimes.empty()) {
+        drcLocal.timeUs = median(std::move(drcTimes));
+        drcLocal.valid = 1;
+      }
+      cocclProfileObservation drcAggregate = {};
+      NCCLCHECKGOTO(
+          aggregateObservation(comm, drcLocal, &drcAggregate), ret, fail);
+      if (drcAggregate.valid) {
+        drcPoints.push_back({(double)bytes, drcAggregate.timeUs});
+      }
+    }
   }
 
   model->time = cocclAutotuneFitLinearModel(points);
+  model->drcTime = cocclAutotuneFitLinearModel(drcPoints);
   model->compressionRatio = median(std::move(ratios));
   model->valid = model->time.valid && model->compressionRatio > 0.0 &&
                  std::isfinite(model->compressionRatio);
@@ -448,6 +686,7 @@ exit:
   if (stream != nullptr) (void)cudaStreamDestroy(stream);
   if (hostFrameMetadata != nullptr) (void)cudaFreeHost(hostFrameMetadata);
   if (deviceFrameMetadata != nullptr) (void)cudaFree(deviceFrameMetadata);
+  if (drcBuffer != nullptr) (void)cudaFree(drcBuffer);
   if (compressedBuffer != nullptr) (void)cudaFree(compressedBuffer);
   if (rawBuffer != nullptr) (void)cudaFree(rawBuffer);
   return ret;
@@ -497,7 +736,30 @@ void publishP2pModel(bool interNode, const cocclLinearModel& model, int rank) {
   }
 }
 
+void publishCollectiveModel(cocclProfileCollective collective,
+                            const cocclLinearModel& model, int rank) {
+  const char* name = collective == cocclProfileCollective::AllGather
+      ? "AllGather" : "AllToAll";
+  if (!model.valid) {
+    if (rank == 0) WARN("COCCL failed to fit %s profile", name);
+    return;
+  }
+  pthread_mutex_lock(&cocclAutotuneLock);
+  if (collective == cocclProfileCollective::AllGather) {
+    cocclPerformanceModel.allGather = model;
+  } else {
+    cocclPerformanceModel.allToAll = model;
+  }
+  pthread_mutex_unlock(&cocclAutotuneLock);
+  if (rank == 0) {
+    INFO(COCCL_TUNING,
+         "COCCL profile %s: time_us=%g+%g*bytes",
+         name, model.alphaUs, model.betaUsPerByte);
+  }
+}
+
 void publishCompressorModel(const cocclProfiledCompressor& profiled,
+                            ncclDataType_t datatype,
                             const cocclCodecModel& model, int rank) {
   const cocclCompressorPlugin* compressor =
       cocclCompressorDescriptor(profiled.compressor);
@@ -509,39 +771,44 @@ void publishCompressorModel(const cocclProfiledCompressor& profiled,
     return;
   }
   pthread_mutex_lock(&cocclAutotuneLock);
-  cocclPerformanceModel.compressorModels[profiled.compressor] = model;
+  cocclPerformanceModel.compressorModels[profiled.compressor][datatype] =
+      model;
   pthread_mutex_unlock(&cocclAutotuneLock);
   if (rank == 0) {
     INFO(COCCL_TUNING,
-         "COCCL compressor %s policy=%s-%s model: time_us=%g+%g*bytes ratio=%g",
+         "COCCL compressor %s policy=%s-%s datatype=%d model: time_us=%g+%g*bytes ratio=%g",
          compressorName(compressor), operationName(profiled.policy.operation),
-         scopeName(profiled.policy.scope), model.time.alphaUs,
+         scopeName(profiled.policy.scope), (int)datatype, model.time.alphaUs,
          model.time.betaUsPerByte, model.compressionRatio);
   }
 }
 
-void copyCompressorModelLocked(void* compressor, cocclCodecModel* model) {
+void copyCompressorModelLocked(void* compressor, ncclDataType_t datatype,
+                               cocclCodecModel* model) {
   *model = {};
   const auto found = cocclPerformanceModel.compressorModels.find(compressor);
-  if (found != cocclPerformanceModel.compressorModels.end()) {
-    *model = found->second;
-  }
+  if (found == cocclPerformanceModel.compressorModels.end()) return;
+  const auto typed = found->second.find(datatype);
+  if (typed != found->second.end()) *model = typed->second;
 }
 
 }  // namespace
 
 cocclSelectionPerformanceModel cocclAutotuneSnapshotPerformanceModel(
     void* defaultCompressor, void* intraCompressor, void* interCompressor,
+    ncclDataType_t datatype,
     cocclCodecModel* defaultModel, cocclCodecModel* intraModel,
     cocclCodecModel* interModel) {
   pthread_mutex_lock(&cocclAutotuneLock);
   const cocclSelectionPerformanceModel snapshot = {
       cocclPerformanceModel.intraP2p,
       cocclPerformanceModel.interP2p,
+      cocclPerformanceModel.allGather,
+      cocclPerformanceModel.allToAll,
   };
-  copyCompressorModelLocked(defaultCompressor, defaultModel);
-  copyCompressorModelLocked(intraCompressor, intraModel);
-  copyCompressorModelLocked(interCompressor, interModel);
+  copyCompressorModelLocked(defaultCompressor, datatype, defaultModel);
+  copyCompressorModelLocked(intraCompressor, datatype, intraModel);
+  copyCompressorModelLocked(interCompressor, datatype, interModel);
   pthread_mutex_unlock(&cocclAutotuneLock);
   return snapshot;
 }
@@ -604,14 +871,38 @@ ncclResult_t cocclAutotuneEnsureGlobalModels(ncclComm_t measurementComm) {
     }
   }
   if ((needs & cocclProfileNeedCompressors) != 0) {
-    for (const cocclProfiledCompressor& compressor :
-         snapshotEnabledCompressors()) {
-      cocclCodecModel model;
-      const ncclResult_t result = profileCompressor(
-          measurementComm, compressor.compressor, sampleSizes, &model);
-      if (result == ncclSuccess) {
-        publishCompressorModel(compressor, model, measurementComm->rank);
+    for (ncclDataType_t datatype : {ncclFloat32, ncclBfloat16}) {
+      for (const cocclProfiledCompressor& compressor :
+           snapshotEnabledCompressors()) {
+        cocclCodecModel model;
+        const ncclResult_t result = profileCompressor(
+            measurementComm, compressor.compressor, sampleSizes, datatype,
+            &model);
+        if (result == ncclSuccess) {
+          publishCompressorModel(
+              compressor, datatype, model, measurementComm->rank);
+        }
       }
+    }
+  }
+  if ((needs & cocclProfileNeedFlatCollectives) != 0) {
+    std::vector<size_t> collectiveSampleSizes;
+    NCCLCHECK(buildCollectiveSampleSizes(
+        measurementComm, sampleSizes, &collectiveSampleSizes));
+    if (collectiveSampleSizes.size() >= 2) {
+      for (cocclProfileCollective collective : {
+               cocclProfileCollective::AllGather,
+               cocclProfileCollective::AllToAll}) {
+        cocclLinearModel model;
+        const ncclResult_t result = profileCollective(
+            measurementComm, collective, collectiveSampleSizes, &model);
+        if (result == ncclSuccess) {
+          publishCollectiveModel(
+              collective, model, measurementComm->rank);
+        }
+      }
+    } else if (measurementComm->rank == 0) {
+      WARN("COCCL autotune has fewer than two collective profile sizes; using P2P model");
     }
   }
   return ncclSuccess;

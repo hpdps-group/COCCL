@@ -20,6 +20,18 @@ double compressionRatio(const cocclAutotunePhaseCodec& codec) {
   return codec.compressed ? codec.model->compressionRatio : 1.0;
 }
 
+double drcTime(const cocclAutotunePhaseCodec& codec,
+               double messageBytes) {
+  if (!codec.compressed) return 0.0;
+  if (codec.model == nullptr || !codec.model->valid) {
+    return std::numeric_limits<double>::infinity();
+  }
+  if (codec.model->drcTime.valid) {
+    return cocclAutotunePredict(codec.model->drcTime, messageBytes);
+  }
+  return codecTime(codec, messageBytes);
+}
+
 double pccaCost(const cocclLinearModel& p2p,
                 const cocclAutotunePhaseCodec& codec,
                 double messageBytes, int ranks,
@@ -101,6 +113,129 @@ double allReduceOneShotCost(const cocclSelectionPerformanceModel& model,
   return hasBranch ? cost : 0.0;
 }
 
+double flatAllReduceOneShotCost(
+    const cocclSelectionPerformanceModel& model,
+    const cocclAutotunePhaseCodec& codec, double messageBytes) {
+  const double codecUs = codecTime(codec, messageBytes);
+  if (!std::isfinite(codecUs)) {
+    return std::numeric_limits<double>::infinity();
+  }
+  const double encodedBytes = messageBytes / compressionRatio(codec);
+  return codecUs + cocclAutotunePredict(model.allGather, encodedBytes);
+}
+
+double flatAllReduceTwoShotCost(
+    const cocclSelectionPerformanceModel& model,
+    const cocclAutotunePhaseCodec& codec, double messageBytes,
+    int ranks) {
+  const double codecUs = codecTime(codec, messageBytes);
+  const double drcUs = drcTime(codec, messageBytes);
+  if (!std::isfinite(codecUs) || !std::isfinite(drcUs)) {
+    return std::numeric_limits<double>::infinity();
+  }
+  const double encodedBytes = messageBytes / compressionRatio(codec);
+  const double allToAllUs =
+      cocclAutotunePredict(model.allToAll, encodedBytes);
+  const double allGatherUs = cocclAutotunePredict(
+      model.allGather, encodedBytes / (double)ranks);
+  if (!std::isfinite(allToAllUs) || !std::isfinite(allGatherUs)) {
+    return std::numeric_limits<double>::infinity();
+  }
+  return codecUs + drcUs + allToAllUs + allGatherUs;
+}
+
+double communicationKnee(const cocclLinearModel& model) {
+  if (model.sampleCount < 2) {
+    return model.betaUsPerByte > 0.0
+        ? model.alphaUs / model.betaUsPerByte
+        : std::numeric_limits<double>::infinity();
+  }
+  const double deltaBytes = model.sampleBytes[1] - model.sampleBytes[0];
+  const double slope =
+      (model.sampleTimeUs[1] - model.sampleTimeUs[0]) / deltaBytes;
+  const double startupUs = model.sampleTimeUs[0] -
+      slope * model.sampleBytes[0];
+  return slope > 0.0 && startupUs > 0.0
+      ? startupUs / slope
+      : std::numeric_limits<double>::infinity();
+}
+
+bool uniformCodecRatio(const cocclAutotuneCodecSet& codecs, int nodes,
+                       double* ratio) {
+  const cocclAutotunePhaseCodec* phases[] = {
+      nodes == 1 ? &codecs.intra : &codecs.defaultScope,
+      &codecs.intra,
+      &codecs.inter,
+  };
+  const int count = nodes == 1 ? 1 : 3;
+  if (!phases[0]->compressed || phases[0]->model == nullptr ||
+      !phases[0]->model->valid) {
+    return false;
+  }
+  *ratio = phases[0]->model->compressionRatio;
+  for (int i = 1; i < count; ++i) {
+    if (!phases[i]->compressed || phases[i]->model == nullptr ||
+        !phases[i]->model->valid ||
+        std::abs(phases[i]->model->compressionRatio - *ratio) >
+            1e-6 * *ratio) {
+      return false;
+    }
+  }
+  return true;
+}
+
+double crossoverCost(cocclAutotuneCostKind costKind,
+                     const cocclSelectionPerformanceModel& model,
+                     const cocclAutotuneCodecSet& codecs,
+                     double messageBytes, int localRanks, int nodes) {
+  if (nodes <= 1) {
+    if (costKind == cocclAutotuneCostKind::AllReduceOneShot) {
+      return flatAllReduceOneShotCost(
+          model, codecs.intra, messageBytes);
+    }
+    if (costKind == cocclAutotuneCostKind::AllReduceTwoShot) {
+      return flatAllReduceTwoShotCost(
+          model, codecs.intra, messageBytes, localRanks);
+    }
+    return std::numeric_limits<double>::infinity();
+  }
+
+  double ratio = 0.0;
+  if (!uniformCodecRatio(codecs, nodes, &ratio)) {
+    return std::numeric_limits<double>::infinity();
+  }
+  const cocclLinearModel& p2p =
+      nodes == 1 ? model.intraP2p : model.interP2p;
+  if (p2p.sampleCount < 2) {
+    return std::numeric_limits<double>::infinity();
+  }
+
+  if (costKind == cocclAutotuneCostKind::ReduceScatterOneShot ||
+      costKind == cocclAutotuneCostKind::ReduceScatterTwoShot) {
+    const double divisor = costKind ==
+            cocclAutotuneCostKind::ReduceScatterOneShot
+        ? (double)nodes / (double)(nodes - 1)
+        : (double)localRanks * (double)nodes;
+    return cocclAutotunePredict(
+        model.interP2p, messageBytes / (ratio * divisor));
+  }
+
+  const double knee = communicationKnee(p2p);
+  if (!std::isfinite(knee)) {
+    return std::numeric_limits<double>::infinity();
+  }
+  const double wireBytes = messageBytes / ratio;
+  if (costKind == cocclAutotuneCostKind::AllReduceOneShot) {
+    return cocclAutotunePredict(p2p, wireBytes);
+  }
+
+  double threshold = knee * 0.5;
+  if (costKind == cocclAutotuneCostKind::AllReduceTwoShot) {
+    threshold *= 2.0;
+  }
+  return cocclAutotunePredict(p2p, threshold);
+}
+
 }  // namespace
 
 cocclLinearModel cocclAutotuneFitLinearModel(
@@ -108,22 +243,29 @@ cocclLinearModel cocclAutotuneFitLinearModel(
   cocclLinearModel model;
   if (points.size() < 2) return model;
 
+  model.sampleCount = std::min(
+      points.size(), (size_t)kCocclAutotuneMaxProfilePoints);
+
   double meanX = 0.0;
   double meanY = 0.0;
-  for (const cocclAutotuneProfilePoint& point : points) {
+  for (size_t i = 0; i < model.sampleCount; ++i) {
+    const cocclAutotuneProfilePoint& point = points[i];
     if (!std::isfinite(point.bytes) || !std::isfinite(point.timeUs) ||
         point.bytes <= 0.0 || point.timeUs <= 0.0) {
       return model;
     }
+    model.sampleBytes[i] = point.bytes;
+    model.sampleTimeUs[i] = point.timeUs;
     meanX += point.bytes;
     meanY += point.timeUs;
   }
-  meanX /= (double)points.size();
-  meanY /= (double)points.size();
+  meanX /= (double)model.sampleCount;
+  meanY /= (double)model.sampleCount;
 
   double covariance = 0.0;
   double variance = 0.0;
-  for (const cocclAutotuneProfilePoint& point : points) {
+  for (size_t i = 0; i < model.sampleCount; ++i) {
+    const cocclAutotuneProfilePoint& point = points[i];
     const double deltaX = point.bytes - meanX;
     covariance += deltaX * (point.timeUs - meanY);
     variance += deltaX * deltaX;
@@ -141,6 +283,21 @@ double cocclAutotunePredict(const cocclLinearModel& model, double bytes) {
   if (!model.valid || !std::isfinite(bytes) || bytes < 0.0) {
     return std::numeric_limits<double>::infinity();
   }
+  if (model.sampleCount >= 2) {
+    size_t upper = 1;
+    while (upper + 1 < model.sampleCount &&
+           bytes > model.sampleBytes[upper]) {
+      ++upper;
+    }
+    const size_t lower = upper - 1;
+    const double span =
+        model.sampleBytes[upper] - model.sampleBytes[lower];
+    const double slope =
+        (model.sampleTimeUs[upper] - model.sampleTimeUs[lower]) / span;
+    return std::max(
+        0.0, model.sampleTimeUs[lower] +
+                 slope * (bytes - model.sampleBytes[lower]));
+  }
   return std::max(0.0, model.alphaUs + model.betaUsPerByte * bytes);
 }
 
@@ -149,6 +306,10 @@ double cocclAutotuneEvaluateCost(
     const cocclSelectionPerformanceModel& model,
     const cocclAutotuneCodecSet& codecs, double messageBytes, int localRanks,
     int nodes) {
+  const double calibrated = crossoverCost(
+      costKind, model, codecs, messageBytes, localRanks, nodes);
+  if (std::isfinite(calibrated)) return calibrated;
+
   const cocclAutotunePhaseCodec& flat =
       nodes == 1 ? codecs.intra : codecs.defaultScope;
   switch (costKind) {
