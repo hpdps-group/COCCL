@@ -84,6 +84,11 @@ bool hasFusedDrc(void* decoder, void* encoder) {
           encoder, cocclCompressorCapabilityDecompressReduceCompress);
 }
 
+bool hasFusedDr(void* compressor) {
+  return compressor != nullptr && cocclCompressorSupports(
+      compressor, cocclCompressorCapabilityDecompressReduce);
+}
+
 ncclResult_t selectCandidate(cocclPreparedCall* prepared) {
   const cocclInfo& info = prepared->info;
   ncclComm_t comm = info.comm;
@@ -133,6 +138,8 @@ ncclResult_t selectCandidate(cocclPreparedCall* prepared) {
         hasFusedDrc(
             prepared->compressors.get(cocclCompressionScope::Inter),
             prepared->compressors.get(cocclCompressionScope::Default)),
+        hasFusedDr(
+            prepared->compressors.get(cocclCompressionScope::Intra)),
     };
     const double bytes = messageBytes(*prepared);
     for (size_t i = 0; i < candidates.count; ++i) {

@@ -173,6 +173,16 @@ void testCostModel() {
     fail("allreduce oneshot must include intra-node and inter-node phases");
   }
 
+  const double flatOneRank = cocclAutotuneEvaluateCost(
+      cocclAutotuneCostKind::AllReduceOneShot, performance,
+      codecs, 1024.0, 1, 1);
+  const double flatFourRanks = cocclAutotuneEvaluateCost(
+      cocclAutotuneCostKind::AllReduceOneShot, performance,
+      codecs, 1024.0, 4, 1);
+  if (std::abs((flatFourRanks - flatOneRank) - 4.608) > 1e-9) {
+    fail("flat allreduce oneshot must decode one message per rank");
+  }
+
   const cocclAutotuneCodecSet fusedCodecs = {
       {true, &codec}, {true, &codec}, {true, &codec}, true, true};
   const double regularTwoShot = cocclAutotuneEvaluateCost(

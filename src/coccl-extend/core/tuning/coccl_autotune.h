@@ -29,6 +29,8 @@ struct cocclCodecModel {
   double compressionRatio = 1.0;
   bool valid = false;
   cocclLinearModel drcTime;
+  cocclLinearModel encodeTime;
+  cocclLinearModel decodeTime;
 };
 
 // Profiling is process-wide and lazy. Disabled autotune returns immediately.

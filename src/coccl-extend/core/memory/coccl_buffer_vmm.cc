@@ -111,24 +111,28 @@ ncclResult_t createPhysicalHandle(
 }
 
 ncclResult_t deregisterAll(VmmBlock* block) {
-  for (VmmRegistration& registration : block->registrations) {
-    NCCLCHECK(ncclCommDeregister(registration.comm, registration.handle));
+  for (BufferRegistration& registration : block->registrations) {
+    NCCLCHECK(deregisterBuffer(&registration));
     block->pool->registeredBytes -= registration.bytes;
   }
   block->registrations.clear();
   return ncclSuccess;
 }
 
-ncclResult_t ensureRegistration(VmmBlock* block, ncclComm_t comm) {
+ncclResult_t ensureRegistration(
+    VmmBlock* block, ncclComm_t comm,
+    cocclBufferRegistrationKind requested) {
   if (comm == nullptr) return ncclSuccess;
-  for (const VmmRegistration& registration : block->registrations) {
-    if (registration.comm == comm) return ncclSuccess;
+  for (BufferRegistration& registration : block->registrations) {
+    if (registration.comm == comm) {
+      return upgradeRegistration(&registration, requested);
+    }
   }
 
-  void* handle = nullptr;
-  NCCLCHECK(ncclCommRegister(comm, block->ptr, block->capacity, &handle));
-  block->registrations.push_back(
-      VmmRegistration{comm, block->ptr, block->capacity, handle});
+  BufferRegistration registration;
+  NCCLCHECK(registerBuffer(comm, block->ptr, block->capacity, requested,
+                           &registration));
+  block->registrations.push_back(registration);
   block->pool->registeredBytes += block->capacity;
   INFO(COCCL_MEMORY,
        "COCCL VMM registration comm %p bytes %zu total %zu", comm,
@@ -245,14 +249,17 @@ fail:
 
 ncclResult_t acquireFromBlock(VmmBlock* block, size_t bytes,
                               ncclComm_t registeredComm,
+                              cocclBufferRegistrationKind requested,
                               cudaStream_t stream,
                               cocclBufferHandle* buffer) {
   mergeFreeSlices(block);
+  auto existing = std::find_if(
+      block->registrations.begin(), block->registrations.end(),
+      [registeredComm](const BufferRegistration& registration) {
+        return registration.comm == registeredComm;
+      });
   const bool registered = registeredComm == nullptr ||
-      std::any_of(block->registrations.begin(), block->registrations.end(),
-                  [registeredComm](const VmmRegistration& registration) {
-                    return registration.comm == registeredComm;
-                  });
+      existing != block->registrations.end();
   for (auto slice = block->slices.begin(); slice != block->slices.end();
        ++slice) {
     if (!reusableOnStream(&*slice, stream, registered) ||
@@ -277,7 +284,7 @@ ncclResult_t acquireFromBlock(VmmBlock* block, size_t bytes,
     buffer->ownerComm = block->pool->ownerComm;
     buffer->block = block;
     buffer->slice = &*slice;
-    ncclResult_t ret = ensureRegistration(block, registeredComm);
+    ncclResult_t ret = ensureRegistration(block, registeredComm, requested);
     if (ret == ncclSuccess) return ncclSuccess;
     slice->state = SliceState::Free;
     *buffer = {};
@@ -366,11 +373,12 @@ unavailable:
 }
 
 ncclResult_t vmmAcquire(VmmPool* pool, ncclComm_t registeredComm,
+                        cocclBufferRegistrationKind registration,
                         size_t bytes, cudaStream_t stream,
                         cocclBufferHandle* buffer) {
   for (auto& block : pool->blocks) {
-    ncclResult_t ret = acquireFromBlock(block.get(), bytes, registeredComm,
-                                        stream, buffer);
+    ncclResult_t ret = acquireFromBlock(
+        block.get(), bytes, registeredComm, registration, stream, buffer);
     if (ret == ncclSuccess) return ncclSuccess;
     if (ret != ncclInProgress) return ret;
   }
@@ -384,18 +392,21 @@ ncclResult_t vmmAcquire(VmmPool* pool, ncclComm_t registeredComm,
   }
   if (grow != nullptr) {
     NCCLCHECK(growBlock(grow, bytes));
-    return acquireFromBlock(grow, bytes, registeredComm, stream, buffer);
+    return acquireFromBlock(
+        grow, bytes, registeredComm, registration, stream, buffer);
   }
 
   VmmBlock* block = nullptr;
   NCCLCHECK(createBlock(pool, bytes, &block));
-  return acquireFromBlock(block, bytes, registeredComm, stream, buffer);
+  return acquireFromBlock(
+      block, bytes, registeredComm, registration, stream, buffer);
 }
 
 ncclResult_t vmmRegister(cocclBufferHandle* buffer,
-                         ncclComm_t registeredComm) {
+                         ncclComm_t registeredComm,
+                         cocclBufferRegistrationKind registration) {
   return ensureRegistration(static_cast<VmmBlock*>(buffer->block),
-                            registeredComm);
+                            registeredComm, registration);
 }
 
 ncclResult_t vmmRelease(cocclBufferHandle* buffer, cudaStream_t stream) {
@@ -420,7 +431,7 @@ ncclResult_t vmmDeregisterComm(VmmPool* pool, ncclComm_t comm) {
         ++registration;
         continue;
       }
-      NCCLCHECK(ncclCommDeregister(comm, registration->handle));
+      NCCLCHECK(deregisterBuffer(&*registration));
       pool->registeredBytes -= registration->bytes;
       registration = block->registrations.erase(registration);
     }

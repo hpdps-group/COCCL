@@ -20,6 +20,30 @@ double compressionRatio(const cocclAutotunePhaseCodec& codec) {
   return codec.compressed ? codec.model->compressionRatio : 1.0;
 }
 
+double encodeTime(const cocclAutotunePhaseCodec& codec,
+                  double messageBytes) {
+  if (!codec.compressed) return 0.0;
+  if (codec.model == nullptr || !codec.model->valid) {
+    return std::numeric_limits<double>::infinity();
+  }
+  if (codec.model->encodeTime.valid) {
+    return cocclAutotunePredict(codec.model->encodeTime, messageBytes);
+  }
+  return codecTime(codec, messageBytes) * 0.5;
+}
+
+double decodeTime(const cocclAutotunePhaseCodec& codec,
+                  double messageBytes) {
+  if (!codec.compressed) return 0.0;
+  if (codec.model == nullptr || !codec.model->valid) {
+    return std::numeric_limits<double>::infinity();
+  }
+  if (codec.model->decodeTime.valid) {
+    return cocclAutotunePredict(codec.model->decodeTime, messageBytes);
+  }
+  return codecTime(codec, messageBytes) * 0.5;
+}
+
 double drcTime(const cocclAutotunePhaseCodec& codec,
                double messageBytes) {
   if (!codec.compressed) return 0.0;
@@ -115,8 +139,14 @@ double allReduceOneShotCost(const cocclSelectionPerformanceModel& model,
 
 double flatAllReduceOneShotCost(
     const cocclSelectionPerformanceModel& model,
-    const cocclAutotunePhaseCodec& codec, double messageBytes) {
-  const double codecUs = codecTime(codec, messageBytes);
+    const cocclAutotunePhaseCodec& codec, double messageBytes, int ranks,
+    bool fusedDecompressReduce) {
+  // Every rank contributes one complete encoded message. DecompressReduce
+  // therefore decodes ranks copies even though AllGather sends one per rank.
+  const double codecUs = fusedDecompressReduce
+      ? codecTime(codec, messageBytes)
+      : encodeTime(codec, messageBytes) +
+            decodeTime(codec, messageBytes * (double)ranks);
   if (!std::isfinite(codecUs)) {
     return std::numeric_limits<double>::infinity();
   }
@@ -191,7 +221,8 @@ double crossoverCost(cocclAutotuneCostKind costKind,
   if (nodes <= 1) {
     if (costKind == cocclAutotuneCostKind::AllReduceOneShot) {
       return flatAllReduceOneShotCost(
-          model, codecs.intra, messageBytes);
+          model, codecs.intra, messageBytes, localRanks,
+          codecs.fusedFlatDecompressReduce);
     }
     if (costKind == cocclAutotuneCostKind::AllReduceTwoShot) {
       return flatAllReduceTwoShotCost(

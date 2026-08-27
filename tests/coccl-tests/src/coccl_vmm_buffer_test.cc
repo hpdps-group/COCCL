@@ -24,11 +24,13 @@ cocclConfig config;
 bool vmmEnabled = true;
 bool completeRecordedEvents = true;
 bool failNextEventRecord = false;
+bool windowRegistrationEnabled = true;
 uint64_t nextPhysicalHandle = 1;
 std::map<void*, size_t> legacyAllocations;
 std::map<CUdeviceptr, size_t> reservations;
 std::map<CUmemGenericAllocationHandle, size_t> physicalHandles;
 std::set<void*> registrations;
+std::set<ncclWindow_t> windows;
 std::set<cudaEvent_t> events;
 std::vector<std::string> lifecycle;
 
@@ -205,6 +207,26 @@ extern "C" ncclResult_t ncclCommDeregister(ncclComm_t, void* handle) {
   return ncclSuccess;
 }
 
+extern "C" ncclResult_t ncclCommWindowRegister(
+    ncclComm_t, void*, size_t, ncclWindow_t* window, int) {
+  if (!windowRegistrationEnabled) {
+    *window = nullptr;
+    return ncclSuccess;
+  }
+  *window = reinterpret_cast<ncclWindow_t>(std::malloc(1));
+  windows.insert(*window);
+  lifecycle.emplace_back("window-register");
+  return ncclSuccess;
+}
+
+extern "C" ncclResult_t ncclCommWindowDeregister(
+    ncclComm_t, ncclWindow_t window) {
+  windows.erase(window);
+  std::free(window);
+  lifecycle.emplace_back("window-deregister");
+  return ncclSuccess;
+}
+
 extern "C" cudaError_t CUDARTAPI cudaSetDevice(int) {
   return cudaSuccess;
 }
@@ -289,12 +311,20 @@ int main() {
   EXPECT(registrationCalls[0].comm == &firstComm &&
          registrationCalls[0].ptr == firstAddress &&
          registrationCalls[0].bytes == 16 * kMiB);
-  EXPECT(cocclRegisterBufferForComm(&first, &secondComm) == ncclSuccess);
+  EXPECT(cocclRegisterBufferForComm(
+             &first, &secondComm,
+             cocclBufferRegistrationKind::Ordinary) == ncclSuccess);
   EXPECT(registrations.size() == 2 && registrationCalls.size() == 2);
+  EXPECT(cocclRegisterBufferForComm(
+             &first, &secondComm,
+             cocclBufferRegistrationKind::Symmetric) == ncclSuccess);
+  EXPECT(registrations.size() == 2 && windows.size() == 1);
   EXPECT(registrationCalls[1].comm == &secondComm &&
          registrationCalls[1].ptr == firstAddress &&
          registrationCalls[1].bytes == 16 * kMiB);
-  EXPECT(cocclRegisterBufferForComm(&first, &secondComm) == ncclSuccess);
+  EXPECT(cocclRegisterBufferForComm(
+             &first, &secondComm,
+             cocclBufferRegistrationKind::Ordinary) == ncclSuccess);
   EXPECT(registrations.size() == 2 && registrationCalls.size() == 2);
 
   completeRecordedEvents = false;
@@ -313,7 +343,9 @@ int main() {
   EXPECT(physicalHandles.size() == 1 &&
          physicalHandles.begin()->second == 24 * kMiB &&
          reservations.size() == 1);
-  EXPECT(cocclRegisterBufferForComm(&grown, &secondComm) == ncclSuccess);
+  EXPECT(cocclRegisterBufferForComm(
+             &grown, &secondComm,
+             cocclBufferRegistrationKind::Ordinary) == ncclSuccess);
   EXPECT(registrations.size() == 2);
   failNextEventRecord = true;
   EXPECT(cocclReleaseBuffer(&grown, firstStream) ==
@@ -349,6 +381,44 @@ int main() {
   EXPECT(cocclReleaseBuffer(&legacy, firstStream) == ncclSuccess);
   EXPECT(cocclBufferCommDestroy(&firstComm) == ncclSuccess);
   EXPECT(legacyAllocations.empty() && registrations.empty() && events.empty());
+
+  vmmEnabled = true;
+  firstComm.nNodes = 1;
+  EXPECT(cocclBufferCommInit(&firstComm) == ncclSuccess);
+  cocclBufferHandle symmetric;
+  EXPECT(cocclGetBufferForComm(
+             &firstComm, &firstComm, 8 * kMiB,
+             cocclBufferRegistrationKind::Symmetric, firstStream,
+             &symmetric) == ncclSuccess);
+  EXPECT(windows.size() == 1);
+  EXPECT(cocclReleaseBuffer(&symmetric, firstStream) == ncclSuccess);
+  lifecycle.clear();
+  EXPECT(cocclBufferCommDestroy(&firstComm) == ncclSuccess);
+  EXPECT(windows.empty());
+  EXPECT(operationIndex("window-deregister") < operationIndex("unmap"));
+
+  windowRegistrationEnabled = false;
+  EXPECT(cocclBufferCommInit(&firstComm) == ncclSuccess);
+  const size_t registrationCount = registrationCalls.size();
+  cocclBufferHandle fallback;
+  EXPECT(cocclGetBufferForComm(
+             &firstComm, &firstComm, 8 * kMiB,
+             cocclBufferRegistrationKind::Symmetric, firstStream,
+             &fallback) == ncclSuccess);
+  void* fallbackPtr = fallback.ptr;
+  EXPECT(windows.empty() &&
+         registrationCalls.size() == registrationCount + 1);
+  EXPECT(cocclReleaseBuffer(&fallback, firstStream) == ncclSuccess);
+  EXPECT(cocclGetBufferForComm(
+             &firstComm, &firstComm, 8 * kMiB,
+             cocclBufferRegistrationKind::Symmetric, firstStream,
+             &fallback) == ncclSuccess);
+  EXPECT(fallback.ptr == fallbackPtr &&
+         registrationCalls.size() == registrationCount + 1);
+  EXPECT(cocclReleaseBuffer(&fallback, firstStream) == ncclSuccess);
+  EXPECT(cocclBufferCommDestroy(&firstComm) == ncclSuccess);
+  EXPECT(physicalHandles.empty() && reservations.empty() &&
+         registrations.empty());
 
   std::puts("VMM buffer tests passed");
   return 0;

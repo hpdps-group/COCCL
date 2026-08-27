@@ -56,34 +56,28 @@ ncclResult_t destroyPool(CommBufferPool* pool) {
 }
 
 ncclResult_t acquire(ncclComm_t ownerComm, ncclComm_t registeredComm,
-                     size_t bytes, cudaStream_t stream,
+                     cocclBufferRegistrationKind registration, size_t bytes,
+                     cudaStream_t stream,
                      cocclBufferHandle* buffer) {
   if (ownerComm == nullptr || buffer == nullptr) return ncclInvalidArgument;
   *buffer = {};
 
-  ncclResult_t ret = ncclSuccess;
   pthread_mutex_lock(&bufferLock);
   CommBufferPool* pool = findPool(ownerComm);
-  if (pool == nullptr) {
-    ret = ncclInvalidUsage;
-    goto exit;
-  }
-  CUDACHECKGOTO(cudaSetDevice(pool->cudaDev), ret, exit);
+  pthread_mutex_unlock(&bufferLock);
+  if (pool == nullptr) return ncclInvalidUsage;
+  CUDACHECK(cudaSetDevice(pool->cudaDev));
   bytes = alignUp(bytes == 0 ? 1 : bytes);
 #if CUDART_VERSION >= 11030
   if (pool->backend == BufferBackend::Vmm) {
-    NCCLCHECKGOTO(vmmAcquire(&pool->vmm, registeredComm, bytes, stream,
-                             buffer), ret, exit);
+    return vmmAcquire(&pool->vmm, registeredComm, registration, bytes,
+                      stream, buffer);
   } else
 #endif
   {
-    NCCLCHECKGOTO(legacyAcquire(pool, registeredComm, bytes, stream, buffer),
-                  ret, exit);
+    return legacyAcquire(pool, registeredComm, registration, bytes, stream,
+                         buffer);
   }
-
-exit:
-  pthread_mutex_unlock(&bufferLock);
-  return ret;
 }
 
 }  // namespace
@@ -108,7 +102,6 @@ ncclResult_t cocclBufferCommDestroy(ncclComm_t comm) {
 
   ncclResult_t ret = ncclSuccess;
   pthread_mutex_lock(&bufferLock);
-
   // A parent-owned block may also be registered with a hierarchical child.
   for (auto& entry : commPools) {
     if (entry.first == comm) continue;
@@ -130,66 +123,119 @@ exit:
 
 ncclResult_t cocclGetBufferForComm(ncclComm_t ownerComm,
                                    ncclComm_t registeredComm, size_t bytes,
+                                   cocclBufferRegistrationKind registration,
                                    cudaStream_t stream,
                                    cocclBufferHandle* buffer) {
   if (registeredComm == nullptr) return ncclInvalidArgument;
-  return acquire(ownerComm, registeredComm, bytes, stream, buffer);
+  return acquire(ownerComm, registeredComm, registration, bytes, stream,
+                 buffer);
 }
 
 ncclResult_t cocclGetBuffer(ncclComm_t comm, size_t bytes,
                             cudaStream_t stream,
                             cocclBufferHandle* buffer) {
-  return cocclGetBufferForComm(comm, comm, bytes, stream, buffer);
+  return cocclGetBufferForComm(
+      comm, comm, bytes, cocclBufferRegistrationKind::Ordinary, stream,
+      buffer);
 }
 
 ncclResult_t cocclGetUnregisteredBuffer(ncclComm_t ownerComm, size_t bytes,
                                         cudaStream_t stream,
                                         cocclBufferHandle* buffer) {
-  return acquire(ownerComm, nullptr, bytes, stream, buffer);
+  return acquire(ownerComm, nullptr, cocclBufferRegistrationKind::Ordinary,
+                 bytes, stream, buffer);
 }
 
 ncclResult_t cocclRegisterBufferForComm(cocclBufferHandle* buffer,
-                                        ncclComm_t registeredComm) {
+                                        ncclComm_t registeredComm,
+                                        cocclBufferRegistrationKind registration) {
   if (buffer == nullptr || buffer->slice == nullptr ||
       registeredComm == nullptr) {
     return ncclInvalidArgument;
   }
 
-  ncclResult_t ret = ncclSuccess;
-  pthread_mutex_lock(&bufferLock);
   BufferBlock* block = static_cast<BufferBlock*>(buffer->block);
 #if CUDART_VERSION >= 11030
   if (block->backend == BufferBackend::Vmm) {
-    NCCLCHECKGOTO(vmmRegister(buffer, registeredComm), ret, exit);
+    return vmmRegister(buffer, registeredComm, registration);
   } else
 #endif
   {
-    NCCLCHECKGOTO(legacyRegister(buffer, registeredComm), ret, exit);
+    return legacyRegister(buffer, registeredComm, registration);
   }
-
-exit:
-  pthread_mutex_unlock(&bufferLock);
-  return ret;
 }
 
 ncclResult_t cocclReleaseBuffer(cocclBufferHandle* buffer,
                                 cudaStream_t stream) {
   if (buffer == nullptr || buffer->slice == nullptr) return ncclSuccess;
 
-  ncclResult_t ret = ncclSuccess;
-  pthread_mutex_lock(&bufferLock);
   BufferBlock* block = static_cast<BufferBlock*>(buffer->block);
+  ncclResult_t ret = ncclSuccess;
 #if CUDART_VERSION >= 11030
   if (block->backend == BufferBackend::Vmm) {
-    NCCLCHECKGOTO(vmmRelease(buffer, stream), ret, exit);
+    ret = vmmRelease(buffer, stream);
   } else
 #endif
   {
-    NCCLCHECKGOTO(legacyRelease(buffer, stream), ret, exit);
+    ret = legacyRelease(buffer, stream);
   }
-
-exit:
   if (ret == ncclSuccess) *buffer = {};
-  pthread_mutex_unlock(&bufferLock);
   return ret;
 }
+
+namespace coccl_buffer {
+
+ncclResult_t registerBuffer(ncclComm_t comm, void* ptr, size_t bytes,
+                            cocclBufferRegistrationKind requested,
+                            BufferRegistration* registration) {
+  *registration = {};
+  registration->comm = comm;
+  registration->ptr = ptr;
+  registration->bytes = bytes;
+  registration->kind = requested;
+  if (requested == cocclBufferRegistrationKind::Symmetric) {
+    NCCLCHECK(ncclCommWindowRegister(
+        comm, ptr, bytes, &registration->window,
+        NCCL_WIN_COLL_SYMMETRIC));
+    if (registration->window != nullptr) {
+      return ncclSuccess;
+    }
+  }
+  NCCLCHECK(ncclCommRegister(comm, ptr, bytes, &registration->handle));
+  return ncclSuccess;
+}
+
+ncclResult_t upgradeRegistration(
+    BufferRegistration* registration,
+    cocclBufferRegistrationKind requested) {
+  if (registrationSatisfies(*registration, requested)) return ncclSuccess;
+  NCCLCHECK(ncclCommWindowRegister(
+      registration->comm, registration->ptr, registration->bytes,
+      &registration->window, NCCL_WIN_COLL_SYMMETRIC));
+  registration->kind = requested;
+  return ncclSuccess;
+}
+
+ncclResult_t deregisterBuffer(BufferRegistration* registration) {
+  ncclResult_t ret = ncclSuccess;
+  if (registration->window != nullptr) {
+    NCCLCHECKGOTO(ncclCommWindowDeregister(
+        registration->comm, registration->window), ret, exit);
+    registration->window = nullptr;
+  }
+  if (registration->handle != nullptr) {
+    NCCLCHECKGOTO(ncclCommDeregister(
+        registration->comm, registration->handle), ret, exit);
+    registration->handle = nullptr;
+  }
+exit:
+  return ret;
+}
+
+bool registrationSatisfies(const BufferRegistration& registration,
+                           cocclBufferRegistrationKind requested) {
+  return registration.kind == cocclBufferRegistrationKind::Symmetric ||
+      requested == cocclBufferRegistrationKind::Ordinary;
+}
+
+}  // namespace coccl_buffer

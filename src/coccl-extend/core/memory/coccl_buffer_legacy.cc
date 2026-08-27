@@ -48,17 +48,18 @@ void mergeFreeSlices(LegacyBlock* block) {
 }
 
 ncclResult_t ensureRegistration(LegacyBlock* block,
-                                ncclComm_t registeredComm) {
-  if (registeredComm == nullptr ||
-      block->registrations.count(registeredComm) != 0) {
-    return ncclSuccess;
+                                ncclComm_t registeredComm,
+                                cocclBufferRegistrationKind requested) {
+  if (registeredComm == nullptr) return ncclSuccess;
+  auto existing = block->registrations.find(registeredComm);
+  if (existing != block->registrations.end()) {
+    return upgradeRegistration(&existing->second, requested);
   }
 
-  void* handle = nullptr;
-  NCCLCHECK(ncclCommRegister(registeredComm, block->ptr, block->capacity,
-                            &handle));
-  block->registrations.emplace(registeredComm,
-                               LegacyRegistration{handle});
+  BufferRegistration registration;
+  NCCLCHECK(registerBuffer(registeredComm, block->ptr, block->capacity,
+                           requested, &registration));
+  block->registrations.emplace(registeredComm, registration);
   return ncclSuccess;
 }
 
@@ -131,9 +132,7 @@ void rollback(cocclBufferHandle* buffer) {
 ncclResult_t releaseBlock(LegacyBlock* block) {
   ncclResult_t ret = ncclSuccess;
   for (auto& registration : block->registrations) {
-    NCCLCHECKGOTO(ncclCommDeregister(registration.first,
-                                     registration.second.handle),
-                  ret, exit);
+    NCCLCHECKGOTO(deregisterBuffer(&registration.second), ret, exit);
   }
   block->registrations.clear();
 
@@ -155,15 +154,17 @@ exit:
 }  // namespace
 
 ncclResult_t legacyAcquire(CommBufferPool* pool, ncclComm_t registeredComm,
+                           cocclBufferRegistrationKind registration,
                            size_t bytes, cudaStream_t stream,
                            cocclBufferHandle* buffer) {
   for (auto& block : pool->blocks) {
+    const auto existing = block->registrations.find(registeredComm);
     const bool registered = registeredComm == nullptr ||
-        block->registrations.count(registeredComm) != 0;
+        existing != block->registrations.end();
     ncclResult_t ret = acquireFromBlock(block.get(), bytes, pool->ownerComm,
                                         stream, registered, buffer);
     if (ret == ncclSuccess) {
-      ret = ensureRegistration(block.get(), registeredComm);
+      ret = ensureRegistration(block.get(), registeredComm, registration);
       if (ret != ncclSuccess) rollback(buffer);
       return ret;
     }
@@ -173,15 +174,16 @@ ncclResult_t legacyAcquire(CommBufferPool* pool, ncclComm_t registeredComm,
   NCCLCHECK(createBlock(pool, bytes, &block));
   NCCLCHECK(acquireFromBlock(block, bytes, pool->ownerComm, stream, false,
                              buffer));
-  ncclResult_t ret = ensureRegistration(block, registeredComm);
+  ncclResult_t ret = ensureRegistration(block, registeredComm, registration);
   if (ret != ncclSuccess) rollback(buffer);
   return ret;
 }
 
 ncclResult_t legacyRegister(cocclBufferHandle* buffer,
-                            ncclComm_t registeredComm) {
+                            ncclComm_t registeredComm,
+                            cocclBufferRegistrationKind registration) {
   return ensureRegistration(static_cast<LegacyBlock*>(buffer->block),
-                            registeredComm);
+                            registeredComm, registration);
 }
 
 ncclResult_t legacyRelease(cocclBufferHandle* buffer, cudaStream_t stream) {
@@ -202,7 +204,7 @@ ncclResult_t legacyDeregisterComm(CommBufferPool* pool, ncclComm_t comm) {
   for (auto& block : pool->blocks) {
     auto registration = block->registrations.find(comm);
     if (registration == block->registrations.end()) continue;
-    NCCLCHECK(ncclCommDeregister(comm, registration->second.handle));
+    NCCLCHECK(deregisterBuffer(&registration->second));
     block->registrations.erase(registration);
   }
   return ncclSuccess;

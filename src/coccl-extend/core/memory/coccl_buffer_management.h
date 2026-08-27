@@ -15,6 +15,11 @@ struct cocclBufferHandle {
   void* slice = nullptr;
 };
 
+enum class cocclBufferRegistrationKind {
+  Ordinary,
+  Symmetric,
+};
+
 ncclResult_t cocclBufferCommInit(ncclComm_t comm);
 ncclResult_t cocclBufferCommDestroy(ncclComm_t comm);
 
@@ -23,13 +28,15 @@ ncclResult_t cocclGetBuffer(ncclComm_t comm, size_t bytes,
                             cocclBufferHandle* buffer);
 ncclResult_t cocclGetBufferForComm(ncclComm_t ownerComm,
                                    ncclComm_t registeredComm, size_t bytes,
+                                   cocclBufferRegistrationKind registration,
                                    cudaStream_t stream,
                                    cocclBufferHandle* buffer);
 ncclResult_t cocclGetUnregisteredBuffer(ncclComm_t ownerComm, size_t bytes,
                                         cudaStream_t stream,
                                         cocclBufferHandle* buffer);
 ncclResult_t cocclRegisterBufferForComm(cocclBufferHandle* buffer,
-                                        ncclComm_t registeredComm);
+                                        ncclComm_t registeredComm,
+                                        cocclBufferRegistrationKind registration);
 ncclResult_t cocclReleaseBuffer(cocclBufferHandle* buffer,
                                 cudaStream_t stream);
 

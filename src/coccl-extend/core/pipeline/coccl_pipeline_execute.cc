@@ -187,16 +187,34 @@ bool pipelineUsesFramedCompressor(const cocclPipelineSpec* spec) {
   return false;
 }
 
-int collectCommunicationComms(const cocclPipelineSpec* spec,
-                              ncclComm_t* comms) {
+struct cocclPipelineCommunicationComm {
+  ncclComm_t comm;
+  cocclBufferRegistrationKind registration;
+};
+
+int collectCommunicationComms(
+    const cocclPipelineSpec* spec, bool framed,
+    cocclPipelineCommunicationComm* comms) {
   int count = 0;
   for (int stage = 0; stage < spec->stageCount; ++stage) {
-    ncclComm_t comm = spec->stages[stage].comm;
+    const cocclPipelineStage& pipelineStage = spec->stages[stage];
+    ncclComm_t comm = pipelineStage.comm;
     if (comm == nullptr) continue;
 
+    const bool symmetric = !framed && comm->nNodes == 1 &&
+        (pipelineStage.kind == cocclPipelineStageAllGather ||
+         pipelineStage.kind == cocclPipelineStageReduceScatter);
+    const cocclBufferRegistrationKind registration = symmetric
+        ? cocclBufferRegistrationKind::Symmetric
+        : cocclBufferRegistrationKind::Ordinary;
+
     int existing = 0;
-    while (existing < count && comms[existing] != comm) ++existing;
-    if (existing == count) comms[count++] = comm;
+    while (existing < count && comms[existing].comm != comm) ++existing;
+    if (existing == count) {
+      comms[count++] = {comm, registration};
+    } else if (symmetric) {
+      comms[existing].registration = registration;
+    }
   }
   return count;
 }
@@ -510,17 +528,21 @@ static ncclResult_t cocclRunPipelineWithDepth(
   NCCLCHECK(cocclPreparePipeline(spec, requestedDepth, &context));
   CUDACHECK(cudaSetDevice(spec->ownerComm->cudaDev));
 
-  ncclComm_t communicationComms[kCocclPipelineExplicitStages] = {};
+  const bool framed = pipelineUsesFramedCompressor(spec);
+  cocclPipelineCommunicationComm
+      communicationComms[kCocclPipelineExplicitStages] = {};
   const int communicationCommCount =
-      collectCommunicationComms(spec, communicationComms);
+      collectCommunicationComms(spec, framed, communicationComms);
   cocclBufferHandle coreWorkspace = {};
   ncclResult_t result = cocclGetBufferForComm(
-      spec->ownerComm, communicationComms[0], context.plan.registeredBytes,
+      spec->ownerComm, communicationComms[0].comm,
+      context.plan.registeredBytes, communicationComms[0].registration,
       spec->stream, &coreWorkspace);
   if (result != ncclSuccess) return result;
   for (int i = 1; i < communicationCommCount; ++i) {
-    result = cocclRegisterBufferForComm(&coreWorkspace,
-                                        communicationComms[i]);
+    result = cocclRegisterBufferForComm(
+        &coreWorkspace, communicationComms[i].comm,
+        communicationComms[i].registration);
     if (result != ncclSuccess) {
       (void)cocclReleaseBuffer(&coreWorkspace, spec->stream);
       return result;
@@ -541,7 +563,6 @@ static ncclResult_t cocclRunPipelineWithDepth(
       coreWorkspace.ptr, rawWorkspace.ptr};
 
   result = ncclSuccess;
-  const bool framed = pipelineUsesFramedCompressor(spec);
   if (context.depth == 1 && !framed) {
     result = runSerial(context, workspace);
   } else {

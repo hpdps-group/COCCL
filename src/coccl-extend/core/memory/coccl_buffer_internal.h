@@ -47,8 +47,14 @@ struct LegacySlice {
   LegacyBlock* block = nullptr;
 };
 
-struct LegacyRegistration {
+struct BufferRegistration {
+  ncclComm_t comm = nullptr;
+  void* ptr = nullptr;
+  size_t bytes = 0;
   void* handle = nullptr;
+  ncclWindow_t window = nullptr;
+  cocclBufferRegistrationKind kind =
+      cocclBufferRegistrationKind::Ordinary;
 };
 
 struct LegacyBlock : BufferBlock {
@@ -57,7 +63,7 @@ struct LegacyBlock : BufferBlock {
   void* ptr = nullptr;
   size_t capacity = 0;
   std::list<LegacySlice> slices;
-  std::map<ncclComm_t, LegacyRegistration> registrations;
+  std::map<ncclComm_t, BufferRegistration> registrations;
 };
 
 #if CUDART_VERSION >= 11030
@@ -73,13 +79,6 @@ struct VmmSlice {
   VmmBlock* block = nullptr;
 };
 
-struct VmmRegistration {
-  ncclComm_t comm = nullptr;
-  void* ptr = nullptr;
-  size_t bytes = 0;
-  void* handle = nullptr;
-};
-
 struct VmmBlock : BufferBlock {
   VmmBlock() : BufferBlock(BufferBackend::Vmm) {}
   struct VmmPool* pool = nullptr;
@@ -88,7 +87,7 @@ struct VmmBlock : BufferBlock {
   size_t capacity = 0;
   CUmemGenericAllocationHandle handle = 0;
   std::list<VmmSlice> slices;
-  std::vector<VmmRegistration> registrations;
+  std::vector<BufferRegistration> registrations;
 };
 
 struct VmmPool {
@@ -117,11 +116,23 @@ struct CommBufferPool {
 #endif
 };
 
+ncclResult_t registerBuffer(ncclComm_t comm, void* ptr, size_t bytes,
+                            cocclBufferRegistrationKind requested,
+                            BufferRegistration* registration);
+ncclResult_t upgradeRegistration(
+    BufferRegistration* registration,
+    cocclBufferRegistrationKind requested);
+ncclResult_t deregisterBuffer(BufferRegistration* registration);
+bool registrationSatisfies(const BufferRegistration& registration,
+                           cocclBufferRegistrationKind requested);
+
 ncclResult_t legacyAcquire(CommBufferPool* pool, ncclComm_t registeredComm,
+                           cocclBufferRegistrationKind registration,
                            size_t bytes, cudaStream_t stream,
                            cocclBufferHandle* buffer);
 ncclResult_t legacyRegister(cocclBufferHandle* buffer,
-                            ncclComm_t registeredComm);
+                            ncclComm_t registeredComm,
+                            cocclBufferRegistrationKind registration);
 ncclResult_t legacyRelease(cocclBufferHandle* buffer, cudaStream_t stream);
 ncclResult_t legacyDeregisterComm(CommBufferPool* pool, ncclComm_t comm);
 ncclResult_t legacyDestroy(CommBufferPool* pool);
@@ -131,10 +142,12 @@ ncclResult_t legacyDestroy(CommBufferPool* pool);
 ncclResult_t vmmInit(VmmPool* pool, ncclComm_t ownerComm,
                      bool* available);
 ncclResult_t vmmAcquire(VmmPool* pool, ncclComm_t registeredComm,
+                        cocclBufferRegistrationKind registration,
                         size_t bytes, cudaStream_t stream,
                         cocclBufferHandle* buffer);
 ncclResult_t vmmRegister(cocclBufferHandle* buffer,
-                         ncclComm_t registeredComm);
+                         ncclComm_t registeredComm,
+                         cocclBufferRegistrationKind registration);
 ncclResult_t vmmRelease(cocclBufferHandle* buffer, cudaStream_t stream);
 ncclResult_t vmmDeregisterComm(VmmPool* pool, ncclComm_t comm);
 ncclResult_t vmmDestroy(VmmPool* pool);
