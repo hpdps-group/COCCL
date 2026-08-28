@@ -4,10 +4,10 @@ English | [简体中文](README_zh-CN.md)
 
 COCCL is a compression-aware GPU collective communication library that makes
 customized compression easy to integrate and configure. Built upon NCCL
-2.21.5, it preserves NCCL-compatible APIs and provides compression-aware
+2.27.7, it preserves NCCL-compatible APIs and provides compression-aware
 pipelines for AllGather, ReduceScatter, AllReduce, AllToAll, Send, and Recv.
-Its unified C++17 plugin model supports custom compression operators and
-includes
+Its unified C++17 plugin model supports fixed-layout and framed
+variable-length compression operators and includes
 [SDP4Bit](https://github.com/ByteDance-Seed/SDP4Bit),
 [TACO](src/coccl-extend/extensions/compressor_plugin/taco),
 [ZFP](https://github.com/LLNL/zfp), and
@@ -28,13 +28,28 @@ accuracy.
 
 - Advisors: [Dingwen Tao](https://www.dingwentao.com/), [Guangming Tan](https://tanniu.github.io/), [Hairui Zhao](https://hairui-zhao.github.io/)
 
+## Current Release
+
+- The backend is NCCL 2.27.7. Release builds and validation use CUDA 12.8.
+- Runtime validation covers four A800 GPUs on one node and eight A800 GPUs
+  across two nodes. Native `sm_90` and `sm_100` builds are ready; Hopper and
+  Blackwell runtime validation is pending target hardware. The A800 matrix
+  covers depth 1/2/4/8, fixed SDP4Bit/ZFP, and inter-only framed dietGPU.
+- Pipeline communication workspaces use NCCL registered memory. Eligible
+  single-node fixed-layout AllGather and ReduceScatter stages request a
+  symmetric window and automatically fall back to ordinary registration.
+- NCCL still chooses its internal Ring or PAT algorithm for native stages.
+  COCCL autotuning selects only the high-level OneShot, TwoShot, or TripleShot
+  compressed recipe.
+
 ## Quick Start
 
 ### Requirements
 
-- CUDA 12.4 or later
+- CUDA 12.8 (release-tested toolchain)
+- A C++17-capable host compiler
 - MPI for multi-process and multi-node tests
-- CMake for the bundled ZFP plugin
+- CMake for the bundled ZFP and dietGPU plugins
 
 ### Build
 
@@ -60,6 +75,15 @@ only for the target architecture, set `NVCC_GENCODE`:
 ```shell
 make -j src.build CUDA_HOME=<path to CUDA> \
   NVCC_GENCODE="-gencode=arch=compute_80,code=sm_80"
+```
+
+`src.build` builds the COCCL library and bundled compressor plugins. Build the
+configuration checker separately when using the manual path:
+
+```shell
+make -f src/coccl-extend/Makefile coccl-config-check \
+  BUILDDIR="$PWD/build" NCCLDIR="$PWD" \
+  COCCL_ROOT=src/coccl-extend CUDA_HOME=<path to CUDA>
 ```
 
 To clean the build:
@@ -119,6 +143,12 @@ fused-reduction codecs. New plugins live under
 `src/coccl-extend/extensions/compressor_plugin/`; COCCL handles pipeline and
 collective scheduling.
 
+The current compressor ABI is v9. Rebuild external plugins when upgrading
+from an older COCCL release. User-owned collective recipes, plugins, and
+configs live under `src/coccl-extend/extensions/`; scheduling, memory,
+compression runtime, tuning, and training classification live under
+`src/coccl-extend/core/`.
+
 See the [compressor integration guide](src/coccl-extend/extensions/compressor_plugin/README.md)
 for the SDK contract, a minimal adapter, build rules, validation, and the
 Codex integration skill.
@@ -150,9 +180,27 @@ build/bin/coccl-config-check path/to/config.toml
   Relative paths are resolved from the TOML file.
 - `pipeline.depth`: overlap slices, from 1 to 16.
 
+The global threshold can be overridden by
+`normal.<operation>.threshold_bytes`,
+`training.{dp,tp}.<operation>.threshold_bytes`, or
+`training.pp.sendrecv.{forward,backward}.threshold_bytes`.
+
 Standard NCCL calls fall back to native NCCL when the selected compressor does
 not support the operation, datatype, or shape. Explicit `coccl*Comp*` calls
 bypass the size threshold but still require a matching policy.
+
+The generated `nccl.h` exposes these explicit interfaces for testing, direct
+compressed-path invocation, or manual algorithm selection:
+
+- `cocclAllGatherComp` and `cocclAllToAllComp`;
+- `cocclReduceScatterCompOneShot` and `cocclReduceScatterCompTwoShot`;
+- `cocclAllReduceCompOneShot`, `cocclAllReduceCompTwoShot`, and
+  `cocclAllReduceCompTripleShot`;
+- `cocclSendComp` and `cocclRecvDecomp`.
+
+Compressed Send/Recv processes one complete message serially. Grouped calls
+batch their metadata and payload exchanges so pipeline-parallel traffic can
+use the same fixed or framed protocol without creating per-direction streams.
 
 ### Normal Mode
 
@@ -174,6 +222,12 @@ Each operation can define:
 
 An explicit `intra` or `inter` policy overrides `default`. Set
 `enabled = false` to leave that scope on native NCCL.
+
+Each scope describes only the encoding produced by that scope. In a
+hierarchical reduction, COCCL carries the previous scope's compressor
+descriptor forward for decoding and uses the current scope's config for
+recompression. An `inter` config therefore does not repeat the `intra` input
+parameters.
 
 This example loads two compressors and assigns one to each operation:
 
@@ -221,14 +275,20 @@ Declare the framework topology in `training.classifier`:
   of AllReduce.
 
 COCCL uses communicator sizes first, then observes repeated collective
-patterns when DP and TP are ambiguous. Unclassified traffic stays on native
-NCCL.
+patterns of at least 1 MiB when DP and TP are ambiguous. A uniquely matching
+configured parallel size is classified immediately; ambiguous traffic stays
+on native NCCL during the observation window and switches only after the role
+is committed for that communicator. `training.observation_iterations`
+defaults to 5.
 
 Minimal example:
 
 ```toml
 [runtime]
 mode = "training"
+
+[training]
+observation_iterations = 5
 
 [compressor_plugins]
 compressors = ["sdp4bit"]
@@ -270,7 +330,9 @@ Autotuning selects ReduceScatter and AllReduce algorithms:
 - `reduce_scatter_algorithm`: `auto`, `oneshot`, or `twoshot`.
 - `all_reduce_algorithm`: `auto`, `oneshot`, `twoshot`, or `tripleshot`.
 
-If a model is unavailable, COCCL uses its built-in heuristic.
+If a model is unavailable, COCCL uses its built-in heuristic. Profiling is
+lazy and process-wide. The model compares COCCL recipes; NCCL continues to
+select the transport algorithm used inside every native stage.
 
 ### Logs
 
@@ -300,9 +362,11 @@ Available subsystems:
 
 ## Performance
 
-The following results use 32 H800 GPUs, CUDA 12.6, NCCL 2.21.5, and
-InfiniBand. COCCL-SDP4Bit reaches up to 2.60x AllReduce, 2.58x ReduceScatter,
-5.66x AllGather, and 4.92x AllToAll speedup over FP32 NCCL.
+The following published results use 32 H800 GPUs, CUDA 12.6, NCCL 2.21.5, and
+InfiniBand. They are retained as the paper baseline; the current NCCL 2.27.7
+release passed separate single-node and two-node A800 regression validation.
+COCCL-SDP4Bit reaches up to 2.60x AllReduce, 2.58x ReduceScatter, 5.66x
+AllGather, and 4.92x AllToAll speedup over FP32 NCCL.
 
 ![Communication performance of COCCL](assets/results/communication_performance.png)
 
