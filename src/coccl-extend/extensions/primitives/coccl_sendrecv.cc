@@ -24,6 +24,7 @@ struct cocclSendRecvCallState {
   cocclBufferHandle buffer;
   cocclCompressorView encoded = {};
   cocclCompressorFrameMetadata metadata = {};
+  void* compressor = nullptr;
   size_t rawBytes = 0;
   size_t metadataOffset = 0;
   bool framed = false;
@@ -60,33 +61,30 @@ cocclCompressorFrameMetadata* deviceMetadata(
       static_cast<char*>(state.buffer.ptr) + state.metadataOffset);
 }
 
-cocclPreparedCall directCall(
+cocclInfo directCall(
     const void* sendbuff, void* recvbuff, size_t count,
     ncclDataType_t datatype, int peer, ncclFunc_t func, ncclComm_t comm,
     cudaStream_t stream) {
-  cocclPreparedCall prepared;
-  prepared.info.sendbuff = sendbuff;
-  prepared.info.recvbuff = recvbuff;
-  prepared.info.count = count;
-  prepared.info.datatype = datatype;
-  prepared.info.peer = peer;
-  prepared.info.func = func;
-  prepared.info.operation = cocclOperation::SendRecv;
-  prepared.info.comm = comm;
-  prepared.info.stream = stream;
-  prepared.descriptor =
-      cocclGetOperationDescriptor(cocclOperation::SendRecv);
-  return prepared;
+  cocclInfo info;
+  info.sendbuff = sendbuff;
+  info.recvbuff = recvbuff;
+  info.count = count;
+  info.datatype = datatype;
+  info.peer = peer;
+  info.func = func;
+  info.operation = cocclOperation::SendRecv;
+  info.comm = comm;
+  info.stream = stream;
+  return info;
 }
 
-ncclResult_t submitDirect(cocclPreparedCall* prepared) {
-  if (prepared->info.count == 0) {
+ncclResult_t submitDirect(const cocclInfo& info) {
+  if (info.count == 0) {
     return ncclGroupDepth > 0
-        ? cocclGroupEnqueueNative(&prepared->info)
-        : cocclReplayNativeCall(prepared->info);
+        ? cocclGroupEnqueueNative(&info)
+        : cocclReplayNativeCall(info);
   }
-  return cocclEnqueueExplicitCall(
-      &prepared->info, cocclAlgorithmNone);
+  return cocclEnqueueExplicitCall(&info, cocclAlgorithmNone);
 }
 
 void* sendRecvCompressor(const cocclPreparedCall& prepared) {
@@ -112,7 +110,7 @@ ncclResult_t cocclExecuteSendRecvBatch(
     const cocclPreparedCall& prepared = calls[i];
     const cocclInfo& info = prepared.info;
     cocclSendRecvCallState& state = states[i];
-    void* const compressor = sendRecvCompressor(prepared);
+    state.compressor = sendRecvCompressor(prepared);
     size_t allocationBytes = 0;
     if (!sendRecvLayout(info.count, info.datatype, &state.rawBytes,
                         &state.metadataOffset, &allocationBytes)) {
@@ -125,7 +123,7 @@ ncclResult_t cocclExecuteSendRecvBatch(
 
     cocclCompressorFrameMetadata* metadata = deviceMetadata(state);
     state.framed = cocclCompressorSupports(
-        compressor, cocclCompressorCapabilityFramed);
+        state.compressor, cocclCompressorCapabilityFramed);
     if (info.func == ncclFuncSend) {
       const cocclCompressorView input = {
           const_cast<void*>(info.sendbuff), state.rawBytes, state.rawBytes,
@@ -135,7 +133,7 @@ ncclResult_t cocclExecuteSendRecvBatch(
           state.framed ? metadata : nullptr,
           state.framed ? state.rawBytes : 0};
       NCCLCHECKGOTO(ncclCompress(
-                        compressor, input, &state.encoded,
+                        state.compressor, input, &state.encoded,
                         info.comm->rank, info.stream),
                     ret, exit);
 
@@ -208,10 +206,8 @@ ncclResult_t cocclExecuteSendRecvBatch(
                 ret, exit);
 
   for (size_t i = 0; i < count; ++i) {
-    const cocclPreparedCall& prepared = calls[i];
-    const cocclInfo& info = prepared.info;
+    const cocclInfo& info = calls[i].info;
     cocclSendRecvCallState& state = states[i];
-    void* const compressor = sendRecvCompressor(prepared);
     if (info.func != ncclFuncRecv) continue;
 
     cocclCompressorView input = {};
@@ -237,7 +233,7 @@ ncclResult_t cocclExecuteSendRecvBatch(
         info.recvbuff, state.rawBytes, 0, info.count, 1,
         info.datatype, nullptr, 0};
     NCCLCHECKGOTO(ncclDecompress(
-                      compressor, input, &output, info.stream),
+                      state.compressor, input, &output, info.stream),
                   ret, exit);
   }
 
@@ -256,9 +252,9 @@ NCCL_API(ncclResult_t, cocclSendComp, const void* sendbuff, size_t count,
 ncclResult_t cocclSendComp(const void* sendbuff, size_t count,
   ncclDataType_t datatype, int peer, ncclComm_t comm, cudaStream_t stream) {
   if (comm == nullptr) return ncclInvalidArgument;
-  cocclPreparedCall prepared = directCall(
+  const cocclInfo info = directCall(
       sendbuff, nullptr, count, datatype, peer, ncclFuncSend, comm, stream);
-  return submitDirect(&prepared);
+  return submitDirect(info);
 }
 
 NCCL_API(ncclResult_t, cocclRecvDecomp, void* recvbuff, size_t count,
@@ -266,9 +262,9 @@ NCCL_API(ncclResult_t, cocclRecvDecomp, void* recvbuff, size_t count,
 ncclResult_t cocclRecvDecomp(void* recvbuff, size_t count,
   ncclDataType_t datatype, int peer, ncclComm_t comm, cudaStream_t stream) {
   if (comm == nullptr) return ncclInvalidArgument;
-  cocclPreparedCall prepared = directCall(
+  const cocclInfo info = directCall(
       nullptr, recvbuff, count, datatype, peer, ncclFuncRecv, comm, stream);
-  return submitDirect(&prepared);
+  return submitDirect(info);
 }
 
 ncclResult_t cocclExecuteSendRecv(const cocclPreparedCall* prepared) {
