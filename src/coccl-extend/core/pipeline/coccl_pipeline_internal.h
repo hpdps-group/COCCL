@@ -37,8 +37,17 @@ struct cocclPipelineFrameResources {
   cocclCompressorFrameMetadata* sendMetadata;
   cocclCompressorFrameMetadata* recvMetadata;
   cocclFrameExchange* exchanges;
+  ncclWaitSignalDesc_t* waitDescriptors;
   size_t metadataCapacity;
   size_t exchangeCapacity;
+  size_t waitCapacity;
+};
+
+struct cocclPipelineRmaWindow {
+  ncclComm_t comm;
+  ncclWindow_t window;
+  size_t workspaceOffset;
+  bool singleSegment;
 };
 
 struct cocclPipelineStageContext {
@@ -52,6 +61,9 @@ struct cocclPipelineStageContext {
   int nNodes;
   int ranksPerNode;
   uint64_t profilerTag;
+  void* registeredBase;
+  cocclPipelineRmaWindow rmaWindows[kCocclPipelineExplicitStages];
+  int rmaWindowCount;
 };
 
 enum cocclPipelineTempRole {

@@ -130,6 +130,12 @@ ncclResult_t cocclCommitAllGatherVFrameExchange(
   return ncclInternalError;
 }
 
+ncclResult_t cocclCommitAllToAllRmaFrameExchange(
+    const cocclFrameExchange*, size_t, size_t, int, ncclWindow_t, size_t,
+    ncclWaitSignalDesc_t*, ncclComm_t, cudaStream_t) {
+  return ncclInternalError;
+}
+
 int64_t ncclParamAllgathervEnable() {
   return 0;
 }

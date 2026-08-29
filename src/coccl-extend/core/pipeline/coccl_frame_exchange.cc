@@ -195,3 +195,38 @@ ncclResult_t cocclCommitAllGatherVFrameExchange(
   }
   return ncclSuccess;
 }
+
+ncclResult_t cocclCommitAllToAllRmaFrameExchange(
+    const cocclFrameExchange* exchanges, size_t frames,
+    size_t frameStrideBytes, int rank, ncclWindow_t window,
+    size_t outputWindowOffset, ncclWaitSignalDesc_t* waitDescriptors,
+    ncclComm_t comm, cudaStream_t stream) {
+  const size_t framesPerPeer = frames / (size_t)comm->nRanks;
+  const size_t rankFrame = (size_t)rank * framesPerPeer;
+
+  ncclResult_t ret = ncclGroupStart();
+  if (ret != ncclSuccess) return ret;
+  for (int peer = 0; peer < comm->nRanks; ++peer) {
+    for (size_t frame = 0; frame < framesPerPeer; ++frame) {
+      const cocclFrameExchange& exchange =
+          exchanges[(size_t)peer * framesPerPeer + frame];
+      const size_t remoteOffset = outputWindowOffset +
+          (rankFrame + frame) * frameStrideBytes;
+      ret = ncclPutSignal(
+          exchange.sendSlot, exchange.sendBytes, ncclInt8, peer, window,
+          remoteOffset, 0, 0, 0, comm, stream);
+      if (ret != ncclSuccess) break;
+    }
+    if (ret != ncclSuccess) break;
+  }
+  const ncclResult_t endResult = ncclGroupEnd();
+  if (ret != ncclSuccess) return ret;
+  if (endResult != ncclSuccess) return endResult;
+
+  for (int peer = 0; peer < comm->nRanks; ++peer) {
+    waitDescriptors[peer] = {
+        (int)framesPerPeer, peer, 0, 0};
+  }
+  return ncclWaitSignal(
+      comm->nRanks, waitDescriptors, comm, stream);
+}

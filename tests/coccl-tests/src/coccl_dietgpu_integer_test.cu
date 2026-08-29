@@ -33,6 +33,7 @@ struct Options {
   std::string path = "compressed";
   std::string pattern = "compressible";
   size_t elements = 0;
+  size_t prewarmElements = 0;
   int warmups = 20;
   int iterations = 30;
   int depth = 1;
@@ -84,6 +85,8 @@ Options parseOptions(int argc, char** argv) {
     else if (key == "--pattern") options.pattern = value;
     else if (key == "--elements") {
       options.elements = std::strtoull(value.c_str(), nullptr, 10);
+    } else if (key == "--prewarm-elements") {
+      options.prewarmElements = std::strtoull(value.c_str(), nullptr, 10);
     } else if (key == "--warmups") {
       options.warmups = std::atoi(value.c_str());
     } else if (key == "--iterations") {
@@ -269,11 +272,35 @@ void runCompressed(Operation operation, const void* input, void* output,
 }
 
 template <typename T>
+void prewarmCompressed(
+    Operation operation, ncclDataType_t datatype, const Options& options,
+    ncclComm_t comm, cudaStream_t stream, int rank, int ranks) {
+  if (options.prewarmElements == 0) return;
+  const size_t inputElements = options.prewarmElements;
+  const size_t resultElements = outputElements(
+      operation, inputElements, ranks);
+  T* input = nullptr;
+  T* output = nullptr;
+  CUDACHECK(cudaMalloc(&input, inputElements * sizeof(T)));
+  CUDACHECK(cudaMalloc(&output, resultElements * sizeof(T)));
+  CUDACHECK(cudaMemset(input, 0, inputElements * sizeof(T)));
+  CUDACHECK(cudaMemset(output, 0, resultElements * sizeof(T)));
+  runCompressed(operation, input, output, inputElements, datatype,
+                comm, stream, rank, ranks);
+  CUDACHECK(cudaStreamSynchronize(stream));
+  CUDACHECK(cudaFree(output));
+  CUDACHECK(cudaFree(input));
+}
+
+template <typename T>
 void runCorrectnessCase(Operation operation, ncclDataType_t datatype,
                         const Options& options, ncclComm_t nativeComm,
                         ncclComm_t compressedComm, cudaStream_t nativeStream,
                         cudaStream_t compressedStream, int rank, int ranks) {
-  const size_t inputElements = kCorrectnessElements;
+  prewarmCompressed<T>(operation, datatype, options, compressedComm,
+                       compressedStream, rank, ranks);
+  const size_t inputElements = options.elements == 0
+      ? kCorrectnessElements : options.elements;
   const size_t resultElements = outputElements(operation, inputElements,
                                                ranks);
   const size_t inputBytes = inputElements * sizeof(T);
@@ -408,6 +435,8 @@ void runPerformance(const Options& options, ncclDataType_t datatype,
                     ncclComm_t comm, cudaStream_t stream,
                     int rank, int ranks) {
   const Operation operation = parseOperation(options.operation);
+  prewarmCompressed<T>(operation, datatype, options, comm, stream,
+                       rank, ranks);
   const size_t elements = options.elements;
   const size_t resultElements = outputElements(operation, elements, ranks);
   const size_t inputBytes = elements * sizeof(T);

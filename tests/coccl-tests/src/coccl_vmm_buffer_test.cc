@@ -324,6 +324,10 @@ int main() {
   std::set<CUmemGenericAllocationHandle> initialHandles;
   for (const auto& entry : physicalHandles) initialHandles.insert(entry.first);
   EXPECT(registrationCalls.empty() && windows.size() == 1);
+  cocclBufferRmaInfo rmaInfo;
+  EXPECT(cocclGetBufferRmaInfo(first, &firstComm, &rmaInfo));
+  EXPECT(rmaInfo.window != nullptr && rmaInfo.bufferOffset == 0 &&
+         rmaInfo.singleSegment);
   EXPECT(cocclRegisterBufferForComm(
              &first, &secondComm,
              cocclBufferRegistrationKind::Ordinary) == ncclSuccess);
@@ -371,6 +375,8 @@ int main() {
   EXPECT(mappings.count(reinterpret_cast<CUdeviceptr>(grown.ptr)) == 1);
   EXPECT(mappings.count(
              reinterpret_cast<CUdeviceptr>(grown.ptr) + 16 * kMiB) == 1);
+  EXPECT(cocclGetBufferRmaInfo(grown, &firstComm, &rmaInfo));
+  EXPECT(!rmaInfo.singleSegment);
   EXPECT(cocclRegisterBufferForComm(
              &grown, &secondComm,
              cocclBufferRegistrationKind::Ordinary) == ncclSuccess);
@@ -426,6 +432,27 @@ int main() {
   EXPECT(cocclBufferCommDestroy(&firstComm) == ncclSuccess);
   EXPECT(windows.empty());
   EXPECT(operationIndex("window-deregister") < operationIndex("unmap"));
+
+  EXPECT(cocclBufferCommInit(&firstComm) == ncclSuccess);
+  cocclBufferHandle rmaSmall;
+  EXPECT(cocclGetBufferForComm(
+             &firstComm, &firstComm, 8 * kMiB,
+             cocclBufferRegistrationKind::Rma, firstStream,
+             &rmaSmall) == ncclSuccess);
+  void* rmaSmallPtr = rmaSmall.ptr;
+  EXPECT(cocclReleaseBuffer(&rmaSmall, firstStream) == ncclSuccess);
+  cocclBufferHandle rmaLarge;
+  EXPECT(cocclGetBufferForComm(
+             &firstComm, &firstComm, 24 * kMiB,
+             cocclBufferRegistrationKind::Rma, firstStream,
+             &rmaLarge) == ncclSuccess);
+  EXPECT(rmaLarge.ptr != rmaSmallPtr && physicalHandles.size() == 2 &&
+         reservations.size() == 2 && windows.size() == 2);
+  EXPECT(cocclGetBufferRmaInfo(rmaLarge, &firstComm, &rmaInfo));
+  EXPECT(rmaInfo.singleSegment);
+  EXPECT(cocclReleaseBuffer(&rmaLarge, firstStream) == ncclSuccess);
+  EXPECT(cocclBufferCommDestroy(&firstComm) == ncclSuccess);
+  EXPECT(physicalHandles.empty() && reservations.empty() && windows.empty());
 
   windowRegistrationEnabled = false;
   EXPECT(cocclBufferCommInit(&firstComm) == ncclSuccess);

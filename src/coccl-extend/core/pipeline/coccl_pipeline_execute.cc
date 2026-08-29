@@ -6,6 +6,7 @@
 #include "core/pipeline/coccl_pipeline_internal.h"
 #include "comm.h"
 #include "core/compression/compress.h"
+#include "rma/rma.h"
 
 #include <stdlib.h>
 
@@ -69,6 +70,7 @@ void destroyResources(cocclPipelineResources* resources) {
     (void)cudaFreeHost(resources->frameResources.recvMetadata);
   }
   free(resources->frameResources.exchanges);
+  free(resources->frameResources.waitDescriptors);
   delete resources;
 }
 
@@ -203,14 +205,21 @@ int collectCommunicationComms(
 
     const bool zeroCta =
         (comm->config.CTAPolicy & NCCL_CTA_POLICY_ZERO) != 0;
-    const bool symmetric = !framed &&
-        (pipelineStage.kind == cocclPipelineStageAllGather ||
-         (pipelineStage.kind == cocclPipelineStageAllToAll && zeroCta) ||
-         (pipelineStage.kind == cocclPipelineStageReduceScatter &&
-          comm->nNodes == 1));
-    const cocclBufferRegistrationKind registration = symmetric
-        ? cocclBufferRegistrationKind::Symmetric
-        : cocclBufferRegistrationKind::Ordinary;
+    const bool framedRma = framed &&
+        pipelineStage.kind == cocclPipelineStageAllToAll &&
+        comm->config.rmaEagerInit && comm->hostRmaSupport &&
+        comm->config.numRmaSig > 0 &&
+        (comm->nNodes == 1 || ncclRmaProxyEnabled(comm));
+    const bool symmetric = framedRma ||
+        (!framed &&
+         (pipelineStage.kind == cocclPipelineStageAllGather ||
+          (pipelineStage.kind == cocclPipelineStageAllToAll && zeroCta) ||
+          (pipelineStage.kind == cocclPipelineStageReduceScatter &&
+           comm->nNodes == 1)));
+    const cocclBufferRegistrationKind registration = framedRma
+        ? cocclBufferRegistrationKind::Rma
+        : (symmetric ? cocclBufferRegistrationKind::Symmetric
+                     : cocclBufferRegistrationKind::Ordinary);
 
     int existing = 0;
     while (existing < count && comms[existing].comm != comm) ++existing;
@@ -551,6 +560,19 @@ static ncclResult_t cocclRunPipelineWithDepth(
       (void)cocclReleaseBuffer(&coreWorkspace, spec->stream);
       return result;
     }
+  }
+  context.stageContext.registeredBase = coreWorkspace.ptr;
+  for (int i = 0; framed && i < communicationCommCount; ++i) {
+    cocclBufferRmaInfo info;
+    if (!cocclGetBufferRmaInfo(
+            coreWorkspace, communicationComms[i].comm, &info)) {
+      continue;
+    }
+    cocclPipelineRmaWindow& window =
+        context.stageContext.rmaWindows[
+            context.stageContext.rmaWindowCount++];
+    window = {communicationComms[i].comm, info.window,
+              info.bufferOffset, info.singleSegment};
   }
 
   cocclBufferHandle rawWorkspace = {};

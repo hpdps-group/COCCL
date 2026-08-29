@@ -87,6 +87,10 @@ bool registrationSatisfiesComm(
 bool blockSupportsRegistration(
     const VmmBlock* block, ncclComm_t comm,
     cocclBufferRegistrationKind requested) {
+  if (requested == cocclBufferRegistrationKind::Rma &&
+      block->segments.size() != 1) {
+    return false;
+  }
   if (comm == nullptr ||
       registrationSatisfiesComm(block, comm, requested)) {
     return true;
@@ -482,9 +486,9 @@ ncclResult_t vmmAcquire(VmmPool* pool, ncclComm_t registeredComm,
   }
 
   VmmBlock* grow = nullptr;
-  const bool ordinaryRegistered = registeredComm != nullptr &&
-      registration == cocclBufferRegistrationKind::Ordinary;
-  if (!ordinaryRegistered) {
+  const bool growableRegistration = registeredComm == nullptr ||
+      registration == cocclBufferRegistrationKind::Symmetric;
+  if (growableRegistration) {
     for (auto& block : pool->blocks) {
       if (blockSupportsRegistration(
               block.get(), registeredComm, registration) &&

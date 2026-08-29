@@ -86,6 +86,29 @@ ncclResult_t ensureFrameExchangeCapacity(
   return ncclSuccess;
 }
 
+ncclResult_t ensureWaitDescriptorCapacity(
+    cocclPipelineFrameResources* resources, size_t count) {
+  if (resources->waitCapacity >= count) return ncclSuccess;
+  void* storage = realloc(
+      resources->waitDescriptors,
+      count * sizeof(ncclWaitSignalDesc_t));
+  if (storage == nullptr) return ncclSystemError;
+  resources->waitDescriptors =
+      static_cast<ncclWaitSignalDesc_t*>(storage);
+  resources->waitCapacity = count;
+  return ncclSuccess;
+}
+
+const cocclPipelineRmaWindow* findRmaWindow(
+    const cocclPipelineStageContext* context, ncclComm_t comm) {
+  for (int i = 0; i < context->rmaWindowCount; ++i) {
+    if (context->rmaWindows[i].comm == comm) {
+      return context->rmaWindows + i;
+    }
+  }
+  return nullptr;
+}
+
 ncclResult_t readFrameMetadata(
     const cocclPipelineStageContext* context,
     const cocclPipelineEdge* edge,
@@ -397,12 +420,34 @@ ncclResult_t cocclCommitPipelineFrameExchange(
         context->frameResources->exchanges,
         context->frameResources->exchangeCapacity, &exchangeCount));
   }
-  if (useFramedAllGatherV(
+  const cocclPipelineRmaWindow* rmaWindow =
+      stage->kind == cocclPipelineStageAllToAll
+      ? findRmaWindow(context, stage->comm) : nullptr;
+  if (rmaWindow != nullptr && rmaWindow->singleSegment) {
+    NCCLCHECK(ensureWaitDescriptorCapacity(
+        context->frameResources, (size_t)stage->comm->nRanks));
+    const size_t outputWindowOffset = rmaWindow->workspaceOffset +
+        (static_cast<char*>(output->ptr) -
+         static_cast<char*>(context->registeredBase));
+    INFO(COCCL_PIPELINE,
+         "COCCL framed AllToAll payload RMA bytes %zu frames %zu",
+         edge->bytes, edge->logicalChunks);
+    NCCLCHECK(cocclCommitAllToAllRmaFrameExchange(
+        context->frameResources->exchanges, edge->logicalChunks,
+        edge->frameStrideBytes, stage->comm->rank, rmaWindow->window,
+        outputWindowOffset, context->frameResources->waitDescriptors,
+        stage->comm, stream));
+  } else if (useFramedAllGatherV(
           stage, context->frameResources->exchanges, exchangeCount)) {
     NCCLCHECK(cocclCommitAllGatherVFrameExchange(
         context->frameResources->exchanges, edge->logicalChunks,
         stage->comm, stream));
   } else {
+    if (stage->kind == cocclPipelineStageAllToAll) {
+      INFO(COCCL_PIPELINE,
+           "COCCL framed AllToAll payload grouped P2P bytes %zu frames %zu",
+           edge->bytes, edge->logicalChunks);
+    }
     NCCLCHECK(cocclCommitFrameExchange(
         context->frameResources->exchanges, exchangeCount,
         stage->comm, stream));

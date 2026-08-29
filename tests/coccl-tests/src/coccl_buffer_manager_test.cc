@@ -202,6 +202,10 @@ int main() {
              &first, &secondComm,
              cocclBufferRegistrationKind::Symmetric) == ncclSuccess);
   EXPECT(registrations.size() == 2 && windows.size() == 1);
+  cocclBufferRmaInfo rmaInfo;
+  EXPECT(cocclGetBufferRmaInfo(first, &secondComm, &rmaInfo));
+  EXPECT(rmaInfo.window != nullptr && rmaInfo.bufferOffset == 0 &&
+         rmaInfo.singleSegment);
   EXPECT(cocclRegisterBufferForComm(
              &first, &secondComm,
              cocclBufferRegistrationKind::Symmetric) == ncclSuccess);
@@ -291,6 +295,7 @@ int main() {
              &fallback) == ncclSuccess);
   void* fallbackPtr = fallback.ptr;
   EXPECT(windows.empty() && registrations.size() == 1);
+  EXPECT(!cocclGetBufferRmaInfo(fallback, &firstComm, &rmaInfo));
   EXPECT(cocclReleaseBuffer(&fallback, firstStream) == ncclSuccess);
   EXPECT(cocclGetBufferForComm(
              &firstComm, &firstComm, 4096,

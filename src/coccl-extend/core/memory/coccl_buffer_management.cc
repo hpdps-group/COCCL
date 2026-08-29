@@ -165,6 +165,40 @@ ncclResult_t cocclRegisterBufferForComm(cocclBufferHandle* buffer,
   }
 }
 
+bool cocclGetBufferRmaInfo(const cocclBufferHandle& buffer,
+                           ncclComm_t registeredComm,
+                           cocclBufferRmaInfo* info) {
+  *info = {};
+  BufferBlock* base = static_cast<BufferBlock*>(buffer.block);
+  BufferRegistration* found = nullptr;
+  bool singleSegment = true;
+#if CUDART_VERSION >= 11030
+  if (base->backend == BufferBackend::Vmm) {
+    VmmBlock* block = static_cast<VmmBlock*>(base);
+    singleSegment = block->segments.size() == 1;
+    for (BufferRegistration& registration : block->registrations) {
+      if (registration.comm == registeredComm) {
+        found = &registration;
+        break;
+      }
+    }
+  } else
+#endif
+  {
+    LegacyBlock* block = static_cast<LegacyBlock*>(base);
+    auto registration = block->registrations.find(registeredComm);
+    if (registration != block->registrations.end()) {
+      found = &registration->second;
+    }
+  }
+  if (found == nullptr || found->window == nullptr) return false;
+  info->window = found->window;
+  info->bufferOffset = static_cast<char*>(buffer.ptr) -
+      static_cast<char*>(found->ptr);
+  info->singleSegment = singleSegment;
+  return true;
+}
+
 ncclResult_t cocclReleaseBuffer(cocclBufferHandle* buffer,
                                 cudaStream_t stream) {
   if (buffer == nullptr || buffer->slice == nullptr) return ncclSuccess;
@@ -193,7 +227,7 @@ ncclResult_t registerBuffer(ncclComm_t comm, void* ptr, size_t bytes,
   registration->ptr = ptr;
   registration->bytes = bytes;
   registration->kind = requested;
-  if (requested == cocclBufferRegistrationKind::Symmetric) {
+  if (requested != cocclBufferRegistrationKind::Ordinary) {
     NCCLCHECK(ncclCommWindowRegister(
         comm, ptr, bytes, &registration->window,
         NCCL_WIN_COLL_SYMMETRIC));
@@ -234,8 +268,8 @@ exit:
 
 bool registrationSatisfies(const BufferRegistration& registration,
                            cocclBufferRegistrationKind requested) {
-  return registration.kind == cocclBufferRegistrationKind::Symmetric ||
-      requested == cocclBufferRegistrationKind::Ordinary;
+  return requested == cocclBufferRegistrationKind::Ordinary ||
+      registration.kind != cocclBufferRegistrationKind::Ordinary;
 }
 
 }  // namespace coccl_buffer
