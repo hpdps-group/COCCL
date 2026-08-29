@@ -125,6 +125,19 @@ ncclResult_t cocclCommitFrameExchange(
   return ncclInternalError;
 }
 
+ncclResult_t cocclCommitAllGatherVFrameExchange(
+    const cocclFrameExchange*, size_t, ncclComm_t, cudaStream_t) {
+  return ncclInternalError;
+}
+
+int64_t ncclParamAllgathervEnable() {
+  return 0;
+}
+
+int64_t ncclParamEnqueueRearchEnable() {
+  return 0;
+}
+
 int main() {
   ncclComm owner = {};
   owner.rank = 3;

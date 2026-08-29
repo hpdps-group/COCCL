@@ -13,6 +13,8 @@ struct SubmittedCall {
   char kind;
   int peer;
   size_t bytes;
+  const void* send;
+  void* recv;
   ncclComm_t comm;
   cudaStream_t stream;
 };
@@ -140,15 +142,65 @@ void testAllGatherMapping() {
   }
 }
 
+void testAllGatherVCommitOrder() {
+  ncclComm_t comm = (ncclComm_t)std::calloc(1, sizeof(ncclComm));
+  if (comm == nullptr) fail("comm allocation failed");
+  comm->nRanks = 4;
+  unsigned char send[2 * 64] = {};
+  unsigned char recv[8 * 64] = {};
+  cocclFrameExchange exchanges[8] = {};
+  for (int root = 0; root < comm->nRanks; ++root) {
+    for (size_t frame = 0; frame < 2; ++frame) {
+      const size_t index = (size_t)root * 2 + frame;
+      exchanges[index] = {
+          root, send + frame * 64, recv + index * 64,
+          frame + 1, index + 11, 64, nullptr, nullptr};
+    }
+  }
+
+  submitted.clear();
+  EXPECT(cocclCommitAllGatherVFrameExchange(
+             exchanges, 2, comm,
+             reinterpret_cast<cudaStream_t>(3)) == ncclSuccess);
+  EXPECT(submitted.size() == 12);
+  for (size_t frame = 0; frame < 2; ++frame) {
+    const size_t groupBase = frame * 6;
+    EXPECT(submitted[groupBase].kind == 'G');
+    EXPECT(submitted[groupBase + 5].kind == 'E');
+    for (int root = 0; root < comm->nRanks; ++root) {
+      const size_t index = (size_t)root * 2 + frame;
+      const SubmittedCall& call = submitted[groupBase + 1 + root];
+      EXPECT(call.kind == 'B');
+      EXPECT(call.peer == root);
+      EXPECT(call.bytes == exchanges[index].recvBytes);
+      EXPECT(call.send == exchanges[index].sendSlot);
+      EXPECT(call.recv == exchanges[index].recvSlot);
+      EXPECT(call.comm == comm);
+      EXPECT(call.stream == reinterpret_cast<cudaStream_t>(3));
+    }
+  }
+  std::free(comm);
+}
+
 }  // namespace
 
 ncclResult_t ncclGroupStart() {
-  submitted.push_back({'G', -1, 0, nullptr, nullptr});
+  submitted.push_back({'G', -1, 0, nullptr, nullptr, nullptr, nullptr});
   return ncclSuccess;
 }
 
 ncclResult_t ncclGroupEnd() {
-  submitted.push_back({'E', -1, 0, nullptr, nullptr});
+  submitted.push_back({'E', -1, 0, nullptr, nullptr, nullptr, nullptr});
+  return ncclSuccess;
+}
+
+ncclResult_t ncclBroadcast(
+    const void* sendbuff, void* recvbuff, size_t count,
+    ncclDataType_t datatype, int root, ncclComm_t comm,
+    cudaStream_t stream) {
+  if (datatype != ncclInt8) return ncclInvalidArgument;
+  submitted.push_back(
+      {'B', root, count, sendbuff, recvbuff, comm, stream});
   return ncclSuccess;
 }
 
@@ -159,7 +211,8 @@ ncclResult_t cocclReplayNativeCall(const cocclInfo& info) {
     return ncclInvalidArgument;
   }
   submitted.push_back({info.func == ncclFuncRecv ? 'R' : 'S',
-                       info.peer, info.count, info.comm, info.stream});
+                       info.peer, info.count, info.sendbuff,
+                       info.recvbuff, info.comm, info.stream});
   return ncclSuccess;
 }
 
@@ -168,6 +221,7 @@ int main() {
   testCommitOrder();
   testAllToAllMapping();
   testAllGatherMapping();
+  testAllGatherVCommitOrder();
   std::printf("COCCL frame exchange tests passed\n");
   return 0;
 }

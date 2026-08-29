@@ -21,6 +21,19 @@ ncclResult_t cocclCommitFrameExchange(
   return ncclInternalError;
 }
 
+ncclResult_t cocclCommitAllGatherVFrameExchange(
+    const cocclFrameExchange*, size_t, ncclComm_t, cudaStream_t) {
+  return ncclInternalError;
+}
+
+int64_t ncclParamAllgathervEnable() {
+  return 0;
+}
+
+int64_t ncclParamEnqueueRearchEnable() {
+  return 0;
+}
+
 ncclResult_t ncclReduceScatterConfig(
     const void*, void*, size_t, ncclDataType_t, ncclRedOp_t,
     ncclComm_t, cudaStream_t, const ncclCollConfig_t*) {

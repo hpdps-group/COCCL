@@ -6,6 +6,7 @@
 #include "core/compression/compress.h"
 #include "core/pipeline/coccl_pipeline_layout.h"
 #include "debug.h"
+#include "enqueue.h"
 
 #include <stdlib.h>
 
@@ -17,6 +18,23 @@ bool buffersOverlap(const void* first, size_t firstBytes,
   const uintptr_t secondBegin = reinterpret_cast<uintptr_t>(second);
   return firstBegin < secondBegin + secondBytes &&
       secondBegin < firstBegin + firstBytes;
+}
+
+bool useFramedAllGatherV(
+    const cocclPipelineStage* stage,
+    const cocclFrameExchange* exchanges, size_t exchangeCount) {
+  if (stage->kind != cocclPipelineStageAllGather ||
+      ncclParamAllgathervEnable() == 0 ||
+      ncclParamEnqueueRearchEnable() != 0 || stage->comm->ccEnable) {
+    return false;
+  }
+  if (stage->comm->nNodes > 1) return true;
+
+  constexpr size_t kSingleNodeP2PFrameBytes = size_t{1} << 30;
+  for (size_t i = 0; i < exchangeCount; ++i) {
+    if (exchanges[i].recvBytes >= kSingleNodeP2PFrameBytes) return false;
+  }
+  return true;
 }
 
 ncclCollConfig_t communicationConfig(
@@ -379,9 +397,16 @@ ncclResult_t cocclCommitPipelineFrameExchange(
         context->frameResources->exchanges,
         context->frameResources->exchangeCapacity, &exchangeCount));
   }
-  NCCLCHECK(cocclCommitFrameExchange(
-      context->frameResources->exchanges, exchangeCount,
-      stage->comm, stream));
+  if (useFramedAllGatherV(
+          stage, context->frameResources->exchanges, exchangeCount)) {
+    NCCLCHECK(cocclCommitAllGatherVFrameExchange(
+        context->frameResources->exchanges, edge->logicalChunks,
+        stage->comm, stream));
+  } else {
+    NCCLCHECK(cocclCommitFrameExchange(
+        context->frameResources->exchanges, exchangeCount,
+        stage->comm, stream));
+  }
 
   if (stage->kind == cocclPipelineStageAllGather) {
     edge->bytes *= (size_t)stage->comm->nRanks;

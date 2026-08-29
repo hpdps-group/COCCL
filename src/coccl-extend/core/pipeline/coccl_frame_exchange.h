@@ -43,4 +43,8 @@ ncclResult_t cocclCommitFrameExchange(
     const cocclFrameExchange* exchanges, size_t count,
     ncclComm_t comm, cudaStream_t stream);
 
+ncclResult_t cocclCommitAllGatherVFrameExchange(
+    const cocclFrameExchange* exchanges, size_t localFrames,
+    ncclComm_t comm, cudaStream_t stream);
+
 #endif

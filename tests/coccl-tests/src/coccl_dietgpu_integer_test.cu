@@ -169,6 +169,20 @@ std::vector<T> makeInput(int rank, size_t elements, bool compressible) {
   return values;
 }
 
+template <typename T>
+std::vector<T> makeRandomInput(int rank, size_t elements) {
+  std::vector<T> values(elements);
+  uint32_t state = 0x9e3779b9u ^ static_cast<uint32_t>(rank + 1);
+  auto* bytes = reinterpret_cast<unsigned char*>(values.data());
+  for (size_t index = 0; index < elements * sizeof(T); ++index) {
+    state ^= state << 13;
+    state ^= state >> 17;
+    state ^= state << 5;
+    bytes[index] = static_cast<unsigned char>(state);
+  }
+  return values;
+}
+
 void runPublic(Operation operation, const void* input, void* output,
                size_t elements, ncclDataType_t datatype, ncclComm_t comm,
                cudaStream_t stream, int rank, int ranks) {
@@ -270,7 +284,13 @@ void runCorrectnessCase(Operation operation, ncclDataType_t datatype,
   CUDACHECK(cudaMalloc(&input, inputBytes));
   CUDACHECK(cudaMalloc(&nativeOutput, outputBytes));
   CUDACHECK(cudaMalloc(&compressedOutput, outputBytes));
-  const std::vector<T> hostInput = makeInput<T>(rank, inputElements, false);
+  const std::vector<T> hostInput = options.pattern == "mixed"
+      ? (rank % 2 == 0
+             ? makeInput<T>(rank, inputElements, true)
+             : makeRandomInput<T>(rank, inputElements))
+      : (options.pattern == "random"
+             ? makeRandomInput<T>(rank, inputElements)
+             : makeInput<T>(rank, inputElements, false));
   CUDACHECK(cudaMemcpy(input, hostInput.data(), inputBytes,
                        cudaMemcpyHostToDevice));
   CUDACHECK(cudaMemset(nativeOutput, 0, outputBytes));
@@ -396,18 +416,13 @@ void runPerformance(const Options& options, ncclDataType_t datatype,
   T* output = nullptr;
   CUDACHECK(cudaMalloc(&input, inputBytes));
   CUDACHECK(cudaMalloc(&output, outputBytes));
-  if (options.pattern == "compressible") {
+  const bool random = options.pattern == "random" ||
+      (options.pattern == "mixed" && rank % 2 != 0);
+  if (options.pattern == "compressible" ||
+      (options.pattern == "mixed" && !random)) {
     CUDACHECK(cudaMemset(input, 0, inputBytes));
-  } else if (options.pattern == "random") {
-    std::vector<T> hostInput(elements);
-    uint32_t state = 0x9e3779b9u ^ static_cast<uint32_t>(rank + 1);
-    auto* bytes = reinterpret_cast<unsigned char*>(hostInput.data());
-    for (size_t index = 0; index < inputBytes; ++index) {
-      state ^= state << 13;
-      state ^= state >> 17;
-      state ^= state << 5;
-      bytes[index] = static_cast<unsigned char>(state);
-    }
+  } else if (random) {
+    const std::vector<T> hostInput = makeRandomInput<T>(rank, elements);
     CUDACHECK(cudaMemcpy(input, hostInput.data(), inputBytes,
                          cudaMemcpyHostToDevice));
   } else {

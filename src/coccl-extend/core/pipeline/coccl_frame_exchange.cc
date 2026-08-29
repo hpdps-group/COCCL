@@ -174,3 +174,24 @@ ncclResult_t cocclCommitFrameExchange(
   const ncclResult_t endResult = ncclGroupEnd();
   return ret == ncclSuccess ? endResult : ret;
 }
+
+ncclResult_t cocclCommitAllGatherVFrameExchange(
+    const cocclFrameExchange* exchanges, size_t localFrames,
+    ncclComm_t comm, cudaStream_t stream) {
+  for (size_t frame = 0; frame < localFrames; ++frame) {
+    ncclResult_t ret = ncclGroupStart();
+    if (ret != ncclSuccess) return ret;
+    for (int root = 0; root < comm->nRanks; ++root) {
+      const cocclFrameExchange& exchange =
+          exchanges[(size_t)root * localFrames + frame];
+      ret = ncclBroadcast(
+          exchange.sendSlot, exchange.recvSlot, exchange.recvBytes,
+          ncclInt8, root, comm, stream);
+      if (ret != ncclSuccess) break;
+    }
+    const ncclResult_t endResult = ncclGroupEnd();
+    if (ret != ncclSuccess) return ret;
+    if (endResult != ncclSuccess) return endResult;
+  }
+  return ncclSuccess;
+}

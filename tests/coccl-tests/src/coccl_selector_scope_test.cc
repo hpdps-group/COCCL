@@ -30,6 +30,7 @@ cocclCodecModel defaultModel = {{2.0, 2e-6, true}, 4.0, true};
 cocclCodecModel intraModel = {{1.0, 1e-6, true}, 8.0, true};
 cocclCodecModel interModel = {{3.0, 3e-6, true}, 4.0, true};
 ncclDataType_t snapshotDatatype = ncclNumTypes;
+bool framedCompressor;
 
 void setScope(cocclPreparedCall* prepared, cocclCompressionScope scope,
               void* compressor, bool datatypeSupported = true) {
@@ -73,8 +74,9 @@ const cocclCompressorPlugin* cocclCompressorDescriptor(void* compressor) {
   return reinterpret_cast<const cocclCompressorPlugin*>(compressor);
 }
 
-bool cocclCompressorSupports(void*, cocclCompressorCapability) {
-  return false;
+bool cocclCompressorSupports(void*, cocclCompressorCapability capability) {
+  return framedCompressor &&
+      capability == cocclCompressorCapabilityFramed;
 }
 
 const cocclConfig& cocclGetConfig() {
@@ -148,6 +150,20 @@ int main() {
   setScope(&prepared, cocclCompressionScope::Inter, kInter);
   checkSelection(&prepared, cocclAlgorithmReduceScatterTwoShot, false);
   interModel.valid = true;
+
+  framedCompressor = true;
+  defaultModel.valid = false;
+  prepared = makePrepared(&comm, cocclOperation::AllReduce);
+  prepared.info.count = (size_t{2} << 30) / sizeof(float);
+  setScope(&prepared, cocclCompressionScope::Default, kDefault);
+  checkSelection(&prepared, cocclAlgorithmAllReduceOneShot, false);
+
+  prepared = makePrepared(&comm, cocclOperation::AllReduce);
+  prepared.info.count = (size_t{3} << 30) / sizeof(float);
+  setScope(&prepared, cocclCompressionScope::Default, kDefault);
+  checkSelection(&prepared, cocclAlgorithmAllReduceTwoShot, false);
+  defaultModel.valid = true;
+  framedCompressor = false;
 
   prepared = makePrepared(&comm, cocclOperation::ReduceScatter);
   setScope(&prepared, cocclCompressionScope::Inter, kInter, false);
