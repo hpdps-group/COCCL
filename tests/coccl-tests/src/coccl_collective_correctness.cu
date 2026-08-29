@@ -367,30 +367,48 @@ void runCase(Operation operation, bool subAdd, ncclDataType_t datatype,
   CUDACHECK(cudaMemcpy(compressedHost.data(), compressedOutput, outputBytes,
                        cudaMemcpyDeviceToHost));
 
-  double localError = 0.0;
+  double localRelativeError = 0.0;
+  double localAbsoluteError = 0.0;
+  double localExpectedMagnitude = 0.0;
+  double localMaxAbsoluteError = 0.0;
   for (size_t index = 0; index < outputCount; ++index) {
     const double expected = static_cast<double>(toFloat(nativeHost[index]));
     const double actual = static_cast<double>(toFloat(compressedHost[index]));
-    localError += std::fabs(actual - expected) /
-        (std::fabs(expected) + 1.0e-6);
+    const double absoluteError = std::fabs(actual - expected);
+    localRelativeError += absoluteError / (std::fabs(expected) + 1.0e-6);
+    localAbsoluteError += absoluteError;
+    localExpectedMagnitude += std::fabs(expected);
+    if (absoluteError > localMaxAbsoluteError) {
+      localMaxAbsoluteError = absoluteError;
+    }
   }
-  double globalError = 0.0;
-  MPICHECK(MPI_Reduce(&localError, &globalError, 1, MPI_DOUBLE, MPI_SUM, 0,
+  const double localSums[] = {
+      localRelativeError, localAbsoluteError, localExpectedMagnitude};
+  double globalSums[3] = {};
+  double globalMaxAbsoluteError = 0.0;
+  MPICHECK(MPI_Reduce(localSums, globalSums, 3, MPI_DOUBLE, MPI_SUM, 0,
                       MPI_COMM_WORLD));
+  MPICHECK(MPI_Reduce(&localMaxAbsoluteError, &globalMaxAbsoluteError, 1,
+                      MPI_DOUBLE, MPI_MAX, 0, MPI_COMM_WORLD));
   if (worldRank == 0) {
-    const double mean = globalError /
+    const double samples =
         static_cast<double>(outputCount * static_cast<size_t>(worldSize));
+    const double meanRelativeError = globalSums[0] / samples;
+    const double meanAbsoluteError = globalSums[1] / samples;
+    const double relativeL1Error = globalSums[1] / (globalSums[2] + 1.0e-12);
     std::printf(
         "COCCL_CORRECTNESS topology=%s rank_count=%d operation=%s "
         "algorithm=%s compressor=%s path=%s dtype=%s depth=%d "
         "raw_chunk_elements=%zu output_elements=%zu "
-        "mean_relative_error=%.12e\n",
+        "mean_relative_error=%.12e mean_absolute_error=%.12e "
+        "relative_l1_error=%.12e max_absolute_error=%.12e\n",
         options.topology.c_str(), worldSize, operationName(operation),
         algorithmName(operation, subAdd), options.compressor.c_str(),
         options.path.c_str(), options.datatype.c_str(), options.depth,
         operation == Operation::AllGather || operation == Operation::SendRecv
             ? inputCount : inputCount / (size_t)worldSize,
-        outputCount, mean);
+        outputCount, meanRelativeError, meanAbsoluteError, relativeL1Error,
+        globalMaxAbsoluteError);
     std::fflush(stdout);
   }
 

@@ -22,6 +22,8 @@ COCCL 是一个面向压缩的 GPU 集合通信库，旨在简化定制压缩算
   或 Host RMA window；未注册的 raw staging arena 可以使用多个物理 segment 扩容。
 - 固定布局通信 stage 使用 NCCL Host Alltoall 和 per-collective Config API。Framed
   payload 根据后端能力选择内部 AllGatherV、grouped P2P 或 opt-in Host RMA。
+- NCCL Zero-CTA/Copy Engine 可以作为可选后端策略使用。默认仍为 NCCL `DEFAULT`，
+  因为其端到端收益取决于具体原语和压缩器。
 - 原生 stage 内部使用 Ring 还是 PAT 仍由 NCCL 选择；COCCL 自动调优只选择压缩通信的
   OneShot、TwoShot 或 TripleShot 上层 recipe。压缩器 profiling 只在一个协调 rank
   执行；在已验收的 A800 系统上，模型建立后的 Host 选择路径低于 1 微秒。
@@ -157,6 +159,19 @@ build/bin/coccl-config-check path/to/config.toml
 - `cocclSendComp` 和 `cocclRecvDecomp`。
 
 压缩 Send/Recv 以完整消息为单位串行执行。Grouped 调用会批量提交 metadata 和 payload 交换，使流水线并行流量可以共用固定布局或 framed 协议，而不创建按方向区分的额外 stream。
+
+### NCCL 后端策略
+
+COCCL 默认沿用 NCCL 的 `DEFAULT` CTA 策略。在支持该能力的 NCCL 2.31 系统上，
+可以通过以下方式测试 Copy Engine 或分层 Copy Engine 通信：
+
+```bash
+export NCCL_CTA_POLICY=ZERO
+```
+
+符合条件的固定布局 stage 会使用已注册的 symmetric window；不支持的 stage 继续使用
+NCCL 原有 fallback。Zero-CTA 可以降低 SM 和 workspace 占用，但由于端到端收益依赖
+具体原语和压缩器，因此不会默认开启。
 
 ### Normal 模式
 

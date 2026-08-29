@@ -42,6 +42,9 @@ accuracy.
 - Fixed communication stages use NCCL's Host Alltoall and per-collective
   Config APIs. Framed payloads select internal AllGatherV, grouped P2P, or
   opt-in Host RMA according to the available backend capability.
+- NCCL Zero-CTA/Copy Engine execution is available as an opt-in backend
+  policy. The default remains NCCL `DEFAULT` because the end-to-end result is
+  operation and compressor dependent.
 - NCCL still chooses its internal Ring or PAT algorithm for native stages.
   COCCL autotuning selects only the high-level OneShot, TwoShot, or TripleShot
   compressed recipe. Codec profiling runs on one coordinator rank and the
@@ -207,6 +210,20 @@ compressed-path invocation, or manual algorithm selection:
 Compressed Send/Recv processes one complete message serially. Grouped calls
 batch their metadata and payload exchanges so pipeline-parallel traffic can
 use the same fixed or framed protocol without creating per-direction streams.
+
+### NCCL Backend Policy
+
+COCCL leaves NCCL's CTA policy at `DEFAULT`. To benchmark Copy Engine or
+hierarchical Copy Engine communication on a supported NCCL 2.31 system, set:
+
+```bash
+export NCCL_CTA_POLICY=ZERO
+```
+
+Eligible fixed stages then use registered symmetric windows; unsupported
+stages keep NCCL's normal fallback. Zero-CTA can reduce SM and workspace use,
+but it is intentionally opt-in because its end-to-end benefit depends on the
+collective and compressor.
 
 ### Normal Mode
 
