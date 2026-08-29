@@ -29,6 +29,11 @@ uint64_t nextPhysicalHandle = 1;
 std::map<void*, size_t> legacyAllocations;
 std::map<CUdeviceptr, size_t> reservations;
 std::map<CUmemGenericAllocationHandle, size_t> physicalHandles;
+struct Mapping {
+  size_t bytes;
+  CUmemGenericAllocationHandle handle;
+};
+std::map<CUdeviceptr, Mapping> mappings;
 std::set<void*> registrations;
 std::set<ncclWindow_t> windows;
 std::set<cudaEvent_t> events;
@@ -108,9 +113,10 @@ CUresult CUDAAPI fakeCuMemGetAllocationGranularity(
   return CUDA_SUCCESS;
 }
 
-CUresult CUDAAPI fakeCuMemMap(CUdeviceptr, size_t, size_t,
-                              CUmemGenericAllocationHandle,
+CUresult CUDAAPI fakeCuMemMap(CUdeviceptr ptr, size_t bytes, size_t,
+                              CUmemGenericAllocationHandle handle,
                               unsigned long long) {
+  mappings.emplace(ptr, Mapping{bytes, handle});
   lifecycle.emplace_back("map");
   return CUDA_SUCCESS;
 }
@@ -127,7 +133,12 @@ CUresult CUDAAPI fakeCuMemSetAccess(CUdeviceptr, size_t,
   return CUDA_SUCCESS;
 }
 
-CUresult CUDAAPI fakeCuMemUnmap(CUdeviceptr, size_t) {
+CUresult CUDAAPI fakeCuMemUnmap(CUdeviceptr ptr, size_t bytes) {
+  auto found = mappings.find(ptr);
+  if (found == mappings.end() || found->second.bytes != bytes) {
+    return CUDA_ERROR_INVALID_VALUE;
+  }
+  mappings.erase(found);
   lifecycle.emplace_back("unmap");
   return CUDA_SUCCESS;
 }
@@ -299,54 +310,71 @@ int main() {
   EXPECT(cocclBufferCommInit(&firstComm) == ncclSuccess);
   EXPECT(cocclBufferCommInit(&secondComm) == ncclSuccess);
   cocclBufferHandle first;
-  EXPECT(cocclGetBuffer(&firstComm, 10 * kMiB, firstStream, &first) ==
-         ncclSuccess);
+  EXPECT(cocclGetBufferForComm(
+             &firstComm, &firstComm, 10 * kMiB,
+             cocclBufferRegistrationKind::Symmetric, firstStream,
+             &first) == ncclSuccess);
   EXPECT(first.bytes == 10 * kMiB);
   const size_t vmmLogicalBytes = first.bytes;
   void* firstAddress = first.ptr;
-  EXPECT(physicalHandles.size() == 1 &&
-         physicalHandles.begin()->second == 16 * kMiB &&
+  EXPECT(physicalHandles.size() == 1 && mappings.size() == 1 &&
          reservations.size() == 1);
-  EXPECT(registrationCalls.size() == 1);
-  EXPECT(registrationCalls[0].comm == &firstComm &&
-         registrationCalls[0].ptr == firstAddress &&
-         registrationCalls[0].bytes == 16 * kMiB);
+  EXPECT(physicalHandles.begin()->second == 16 * kMiB);
+  EXPECT(mappings.count(reinterpret_cast<CUdeviceptr>(firstAddress)) == 1);
+  std::set<CUmemGenericAllocationHandle> initialHandles;
+  for (const auto& entry : physicalHandles) initialHandles.insert(entry.first);
+  EXPECT(registrationCalls.empty() && windows.size() == 1);
   EXPECT(cocclRegisterBufferForComm(
              &first, &secondComm,
              cocclBufferRegistrationKind::Ordinary) == ncclSuccess);
-  EXPECT(registrations.size() == 2 && registrationCalls.size() == 2);
+  EXPECT(registrations.size() == 1 && registrationCalls.size() == 1 &&
+         windows.size() == 1);
   EXPECT(cocclRegisterBufferForComm(
              &first, &secondComm,
              cocclBufferRegistrationKind::Symmetric) == ncclSuccess);
-  EXPECT(registrations.size() == 2 && windows.size() == 1);
-  EXPECT(registrationCalls[1].comm == &secondComm &&
-         registrationCalls[1].ptr == firstAddress &&
-         registrationCalls[1].bytes == 16 * kMiB);
+  EXPECT(registrations.size() == 1 && registrationCalls.size() == 1 &&
+         windows.size() == 2);
   EXPECT(cocclRegisterBufferForComm(
              &first, &secondComm,
              cocclBufferRegistrationKind::Ordinary) == ncclSuccess);
-  EXPECT(registrations.size() == 2 && registrationCalls.size() == 2);
+  EXPECT(registrations.size() == 1 && registrationCalls.size() == 1 &&
+         windows.size() == 2);
 
   completeRecordedEvents = false;
   EXPECT(cocclReleaseBuffer(&first, firstStream) == ncclSuccess);
   cocclBufferHandle smaller;
-  EXPECT(cocclGetBuffer(&firstComm, 4 * kMiB, firstStream, &smaller) ==
-         ncclSuccess);
-  EXPECT(smaller.ptr == firstAddress && physicalHandles.size() == 1);
+  EXPECT(cocclGetBufferForComm(
+             &firstComm, &firstComm, 4 * kMiB,
+             cocclBufferRegistrationKind::Symmetric, firstStream,
+             &smaller) == ncclSuccess);
+  EXPECT(smaller.ptr == firstAddress);
+  EXPECT(physicalHandles.size() == 1);
+  EXPECT(mappings.size() == 1);
+  EXPECT(reservations.size() == 1);
 
   completeRecordedEvents = true;
   EXPECT(cocclReleaseBuffer(&smaller, firstStream) == ncclSuccess);
   cocclBufferHandle grown;
-  EXPECT(cocclGetBuffer(&firstComm, 20 * kMiB, firstStream, &grown) ==
-         ncclSuccess);
+  EXPECT(cocclGetBufferForComm(
+             &firstComm, &firstComm, 20 * kMiB,
+             cocclBufferRegistrationKind::Symmetric, firstStream,
+             &grown) == ncclSuccess);
   EXPECT(grown.bytes == 20 * kMiB);
-  EXPECT(physicalHandles.size() == 1 &&
-         physicalHandles.begin()->second == 24 * kMiB &&
+  EXPECT(physicalHandles.size() == 2 && mappings.size() == 2 &&
          reservations.size() == 1);
+  for (CUmemGenericAllocationHandle handle : initialHandles) {
+    EXPECT(physicalHandles.count(handle) == 1);
+  }
+  size_t physicalBytes = 0;
+  for (const auto& entry : physicalHandles) physicalBytes += entry.second;
+  EXPECT(physicalBytes == 24 * kMiB);
+  EXPECT(mappings.count(reinterpret_cast<CUdeviceptr>(grown.ptr)) == 1);
+  EXPECT(mappings.count(
+             reinterpret_cast<CUdeviceptr>(grown.ptr) + 16 * kMiB) == 1);
   EXPECT(cocclRegisterBufferForComm(
              &grown, &secondComm,
              cocclBufferRegistrationKind::Ordinary) == ncclSuccess);
-  EXPECT(registrations.size() == 2);
+  EXPECT(registrations.empty() && windows.size() == 1);
   failNextEventRecord = true;
   EXPECT(cocclReleaseBuffer(&grown, firstStream) ==
          ncclUnhandledCudaError);
@@ -356,21 +384,23 @@ int main() {
   cocclBufferHandle independent;
   EXPECT(cocclGetBuffer(&secondComm, 8 * kMiB, firstStream, &independent) ==
          ncclSuccess);
-  EXPECT(physicalHandles.size() == 2 && reservations.size() == 2);
+  EXPECT(physicalHandles.size() == 3 && mappings.size() == 3 &&
+         reservations.size() == 2);
   EXPECT(cocclReleaseBuffer(&independent, firstStream) == ncclSuccess);
-  EXPECT(registrations.size() == 3);
+  EXPECT(registrations.size() == 1);
 
   lifecycle.clear();
   EXPECT(cocclBufferCommDestroy(&secondComm) == ncclSuccess);
-  EXPECT(physicalHandles.size() == 1 && reservations.size() == 1);
-  EXPECT(registrations.size() == 1);
+  EXPECT(physicalHandles.size() == 2 && mappings.size() == 2 &&
+         reservations.size() == 1);
+  EXPECT(registrations.empty() && windows.size() == 1);
   EXPECT(operationIndex("deregister") < operationIndex("unmap"));
   EXPECT(operationIndex("unmap") < operationIndex("release"));
   EXPECT(operationIndex("release") < operationIndex("address-free"));
   lifecycle.clear();
   EXPECT(cocclBufferCommDestroy(&firstComm) == ncclSuccess);
   EXPECT(physicalHandles.empty() && reservations.empty() &&
-         registrations.empty() && events.empty());
+         mappings.empty() && registrations.empty() && events.empty());
 
   vmmEnabled = false;
   EXPECT(cocclBufferCommInit(&firstComm) == ncclSuccess);
@@ -418,7 +448,7 @@ int main() {
   EXPECT(cocclReleaseBuffer(&fallback, firstStream) == ncclSuccess);
   EXPECT(cocclBufferCommDestroy(&firstComm) == ncclSuccess);
   EXPECT(physicalHandles.empty() && reservations.empty() &&
-         registrations.empty());
+         mappings.empty() && registrations.empty());
 
   std::puts("VMM buffer tests passed");
   return 0;

@@ -79,13 +79,18 @@ struct VmmSlice {
   VmmBlock* block = nullptr;
 };
 
+struct VmmSegment {
+  CUmemGenericAllocationHandle handle = 0;
+  size_t bytes = 0;
+};
+
 struct VmmBlock : BufferBlock {
   VmmBlock() : BufferBlock(BufferBackend::Vmm) {}
   struct VmmPool* pool = nullptr;
   int cudaDev = -1;
   void* ptr = nullptr;
   size_t capacity = 0;
-  CUmemGenericAllocationHandle handle = 0;
+  std::vector<VmmSegment> segments;
   std::list<VmmSlice> slices;
   std::vector<BufferRegistration> registrations;
 };
