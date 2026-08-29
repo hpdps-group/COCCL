@@ -1,8 +1,9 @@
 /*************************************************************************
- * Copyright (c) 2016-2022, NVIDIA CORPORATION. All rights reserved.
+ * SPDX-FileCopyrightText: Copyright (c) 2016-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+ * SPDX-License-Identifier: Apache-2.0
  *
- * See LICENSE.txt for license information
- ************************************************************************/
+ * See LICENSE.txt for more license information
+ *************************************************************************/
 
 #ifndef NCCL_TRANSPORT_H_
 #define NCCL_TRANSPORT_H_
@@ -18,7 +19,6 @@
 #define TRANSPORT_SHM 1
 #define TRANSPORT_NET 2
 #define TRANSPORT_COLLNET 3
-#define TRANSPORT_PROFILER 4
 
 #include "proxy.h"
 #include "comm.h"
@@ -28,13 +28,15 @@ extern struct ncclTransport p2pTransport;
 extern struct ncclTransport shmTransport;
 extern struct ncclTransport netTransport;
 extern struct ncclTransport collNetTransport;
-extern struct ncclTransport profilerTransport;
 
 extern struct ncclTransport* ncclTransports[];
 // Forward declarations
 struct ncclRing;
 struct ncclConnector;
 struct ncclComm;
+
+int64_t ncclParamMultiSegmentRegister();
+extern int64_t ncclParamNvlsEnable();
 
 struct ncclPeerInfo {
   int rank;
@@ -45,13 +47,21 @@ struct ncclPeerInfo {
   uint64_t pidHash;
   dev_t shmDev;
   int64_t busId;
+  cudaUUID_t gpuUuid;
   struct ncclComm* comm;
   int cudaCompCap;
+  int gpuCftSupport;
   size_t totalGlobalMem;
   // MNNVL support
   nvmlGpuFabricInfoV_t fabricInfo;
+  int fabricHandleSupport;
   int cuMemSupport;
   int version;
+  uint64_t supportedGinTypeBitMask;
+  bool crossNicSupport;
+  bool rmaPluginAvailable;
+  bool cuMemGdrSupport;
+  int mloPart; // MLOPart partition index, or -1 if not an MLOPart GPU
 };
 
 #define CONNECT_SIZE 256
@@ -85,8 +95,10 @@ struct ncclNvlsSharedRes {
   char* ucCredit; // Unicast NVLS credit address
   int nChannels;
   int nHeads;
+  int chunkSize;
+  int treeMaxChunkSize;
   struct ncclShmemCollBuff nvlsShmem;
-  void *nvlsShmemHandle;
+  void* nvlsShmemHandle;
 };
 
 #endif /* CUDART_VERSION >= 12010 */
@@ -96,56 +108,81 @@ struct ncclCollNetSharedRes {
   int size;
   char* cudaBuff;
   char* hostBuff;
-  struct ncclProxyArgs* proxyAppend[2*NCCL_MAX_NETDEVS];
+  struct ncclProxyArgs* proxyAppend[2 * NCCL_MAX_NETDEVS];
   void* resources;
   int nChannels;
   size_t buffSize;
 };
 
 struct ncclTransportComm {
-  ncclResult_t (*setup)(struct ncclComm* comm, struct ncclTopoGraph* graph, struct ncclPeerInfo*, struct ncclPeerInfo*, struct ncclConnect*, struct ncclConnector*, int channelId, int connIndex);
+  ncclResult_t (*setup)(struct ncclComm* comm, struct ncclTopoGraph* graph, struct ncclPeerInfo*, struct ncclPeerInfo*,
+                        struct ncclConnect*, struct ncclConnector*, int channelId, int connIndex);
   ncclResult_t (*connect)(struct ncclComm* comm, struct ncclConnect*, int nranks, int rank, struct ncclConnector*);
-  ncclResult_t (*free)(struct ncclConnector*);
-  ncclResult_t (*proxySharedInit)(struct ncclProxyConnection* connection, struct ncclProxyState* proxyState, int nChannels);
-  ncclResult_t (*proxySetup)(struct ncclProxyConnection* connection, struct ncclProxyState* proxyState, void* reqBuff, int reqSize, void* respBuff, int respSize, int* done);
-  ncclResult_t (*proxyConnect)(struct ncclProxyConnection* connection, struct ncclProxyState* proxyState, void* reqBuff, int reqSize, void* respBuff, int respSize, int* done);
+  ncclResult_t (*free)(struct ncclComm* comm, struct ncclConnector*);
+  ncclResult_t (*proxySharedInit)(struct ncclProxyConnection* connection, struct ncclProxyState* proxyState,
+                                  int nChannels);
+  ncclResult_t (*proxySetup)(struct ncclProxyConnection* connection, struct ncclProxyState* proxyState, void* reqBuff,
+                             int reqSize, void* respBuff, int respSize, int* done);
+  ncclResult_t (*proxyConnect)(struct ncclProxyConnection* connection, struct ncclProxyState* proxyState, void* reqBuff,
+                               int reqSize, void* respBuff, int respSize, int* done);
   ncclResult_t (*proxyFree)(struct ncclProxyConnection* connection, struct ncclProxyState* proxyState);
   ncclResult_t (*proxyProgress)(struct ncclProxyState* proxyState, struct ncclProxyArgs*);
-  ncclResult_t (*proxyRegister)(struct ncclProxyConnection* connection, struct ncclProxyState* proxyState, void* reqBuff, int reqSize, void* respBuff, int respSize, int* done);
-  ncclResult_t (*proxyDeregister)(struct ncclProxyConnection* connection, struct ncclProxyState* proxyState, void* reqBuff, int reqSize, int* done);
+  ncclResult_t (*proxyRegister)(struct ncclProxyConnection* connection, struct ncclProxyState* proxyState,
+                                void* reqBuff, int reqSize, void* respBuff, int respSize, int* done);
+  ncclResult_t (*proxyDeregister)(struct ncclProxyConnection* connection, struct ncclProxyState* proxyState,
+                                  void* reqBuff, int reqSize, int* done);
 };
 
 struct ncclTransport {
   const char name[8];
-  ncclResult_t (*canConnect)(int*, struct ncclComm* comm, struct ncclTopoGraph* graph, struct ncclPeerInfo*, struct ncclPeerInfo*);
+  ncclResult_t (*canConnect)(int*, struct ncclComm* comm, struct ncclTopoGraph* graph, struct ncclPeerInfo*,
+                             struct ncclPeerInfo*);
   struct ncclTransportComm send;
   struct ncclTransportComm recv;
 };
 
-ncclResult_t ncclTransportP2pConnect(struct ncclComm* comm, int channelId, int nrecv, int* peerRecv, int nsend, int* peerSend, int connIndex);
+ncclResult_t ncclTransportP2pConnect(struct ncclComm* comm, int channelId, int nrecv, int* peerRecv, int nsend,
+                                     int* peerSend, int connIndex);
 ncclResult_t ncclTransportP2pSetup(struct ncclComm* comm, struct ncclTopoGraph* graph, int connIndex);
-ncclResult_t ncclTransportCheckP2pType(struct ncclComm* comm, bool* isAllDirectP2p, bool* directMode);
-ncclResult_t ncclTransportIsAllDirectP2p(struct ncclComm* comm, int* isAllDirectP2p);
+ncclResult_t ncclTransportCheckP2pType(struct ncclComm* comm, bool* isAllDirectP2p, bool* directMode,
+                                       bool* isAllCudaP2p);
+bool ncclP2pUsesMemcpy();
 
 ncclResult_t ncclNvlsInit(struct ncclComm* comm);
+ncclResult_t ncclNvlsTuning(struct ncclComm* comm);
 ncclResult_t ncclNvlsSetup(struct ncclComm* comm, struct ncclComm* parent);
 ncclResult_t ncclNvlsBufferSetup(struct ncclComm* comm);
 ncclResult_t ncclNvlsTreeConnect(struct ncclComm* comm);
-ncclResult_t ncclNvlsGraphRegisterBuffer(struct ncclComm *comm, const void *sendbuff, void *recvbuff, size_t sendbuffSize, size_t recvbuffSize, int *outRegBufUsed, void **outRegBufSend, void **outRegBufRecv, struct ncclIntruQueue<struct ncclCommCallback, &ncclCommCallback::next>* cleanupQueue, int* nCleanupQueueElts);
-ncclResult_t ncclNvlsLocalRegisterBuffer(struct ncclComm *comm, const void *sendbuff, void *recvbuff, size_t sendbuffSize, size_t recvbuffSize, int *outRegBufUsed, void **outRegBufSend, void **outRegBufRecv);
-ncclResult_t ncclNvlsDeregBuffer(struct ncclComm* comm, CUmemGenericAllocationHandle *mcHandler, CUdeviceptr ptr, int dev, size_t ucsize, size_t mcsize);
+ncclResult_t ncclNvlsGraphRegisterBuffer(
+  struct ncclComm* comm, const void* sendbuff, void* recvbuff, size_t sendbuffSize, size_t recvbuffSize,
+  int* outRegBufUsed, void** outRegBufSend, void** outRegBufRecv,
+  struct ncclIntruQueue<struct ncclCommCallback, &ncclCommCallback::next>* cleanupQueue, int* nCleanupQueueElts);
+ncclResult_t ncclNvlsLocalRegisterBuffer(struct ncclComm* comm, const void* sendbuff, void* recvbuff,
+                                         size_t sendbuffSize, size_t recvbuffSize, int* outRegBufUsed,
+                                         void** outRegBufSend, void** outRegBufRecv);
+ncclResult_t ncclNvlsDeregBuffer(struct ncclComm* comm, CUmemGenericAllocationHandle* mcHandler, CUdeviceptr ptr,
+                                 int dev, size_t ucsize, size_t mcsize);
 ncclResult_t ncclNvlsFree(struct ncclComm* comm);
 
-enum { collNetRecv=0, collNetSend=1 };
-bool ncclTransportCollNetSetup(struct ncclComm* comm, struct ncclTopoGraph* collNetGraph, struct ncclChannel* channel, int masterRank, int masterPeer, int collNetGraphChannelId, int type, ncclConnect* connect);
+enum {
+  collNetRecv = 0,
+  collNetSend = 1
+};
+bool ncclTransportCollNetSetup(struct ncclComm* comm, struct ncclTopoGraph* collNetGraph, struct ncclChannel* channel,
+                               int masterRank, int masterPeer, int collNetGraphChannelId, int type,
+                               ncclConnect* connect);
 ncclResult_t ncclTransportCollNetCheck(struct ncclComm* comm, int collNetSetupFail);
 ncclResult_t ncclTransportCollNetFree(struct ncclComm* comm);
-ncclResult_t ncclCollnetLocalRegisterBuffer(struct ncclComm* comm, const void* userbuff, size_t buffSize, int type, int* outRegBufUsed, void** outHandle);
-ncclResult_t ncclCollnetGraphRegisterBuffer(struct ncclComm* comm, const void* userbuff, size_t buffSize, int type, int* outRegBufFlag, void** outHandle, struct ncclIntruQueue<struct ncclCommCallback, &ncclCommCallback::next>* cleanupQueue, int* nCleanupQueueElts);
+ncclResult_t ncclCollnetLocalRegisterBuffer(struct ncclComm* comm, const void* userbuff, size_t buffSize, int type,
+                                            int* outRegBufUsed, void** outHandle);
+ncclResult_t ncclCollnetGraphRegisterBuffer(
+  struct ncclComm* comm, const void* userbuff, size_t buffSize, int type, int* outRegBufFlag, void** outHandle,
+  struct ncclIntruQueue<struct ncclCommCallback, &ncclCommCallback::next>* cleanupQueue, int* nCleanupQueueElts);
 ncclResult_t ncclCollnetDeregBuffer(struct ncclComm* comm, struct ncclProxyConnector* proxyconn, void* handle);
 
 ncclResult_t ncclTransportRingConnect(struct ncclComm* comm);
 ncclResult_t ncclTransportTreeConnect(struct ncclComm* comm);
+ncclResult_t ncclTransportInitRankMap(struct ncclComm* comm, int nHeads, const int* heads);
 ncclResult_t ncclTransportPatConnect(struct ncclComm* comm);
 
 ncclResult_t ncclCollNetSetup(ncclComm_t comm, ncclComm_t parent, struct ncclTopoGraph* graphs[]);
@@ -153,22 +190,45 @@ ncclResult_t ncclCollNetChainBufferSetup(ncclComm_t comm);
 ncclResult_t ncclCollNetDirectBufferSetup(ncclComm_t comm);
 
 ncclResult_t ncclNetDeregBuffer(struct ncclComm* comm, struct ncclProxyConnector* proxyConn, void* handle);
-ncclResult_t ncclNetLocalRegisterBuffer(ncclComm* comm, const void* userbuff, size_t buffSize, struct ncclConnector** peerConns, int nPeers, int* outRegBufFlag, void** outHandle);
-ncclResult_t ncclNetGraphRegisterBuffer(ncclComm* comm, const void* userbuff, size_t buffSize, struct ncclConnector** peerConns, int nPeers, int* outRegBufFlag, void** outHandle, struct ncclIntruQueue<struct ncclCommCallback, &ncclCommCallback::next>* cleanupQueue, int* nCleanupQueueElts);
+ncclResult_t ncclNetLocalRegisterBuffer(ncclComm* comm, const void* userbuff, size_t buffSize,
+                                        struct ncclConnector** peerConns, int nPeers, int* outRegBufFlag,
+                                        void** outHandle);
+ncclResult_t ncclNetGraphRegisterBuffer(
+  ncclComm* comm, const void* userbuff, size_t buffSize, struct ncclConnector** peerConns, int nPeers,
+  int* outRegBufFlag, void** outHandle,
+  struct ncclIntruQueue<struct ncclCommCallback, &ncclCommCallback::next>* cleanupQueue, int* nCleanupQueueElts);
 
-ncclResult_t ncclRegisterP2pIpcBuffer(struct ncclComm* comm, void* userbuff, size_t size, int peerRank, int* regFlag, void** regAddr, struct ncclIntruQueue<struct ncclCommCallback, &ncclCommCallback::next>* cleanupQueue);
-ncclResult_t ncclRegisterP2pNetBuffer(struct ncclComm* comm, void* userbuff, size_t size, struct ncclConnector* conn, int* regFlag, void** handle, struct ncclIntruQueue<struct ncclCommCallback, &ncclCommCallback::next>* cleanupQueue);
-ncclResult_t ncclRegisterCollBuffers(struct ncclComm* comm, struct ncclTaskColl* info, void* outRegBufSend[NCCL_MAX_LOCAL_RANKS], void* outRegBufRecv[NCCL_MAX_LOCAL_RANKS], struct ncclIntruQueue<struct ncclCommCallback, &ncclCommCallback::next>* cleanupQueue, bool* regNeedConnect);
-ncclResult_t ncclRegisterCollNvlsBuffers(struct ncclComm* comm, struct ncclTaskColl* info, void* outRegBufSend[NCCL_MAX_LOCAL_RANKS], void* outRegBufRecv[NCCL_MAX_LOCAL_RANKS], struct ncclIntruQueue<struct ncclCommCallback, &ncclCommCallback::next>* cleanupQueue, bool* regNeedConnect);
-ncclResult_t ncclNvlsRegResourcesQuery(struct ncclComm* comm, struct ncclTaskColl* info, int* recChannels);
+ncclResult_t ncclRegisterP2pIpcBuffer(
+  struct ncclComm* comm, void* userbuff, size_t size, int peerRank, int* regFlag, void** regAddr,
+  struct ncclIntruQueue<struct ncclCommCallback, &ncclCommCallback::next>* cleanupQueue);
+ncclResult_t ncclRegisterP2pNetBuffer(
+  struct ncclComm* comm, void* userbuff, size_t size, struct ncclConnector* conn, int* regFlag, void** handle,
+  struct ncclIntruQueue<struct ncclCommCallback, &ncclCommCallback::next>* cleanupQueue);
+ncclResult_t ncclRegisterCollBuffers(
+  struct ncclComm* comm, struct ncclTaskColl* info, void* outRegBufSend[NCCL_MAX_LOCAL_RANKS],
+  void* outRegBufRecv[NCCL_MAX_LOCAL_RANKS],
+  struct ncclIntruQueue<struct ncclCommCallback, &ncclCommCallback::next>* cleanupQueue, bool* regNeedConnect);
+ncclResult_t ncclRegisterCollNvlsBuffers(
+  struct ncclComm* comm, struct ncclTaskColl* info, void* outRegBufSend[NCCL_MAX_LOCAL_RANKS],
+  void* outRegBufRecv[NCCL_MAX_LOCAL_RANKS],
+  struct ncclIntruQueue<struct ncclCommCallback, &ncclCommCallback::next>* cleanupQueue, bool* regNeedConnect);
+ncclResult_t ncclNvlsRegResourcesQuery(struct ncclComm* comm, ncclFunc_t func, int* recChannels);
+
+#if CUDART_VERSION >= 12010
+ncclResult_t ncclNvlsGroupCreate(struct ncclComm* comm, CUmulticastObjectProp* prop, int rank, unsigned int nranks,
+                                 CUmemGenericAllocationHandle* mcHandle, char* shareableHandle);
+ncclResult_t ncclNvlsGroupConnect(struct ncclComm* comm, char* shareableHandle, int rank,
+                                  CUmemGenericAllocationHandle* mcHandle);
+#endif
 
 ncclResult_t ncclIpcSymmetricInit(struct ncclComm* comm);
-ncclResult_t ncclIpcSymmetricMap(struct ncclComm* comm, size_t offset, size_t size, CUmemGenericAllocationHandle memHandle, void** symPtr);
-ncclResult_t ncclIpcSymmetricFree(struct ncclComm* comm, size_t size, void* symPtr);
+ncclResult_t ncclIpcMapSymmetric(struct ncclComm* comm, size_t offset, size_t size,
+                                 CUmemGenericAllocationHandle memHandle, void** symPtr);
+ncclResult_t ncclIpcFreeSymmetric(struct ncclComm* comm, size_t size, void* symPtr);
 ncclResult_t ncclIpcSymmetricFinalize(struct ncclComm* comm);
 ncclResult_t ncclNvlsSymmetricInit(struct ncclComm* comm);
-ncclResult_t ncclNvlsSymmetricMap(struct ncclComm* comm, size_t offset, size_t ucsize, void* ucaddr);
-ncclResult_t ncclNvlsSymmetricFree(struct ncclComm* comm, size_t ucsize, void* ucaddr);
+ncclResult_t ncclNvlsMapSymmetric(struct ncclComm* comm, size_t offset, size_t ucsize, void* ucaddr);
+ncclResult_t ncclNvlsFreeSymmetric(struct ncclComm* comm, size_t ucsize, void* ucaddr);
 ncclResult_t ncclNvlsSymmetricFinalize(struct ncclComm* comm);
 
 #endif

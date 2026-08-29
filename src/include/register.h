@@ -1,3 +1,10 @@
+/*************************************************************************
+ * SPDX-FileCopyrightText: Copyright (c) 2024-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * See LICENSE.txt for more license information
+ *************************************************************************/
+
 #ifndef NCCL_REGISTER_H_
 #define NCCL_REGISTER_H_
 
@@ -29,15 +36,6 @@ struct ncclRegNetHandles {
   struct ncclRegNetHandles* next;
 };
 
-struct ncclSymRegTask {
-  struct ncclSymRegTask *next;
-  void* buff;
-  size_t baseSize;
-  CUmemGenericAllocationHandle memHandle;
-  struct ncclReg* regHandle;
-  size_t alignment;
-};
-
 struct ncclReg {
   // common attributes
   uintptr_t begAddr, endAddr; // page aligned
@@ -54,30 +52,25 @@ struct ncclReg {
   uintptr_t caddrs[NCCL_MAX_LOCAL_RANKS]; /* use to check if NVLS buffers match among intra-node ranks */
   // collnet reg
   void* collnetHandle;
+  // gin reg
+  void** ginMhandles;
+  void** ginHandles;
   struct ncclProxyConnector* collnetProxyconn;
   // general ipc reg
   struct ncclPeerRegIpcAddr regIpcAddrs;
-  struct ncclIpcRegInfo* ipcInfos[NCCL_MAX_LOCAL_RANKS];
-  // symmetric reg
-  void* baseSymPtr;
-  size_t symSize;
-  int winFlags;
+  struct ncclIpcRegInfo** ipcInfos;  // Dynamically allocated, sized to ipcInfosSize
+  int ipcInfosSize;                  // Size of ipcInfos array (localRanks or nRanks for cross-clique)
 };
 
 struct ncclRegCache {
-  struct ncclReg **slots;
+  struct ncclReg** slots;
   int capacity, population;
   uintptr_t pageSize;
 };
 
-struct ncclWindow {
-  struct ncclReg* handle;
-};
-
 ncclResult_t ncclRegCleanup(struct ncclComm* comm);
 ncclResult_t ncclCommGraphRegister(const ncclComm_t comm, void* buff, size_t size, void** handle);
-ncclResult_t ncclCommGraphDeregister(const ncclComm_t comm, struct ncclReg *handle);
-ncclResult_t ncclRegLocalIsValid(struct ncclReg *reg, bool *isValid);
-ncclResult_t ncclCommSymmetricRegisterInternal(struct ncclComm* comm, void* buff, size_t baseSize, size_t alignment, CUmemGenericAllocationHandle memHandle, struct ncclReg* regHandle);
+ncclResult_t ncclCommGraphDeregister(const ncclComm_t comm, struct ncclReg* handle);
+ncclResult_t ncclRegLocalIsValid(struct ncclReg* reg, bool* isValid);
 
 #endif

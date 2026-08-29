@@ -48,6 +48,7 @@ $(COCCL_OBJDIR)/%.cu.o: $(COCCL_ROOT)/%.cu
 	mkdir -p $(dir $@)
 	$(NVCC) $(NVCUFLAGS) -Xcompiler -fPIC \
 		-I$(INCDIR) -I$(NCCLDIR)/src -I$(NCCLDIR)/src/include \
+		-I$(NCCLDIR)/src/include/plugin \
 		$(COCCL_INCFLAGS) -MMD -MF $@.d -c $< -o $@
 endif
 

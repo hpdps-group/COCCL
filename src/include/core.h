@@ -1,34 +1,30 @@
 /*************************************************************************
- * Copyright (c) 2015-2021, NVIDIA CORPORATION. All rights reserved.
+ * SPDX-FileCopyrightText: Copyright (c) 2015-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+ * SPDX-License-Identifier: Apache-2.0
  *
- * See LICENSE.txt for license information
- ************************************************************************/
+ * See LICENSE.txt for more license information
+ *************************************************************************/
 
 #ifndef NCCL_CORE_H_
 #define NCCL_CORE_H_
 
-#include <pthread.h>
-#include <unistd.h>
 #include <stdlib.h>
 #include <stdint.h>
 #include <algorithm> // For std::min/std::max
 #include "nccl.h"
 
+#if defined(NCCL_OS_LINUX)
 #ifdef PROFAPI
-#define NCCL_API(ret, func, args...)        \
-    __attribute__ ((visibility("default"))) \
-    __attribute__ ((alias(#func)))          \
-    ret p##func (args);                     \
-    extern "C"                              \
-    __attribute__ ((visibility("default"))) \
-    __attribute__ ((weak))                  \
-    ret func(args)
+#define NCCL_API(ret, func, args...) \
+  extern "C" __attribute__((visibility("default"))) __attribute__((alias(#func))) ret p##func(args); \
+  extern "C" __attribute__((visibility("default"))) __attribute__((weak)) ret func(args)
 #else
-#define NCCL_API(ret, func, args...)        \
-    extern "C"                              \
-    __attribute__ ((visibility("default"))) \
-    ret func(args)
+#define NCCL_API(ret, func, args...) extern "C" __attribute__((visibility("default"))) ret func(args)
 #endif // end PROFAPI
+#else
+/* Windows and other non-Linux: use standard variadic macro (no visibility attribute) */
+#define NCCL_API(ret, func, ...) extern "C" ret func(__VA_ARGS__)
+#endif // end NCCL_OS_LINUX
 
 #include "debug.h"
 #include "checks.h"

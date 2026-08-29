@@ -1,8 +1,9 @@
 /*************************************************************************
- * Copyright (c) 2016-2022, NVIDIA CORPORATION. All rights reserved.
+ * SPDX-FileCopyrightText: Copyright (c) 2016-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+ * SPDX-License-Identifier: Apache-2.0
  *
- * See LICENSE.txt for license information
- ************************************************************************/
+ * See LICENSE.txt for more license information
+ *************************************************************************/
 
 #ifndef NCCL_INT_NET_H_
 #define NCCL_INT_NET_H_
@@ -12,10 +13,17 @@
 #include "comm.h"
 #include "checks.h"
 
+#define NCCL_UNDEF_DEV_COUNT -1
+
 typedef char ncclNetHandle_t[NCCL_NET_HANDLE_MAXSIZE];
 
 ncclResult_t ncclNetInit(struct ncclComm* comm);
+ncclResult_t ncclNetInitFromParent(struct ncclComm* comm, struct ncclComm* parent);
 ncclResult_t ncclNetFinalize(struct ncclComm* comm);
+ncclResult_t ncclNetGetDevCount(int netPluginIndex, int* nPhysDev, int* nVirtDev);
+ncclResult_t ncclNetSetVirtDevCount(int netPluginIndex, int nVirtDev);
+ncclResult_t ncclCollNetGetDevCount(int netPluginIndex, int* nPhysDev, int* nVirtDev);
+ncclResult_t ncclCollNetSetVirtDevCount(int netPluginIndex, int nVirtDev);
 
 // Test whether the current GPU support GPU Direct RDMA.
 ncclResult_t ncclGpuGdrSupport(struct ncclComm* comm, int* gdrSupport);

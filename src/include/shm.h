@@ -1,10 +1,17 @@
+/*************************************************************************
+ * SPDX-FileCopyrightText: Copyright (c) 2016-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * See LICENSE.txt for more license information
+ *************************************************************************/
+
 #ifndef NCCL_SHM_H_
 #define NCCL_SHM_H_
 
 #include "comm.h"
 
 struct shmLegacyIpc {
-  char shmSuffix[7];
+  char shmSuffix[32];
   ncclShmHandle_t handle;
   size_t shmSize;
 };
@@ -14,13 +21,12 @@ struct shmCuIpc {
     CUmemFabricHandle handle;
     CUmemGenericAllocationHandle data;
   };
-  void *ptr;
+  void* ptr;
   size_t size;
 };
 
 struct shmIpcDesc {
-  union
-  {
+  union {
     struct shmLegacyIpc shmli;
     struct shmCuIpc shmci;
   };
@@ -29,8 +35,10 @@ struct shmIpcDesc {
 
 typedef struct shmIpcDesc ncclShmIpcDesc_t;
 
-ncclResult_t ncclShmAllocateShareableBuffer(size_t size, bool legacy, ncclShmIpcDesc_t *descOut, void **hptr, void **dptr);
-ncclResult_t ncclShmImportShareableBuffer(struct ncclComm *comm, int proxyRank, ncclShmIpcDesc_t *desc, void **hptr, void **dptr, ncclShmIpcDesc_t *descOut);
-ncclResult_t ncclShmIpcClose(ncclShmIpcDesc_t *desc);
+ncclResult_t ncclShmAllocateShareableBuffer(size_t size, bool legacy, ncclShmIpcDesc_t* descOut, void** hptr,
+                                            void** dptr);
+ncclResult_t ncclShmImportShareableBuffer(struct ncclComm* comm, int proxyRank, ncclShmIpcDesc_t* desc, void** hptr,
+                                          void** dptr, ncclShmIpcDesc_t* descOut);
+ncclResult_t ncclShmIpcClose(ncclShmIpcDesc_t* desc);
 
 #endif

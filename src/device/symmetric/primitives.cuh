@@ -1,11 +1,38 @@
+/*************************************************************************
+ * SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * See LICENSE.txt for more license information
+ *************************************************************************/
+
 #ifndef NCCL_DEVICE_SYMMETRIC_PRIMITIVES_H_
 #define NCCL_DEVICE_SYMMETRIC_PRIMITIVES_H_
 
-#include "symmetric.h"
+#include "sym_kernels.h"
 #include "bitops.h"
 #include "collectives.h"
-#include "op128.h"
-#include "reduce_kernel.h"
+#include "../op128.h"
+#include "../reduce_kernel.h"
+#if !defined(NCCL_OS_WINDOWS)
+#include "gin_scratch.h"
+#endif
+
+#if defined(CUDART_VERSION) && CUDART_VERSION >= 13010
+#include <cuda/std/ranges>
+#endif
+
+#if __CUDA_ARCH__ >= 1000
+#include <cuda/barrier>
+#include <cuda/ptx>
+
+namespace ptx = cuda::ptx;
+
+template <typename Pack, int UnrollPacks, int UnrollPeers = 1>
+struct tmaSmemStruct {
+  alignas(16) Pack buff[UnrollPeers][UnrollPacks * WARP_SIZE];
+  cuda::barrier<cuda::thread_scope_block> bar;
+};
+#endif
 
 #if __CUDA_ARCH__ >= 700
 // __grid_constant__ appears to break cuda-gdb
@@ -14,407 +41,415 @@
 #define NCCL_GRID_CONSTANT
 #endif
 
+template <bool val>
+struct BoolTag {
+  static constexpr bool value = val;
+};
+
+// A cheap approximation of std::decay
+template <typename T>
+struct ncclDecayType {
+  using Type = T;
+};
+template <typename T>
+struct ncclDecayType<T&> {
+  using Type = T;
+};
+template <typename T>
+struct ncclDecayType<T&&> {
+  using Type = T;
+};
+template <typename T>
+struct ncclDecayType<T const> {
+  using Type = T;
+};
+template <typename T>
+struct ncclDecayType<T volatile> {
+  using Type = T;
+};
+
+template <typename T>
+using ncclDecayType_t = typename ncclDecayType<T>::Type;
+
 // flattenIx(pos0, dim0, pos1, dim1, pos2, dim2, ...)
 // Given a position vector `pos` in a rectangular index space with lengths in the `dim`
 // vector, flatten that down to a linear index. The fastest moving dimension is given first.
-__device__ __forceinline__ int flattenIx() { return 0; }
-
-template<typename Int0, typename Int1, typename ...Ints>
-static __device__ Int0 flattenIx(Int0 pos, Int1 size, Ints ...more) {
-  return pos + size*flattenIx(more...);
+__device__ __forceinline__ int flattenIx() {
+  return 0;
 }
 
-// Precomputed integer reciprocoals for denominator values 1..64 inclusive.
-// Pass these to idivFast64() for fast division on the GPU.
-static __device__ uint64_t idivRcp64_upto64(int x) {
-  static constexpr uint64_t table[65] = {
-    idivRcp64(0x01), idivRcp64(0x01), idivRcp64(0x02), idivRcp64(0x03),
-    idivRcp64(0x04), idivRcp64(0x05), idivRcp64(0x06), idivRcp64(0x07),
-    idivRcp64(0x08), idivRcp64(0x09), idivRcp64(0x0a), idivRcp64(0x0b),
-    idivRcp64(0x0c), idivRcp64(0x0d), idivRcp64(0x0e), idivRcp64(0x0f),
-    idivRcp64(0x10), idivRcp64(0x11), idivRcp64(0x12), idivRcp64(0x13),
-    idivRcp64(0x14), idivRcp64(0x15), idivRcp64(0x16), idivRcp64(0x17),
-    idivRcp64(0x18), idivRcp64(0x19), idivRcp64(0x1a), idivRcp64(0x1b),
-    idivRcp64(0x1c), idivRcp64(0x1d), idivRcp64(0x1e), idivRcp64(0x1f),
-    idivRcp64(0x20), idivRcp64(0x21), idivRcp64(0x22), idivRcp64(0x23),
-    idivRcp64(0x24), idivRcp64(0x25), idivRcp64(0x26), idivRcp64(0x27),
-    idivRcp64(0x28), idivRcp64(0x29), idivRcp64(0x2a), idivRcp64(0x2b),
-    idivRcp64(0x2c), idivRcp64(0x2d), idivRcp64(0x2e), idivRcp64(0x2f),
-    idivRcp64(0x30), idivRcp64(0x31), idivRcp64(0x32), idivRcp64(0x33),
-    idivRcp64(0x34), idivRcp64(0x35), idivRcp64(0x36), idivRcp64(0x37),
-    idivRcp64(0x38), idivRcp64(0x39), idivRcp64(0x3a), idivRcp64(0x3b),
-    idivRcp64(0x3c), idivRcp64(0x3d), idivRcp64(0x3e), idivRcp64(0x3f),
-    idivRcp64(0x40)
-  };
-  return table[x];
+template <typename Int0, typename Int1, typename... Ints>
+static __device__ Int0 flattenIx(Int0 pos, Int1 size, Ints... more) {
+  return pos + size * flattenIx(more...);
 }
 
-static __device__ uint32_t idivRcp32_upto64(int x) {
-  return idivRcp64_upto64(x)>>32;
+template <typename T>
+static __device__ void partitionElts(unsigned nParts, unsigned part, size_t* nElts, ncclSymPtr<T>* inPtr,
+                                     ncclSymPtr<T>* outPtr) {
+  constexpr int eltPerB16 = 16 / sizeof(T);
+  size_t nB16 = (*nElts + eltPerB16 - 1) / eltPerB16;
+  size_t beginB16 = part * (nB16 / nParts) + min(part, uint32_t(nB16 % nParts));
+  *inPtr += beginB16 * eltPerB16;
+  *outPtr += beginB16 * eltPerB16;
+  if (part < nParts - 1) {
+    nB16 = nB16 / nParts + (part < nB16 % nParts ? 1 : 0);
+    *nElts = nB16 * eltPerB16;
+  } else {
+    *nElts = *nElts - beginB16 * eltPerB16;
+  }
 }
 
 namespace {
-struct ncclCoopCta {
-  __device__ void sync() { __syncthreads(); }
-  __device__ int self() { return threadIdx.x; }
-  __device__ int count() { return blockDim.x; }
-};
-struct ncclCoopWarps {
-  int log2_nWarps;
-  __device__ void sync() {
-    asm volatile("barrier.sync %0, %1;" :: "r"(1 + (threadIdx.x>>(5+log2_nWarps))), "r"(32<<log2_nWarps) : "memory");
+struct ncclSymkArgsHandler {
+  ncclDevComm const& comm;
+  ncclLLA2AHandle const& lsaLLA2A;
+  ncclGinOutboxHandle const& ginOutbox;
+  ncclGinInboxA2AHandle const& ginInboxRail;
+  ncclGinSyncHandle const& ginSyncHandle;
+  ncclDevResourceHandle rsGinAccumBuf;
+  uint32_t rsGinAccumBytesPerBlock;
+  struct ncclSymkChannelWorkRange* channelWorkRange;
+  struct ncclSymkDevWork* devWork;
+  uint32_t nRanks_rcp32;
+
+  __device__ ncclSymkArgsHandler(ncclSymkDevWorkArgs const* args)
+    : comm(args->kcomm.devComm), lsaLLA2A(args->kcomm.lsaLLA2A), ginOutbox(args->kcomm.ginOutbox),
+      ginInboxRail(args->kcomm.ginInboxRail), ginSyncHandle(args->kcomm.ginSyncHandle),
+      rsGinAccumBuf(args->kcomm.rsGinAccumBuf), rsGinAccumBytesPerBlock(args->kcomm.rsGinAccumBytesPerBlock) {
+    channelWorkRange = args->getWorkRange();
+
+    devWork = args->getWorks(args->nMaxChannels);
+    nRanks_rcp32 = comm.nRanks_rcp32;
   }
-  __device__ int self() { return threadIdx.x & ((32<<log2_nWarps)-1); }
-  __device__ int count() { return 32<<log2_nWarps; }
-};
-struct ncclCoopWarp {
-  __device__ void sync() { __syncwarp(); }
-  __device__ int self() { return threadIdx.x%32; }
-  __device__ int count() { return 32; }
-};
-}
 
-namespace {
-static constexpr int ncclSymPrims_UseBarrier = 1;
-static constexpr int ncclSymPrims_UseLL = 2;
-static constexpr int ncclSymPrims_UseMultimem = 4;
-struct ncclSymPrims {
-  int flags;
-  int const &rank;
-  int const &nRanks;
-  uint32_t const &nRanks_rcp32;
-  int block, nBlocks;
-  uint32_t nBlocks_rcp32;
-  uint32_t nBlocks_nWarps_rcp32;
-  uint32_t nRanks_nBlocks_rcp32;
-  uint32_t nWarpPerRank, nWarpPerRank_rcp32;
-  struct ncclSymDevBase* const &base;
-  uintptr_t offsetMc;
+  template <typename T>
+  __device__ void getWorkRange(int block, uint16_t& workLo, size_t& indexLo, uint16_t& workHi, size_t& indexHi) {
+    constexpr int EltPerCell = NCCL_SYM_KERNEL_CELL_SIZE / sizeof(T);
+    uint32_t fracLo, fracHi;
 
-  uint32_t const &stride4G;
-  uint32_t barEpoch;
-  uint32_t llEpoch;
-
-  __device__ ncclSymPrims(ncclSymDevComm const &comm, int flags):
-    flags(flags),
-    rank(comm.rank),
-    nRanks(comm.nRanks),
-    nRanks_rcp32(comm.nRanks_rcp32),
-    block(blockIdx.x),
-    nBlocks(gridDim.x),
-    nBlocks_rcp32(idivRcp32_upto64(nBlocks)),
-    nBlocks_nWarps_rcp32(imulRcp32(nBlocks, nBlocks_rcp32, blockDim.x/32, idivRcp32_upto64(blockDim.x/32))),
-    nRanks_nBlocks_rcp32(imulRcp32(nRanks, nRanks_rcp32, gridDim.x, nBlocks_rcp32)),
-    nWarpPerRank(idivFast32(nBlocks*blockDim.x/32, nRanks, nRanks_rcp32)),
-    nWarpPerRank_rcp32(idivRcp32_upto64(nWarpPerRank)),
-    base(comm.base),
-    offsetMc((flags & ncclSymPrims_UseMultimem) ? (char*)comm.baseMc - (char*)base : 0x0),
-    stride4G(comm.stride4G) {
-
-    #if CUDART_VERSION >= 12030 && __CUDA_ARCH__ >= 900
-      cudaGridDependencySynchronize();
-    #endif
-
-    if ((flags & ncclSymPrims_UseBarrier) && threadIdx.x < nRanks) {
-      barEpoch = (flags & ncclSymPrims_UseMultimem) ? base->barEpochMc[block] : base->barEpochUc[block];
+    // Where the work begins
+    workLo = (block == 0) ? 0 : channelWorkRange[block - 1].workHi; // start where predecessor ends
+    fracLo = (block == 0) ? 0 : channelWorkRange[block - 1].fracHi + 1;
+    // If the predecessor ended on the work boundary, then we step to the beginning of the next work.
+    // This ensures we never have empty parts.
+    if (fracLo == 0x10000) {
+      workLo++;
+      fracLo = 0;
     }
-    if (flags & ncclSymPrims_UseLL) llEpoch = base->llEpoch[block] + 2;
-  }
-  __device__  ~ncclSymPrims() {
-    if (threadIdx.x == 0) {
-      if (flags & ncclSymPrims_UseBarrier) {
-        ((flags & ncclSymPrims_UseMultimem) ? base->barEpochMc : base->barEpochUc)[block] = barEpoch;
-      }
-      if (flags & ncclSymPrims_UseLL) base->llEpoch[block] = llEpoch - 2;
-    }
+    struct ncclSymkDevWork const& dwLo = devWork[workLo];
+    indexLo = ((fracLo * divUp(dwLo.nElts, EltPerCell)) >> 16) * EltPerCell;
+
+    // Where the work ends
+    workHi = channelWorkRange[block].workHi;
+    fracHi = channelWorkRange[block].fracHi + 1;
+    struct ncclSymkDevWork const& dwHi = devWork[workHi];
+    indexHi = min(((fracHi * divUp(dwHi.nElts, EltPerCell)) >> 16) * EltPerCell, dwHi.nElts);
   }
 
-  template<typename T>
-  __device__ T* peerPtr(int peer, T* selfPtr) {
-    return add4G(selfPtr, (peer-rank)*stride4G);
+  template <typename T>
+  __device__ void getWorkRangeFused(int blockIdx, int w, int& block, int& nBlocks, size_t& indexLo, size_t& indexHi) {
+    constexpr int EltPerCell = NCCL_SYM_KERNEL_CELL_SIZE / sizeof(T);
+    struct ncclSymkDevWork const& dw = devWork[w];
+    uint32_t fracLo, fracHi;
+    int lastBlock;
+
+    block = blockIdx - dw.sChannelId;
+    nBlocks = dw.nChannels;
+    lastBlock = dw.sChannelId + dw.nChannels - 1;
+
+    // Where the work begins
+    fracLo = (dw.sChannelId > 0 && channelWorkRange[dw.sChannelId - 1].workHi == w) ?
+               ((channelWorkRange[dw.sChannelId - 1].fracHi + 1) & 0xFFFF) :
+               0;
+    indexLo = ((fracLo * divUp(dw.nElts, EltPerCell)) >> 16) * EltPerCell;
+    fracHi = (channelWorkRange[lastBlock].workHi == w) ? channelWorkRange[lastBlock].fracHi + 1 : 0x10000;
+    indexHi = min(((fracHi * divUp(dw.nElts, EltPerCell)) >> 16) * EltPerCell, dw.nElts);
   }
 
-  template<typename T>
-  __device__ T* multimemPtr(T* selfPtr) {
-    return reinterpret_cast<T*>(reinterpret_cast<uintptr_t>(selfPtr) + offsetMc);
-  }
+  template <typename T, typename Fn>
+  __device__ void forEachWork(Fn const& fn) {
+    uint16_t workLo, workHi;
+    size_t indexLo, indexHi;
 
-  __device__  void barrierArrive(ncclCoopCta cta, bool release) {
-    cta.sync();
-    #if __CUDA_ARCH__ < 700
-      if (release) {
-        if (cta.self() == 0) __threadfence_system();
-        cta.sync();
+    getWorkRange<T>(blockIdx.x, workLo, indexLo, workHi, indexHi);
+
+    NVCC_PRAGMA_UNROLL_DISABLED
+    for (int w = workLo; w <= workHi; w++) {
+      struct ncclSymkDevWork const& dw = devWork[w];
+      size_t const& nAllElts = dw.nElts;
+      size_t currentIndexLo, currentIndexHi;
+      int block, nBlocks;
+      if (blockIdx.x >= dw.sChannelId && blockIdx.x < dw.sChannelId + dw.nChannels) {
+        getWorkRangeFused<T>(blockIdx.x, w, block, nBlocks, currentIndexLo, currentIndexHi);
+      } else {
+        currentIndexLo = (w > workLo) ? 0 : indexLo;
+        currentIndexHi = (w < workHi) ? nAllElts : indexHi;
+        block = 0;
+        nBlocks = 1;
       }
-    #endif
-    if (flags & ncclSymPrims_UseMultimem) {
-    #if __CUDA_ARCH__ >= 900 && CUDART_VERSION >= 12010
-      if (cta.self() == 0) {
-        uint32_t* inbox = &multimemPtr(base)->barInboxMc[block];
-        if (release) {
-          asm volatile("multimem.red.release.sys.add.u32 [%0],1;" :: "l"(inbox));
-        } else {
-          asm volatile("multimem.red.relaxed.sys.add.u32 [%0],1;" :: "l"(inbox));
-        }
-      }
-    #endif
-    } else {
-      int r = cta.self();
-      if (r != rank && r < nRanks) {
-        uint32_t* inbox = &peerPtr(r, base)->barInboxPerPeer[block*nRanks + rank];
-        #if __CUDA_ARCH__ >= 700
-          if (release) {
-            asm volatile("st.release.sys.u32 [%0],%1;" :: "l"(inbox), "r"(barEpoch+1));
-          } else {
-            asm volatile("st.relaxed.sys.u32 [%0],%1;" :: "l"(inbox), "r"(barEpoch+1));
-          }
-        #else
-          asm volatile("st.volatile.u32 [%0],%1;" :: "l"(inbox), "r"(barEpoch+1));
-        #endif
-      }
+
+      fn(block, nBlocks, currentIndexHi - currentIndexLo, nAllElts,
+         ncclSymPtr<T>(dw.inputWin, dw.inputOff) + currentIndexLo,
+         ncclSymPtr<T>(dw.outputWin, dw.outputOff) + currentIndexLo);
+
+      currentIndexLo = 0;
     }
   }
 
-  __device__  void barrierWait(ncclCoopCta cta, bool acquire) {
-    if (flags & ncclSymPrims_UseMultimem) {
-    #if __CUDA_ARCH__ >= 900
-      if (cta.self() == 0) {
-        uint32_t* inbox = &base->barInboxMc[block];
-        while (true) {
-          uint32_t got;
-          if (acquire) {
-            asm volatile("ld.acquire.sys.u32 %0,[%1];" : "=r"(got) : "l"(inbox));
-          } else {
-            asm volatile("ld.relaxed.sys.u32 %0,[%1];" : "=r"(got) : "l"(inbox));
-          }
-          if (got-(barEpoch+nRanks) <= uint32_t(-1)>>1) break;
-        }
-        barEpoch += nRanks;
-      }
-    #endif
-    } else {
-      int r = cta.self();
-      if (r != rank && r < nRanks) {
-        uint32_t* inbox = &base->barInboxPerPeer[block*nRanks + r];
-        while (true) {
-          uint32_t got;
-          #if __CUDA_ARCH__ >= 700
-            if (acquire) {
-              asm volatile("ld.acquire.sys.u32 %0,[%1];" : "=r"(got) : "l"(inbox));
-            } else {
-              asm volatile("ld.relaxed.sys.u32 %0,[%1];" : "=r"(got) : "l"(inbox));
-            }
-          #else
-            asm volatile("ld.volatile.u32 %0,[%1];" : "=r"(got) : "l"(inbox));
-          #endif
-          if (got-(barEpoch+1) <= uint32_t(-1)>>1) break;
-        }
-      }
-      #if __CUDA_ARCH__ < 700
-        if (acquire) {
-          cta.sync();
-          if (cta.self() == 0) __threadfence();
-        }
-      #endif
-      barEpoch += 1;
-    }
-    cta.sync();
+  template <typename T, typename Fn>
+  __device__ void singleWork(Fn const& fn) {
+    uint16_t w;
+    size_t indexLo, indexHi;
+
+    getWorkRange<T>(blockIdx.x, w, indexLo, w, indexHi);
+
+    struct ncclSymkDevWork const& dw = devWork[w];
+
+    fn(indexHi - indexLo, dw.nElts, ncclSymPtr<T>(dw.inputWin, dw.inputOff) + indexLo,
+       ncclSymPtr<T>(dw.outputWin, dw.outputOff) + indexLo);
   }
 
-  __device__ void endLL(ncclCoopCta cta) {
-    if (__builtin_expect(llEpoch >= -2u, false)) {
-      cta.sync();
-      uint4* buf = ncclSymDevBase_getLLBuf(base, nRanks, block, llEpoch);
-      int epochSize = ncclSymLLEpochSize(nRanks);
-      #pragma unroll 4
-      for (int i=cta.self(); i*16 < epochSize; i += cta.count()) {
-        buf[i] = uint4{0, 0, 0, 0};
-      }
-    }
-    cta.sync();
-    llEpoch += (llEpoch == -1u) ? 3 : 1;
-  }
+  template <typename T, typename Fn>
+  __device__ void forEachWorkNoFusion(Fn const& fn) {
+    uint16_t workLo, workHi;
+    size_t indexLo, indexHi;
 
-  template<typename T>
-  __device__ void sendLL(int peer, int slot, T val) {
-    union { T tmp; uint32_t u32[divUp(sizeof(T),8)][2]; };
-    tmp = val;
-    uint4* buf = ncclSymDevBase_getLLBuf(peerPtr(peer, base), nRanks, block, llEpoch) + slot;
-    #pragma unroll
-    for (int u=0; u < divUp(sizeof(T),8); u++) {
-      asm volatile("st.volatile.v4.u32 [%0],{%1,%3,%2,%3};" :: "l"(buf + ncclSymLLMaxSlots(sizeof(T))*u), "r"(u32[u][0]), "r"(u32[u][1]), "r"(llEpoch));
-    }
-  }
+    getWorkRange<T>(blockIdx.x, workLo, indexLo, workHi, indexHi);
 
-  template<typename T>
-  __device__ void bcastLL(int slot, T val) {
-    if (flags & ncclSymPrims_UseMultimem) {
-      union { T tmp; uint32_t u32[divUp(sizeof(T),8)][2]; };
-      tmp = val;
-      uint4* bufmc = ncclSymDevBase_getLLBuf(multimemPtr(base), nRanks, block, llEpoch) + slot;
-      #pragma unroll
-      for (int u=0; u < divUp(sizeof(T),8); u++) {
-        asm volatile("st.volatile.v4.u32 [%0],{%1,%3,%2,%3};" :: "l"(bufmc + ncclSymLLMaxSlots(sizeof(T))*u), "r"(u32[u][0]), "r"(u32[u][1]), "r"(llEpoch));
-      }
-    } else {
-      union { T tmp; uint32_t u32[divUp(sizeof(T),8)][2]; };
-      tmp = val;
-      uint4* buf0 = ncclSymDevBase_getLLBuf(peerPtr(0, base), nRanks, block, llEpoch) + slot;
-      int dr = 0;
-      int r = rank;
-      #pragma unroll 1
-      for (; dr+8 <= nRanks; dr += 8) {
-        #pragma unroll
-        for (int ur=0; ur < 8; ur++) {
-          uint4* buf = add4G(buf0, r*stride4G);
-          #pragma unroll
-          for (int u=0; u < divUp(sizeof(T),8); u++) {
-            asm volatile("st.volatile.v4.u32 [%0],{%1,%3,%2,%3};" :: "l"(buf + ncclSymLLMaxSlots(sizeof(T))*u), "r"(u32[u][0]), "r"(u32[u][1]), "r"(llEpoch));
-          }
-          r += 1;
-          if (r == nRanks) r = 0;
-        }
-      }
-      #pragma unroll
-      for (int ur=0; ur < 8; ur++, dr++) {
-        if (dr == nRanks) break;
-        uint4* buf = add4G(buf0, r*stride4G);
-        #pragma unroll
-        for (int u=0; u < divUp(sizeof(T),8); u++) {
-          asm volatile("st.volatile.v4.u32 [%0],{%1,%3,%2,%3};" :: "l"(buf + ncclSymLLMaxSlots(sizeof(T))*u), "r"(u32[u][0]), "r"(u32[u][1]), "r"(llEpoch));
-        }
-        r += 1;
-        if (r == nRanks) r = 0;
-      }
-    }
-  }
+    NVCC_PRAGMA_UNROLL_DISABLED
+    for (int w = workLo; w <= workHi; w++) {
+      struct ncclSymkDevWork const& dw = devWork[w];
+      size_t const& nAllElts = dw.nElts;
+      size_t currentIndexLo, currentIndexHi;
+      currentIndexLo = (w > workLo) ? 0 : indexLo;
+      currentIndexHi = (w < workHi) ? nAllElts : indexHi;
 
-  template<int nSlotsMin, int nSlotsMax, typename T>
-  __device__ void recvLL(int slot0, int nSlots, int stride, T(&elts)[nSlotsMax]) {
-    uint4* buf = ncclSymDevBase_getLLBuf(base, nRanks, block, llEpoch) + slot0;
-    uint4 tmp[nSlotsMax][divUp(sizeof(T),8)];
-    //int spins=0;
-    while (true) {
-      #pragma unroll
-      for (int u=0; u < nSlotsMax; u++) {
-        if (u < nSlotsMin || u < nSlots) {
-          #pragma unroll
-          for (int v=0; v < divUp(sizeof(T),8); v++) {
-            asm volatile("ld.volatile.v4.u32 {%0,%1,%2,%3},[%4];" : "=r"(tmp[u][v].x), "=r"(tmp[u][v].y), "=r"(tmp[u][v].z), "=r"(tmp[u][v].w) : "l"(buf + u*stride + v*ncclSymLLMaxSlots(sizeof(T))));
-          }
-        }
-      }
-      bool okAll = true;
-      #pragma unroll
-      for (int u=0; u < nSlotsMax; u++) {
-        #pragma unroll
-        for (int v=0; v < divUp(sizeof(T),8); v++) {
-          if (u < nSlotsMin || u < nSlots) {
-            bool ok = tmp[u][v].y == llEpoch &&
-                      tmp[u][v].w == llEpoch;
-            okAll &= ok;
-          }
-        }
-      }
-      if (__builtin_expect(okAll, true)) break;
-      //if (spins++ == 10<<20) spins=0;
-    }
-    #pragma unroll
-    for (int u=0; u < nSlotsMax; u++) {
-      if (nSlotsMin <= u && u == nSlots) break;
-      union { T val; uint32_t u32[divUp(sizeof(T),8)][2]; };
-      #pragma unroll
-      for (int v=0; v < divUp(sizeof(T),8); v++) {
-        u32[v][0] = tmp[u][v].x;
-        u32[v][1] = tmp[u][v].z;
-      }
-      elts[u] = val;
-    }
-  }
-
-  template<typename Pack, typename T, typename Red, int Unroll=8>
-  __device__ Pack recvReduceLL(int slot, int stride, Red red) {
-    using Acc = typename Red::EltType;
-    using AccPack = BytePack<sizeof(Pack)*sizeof(Acc)/sizeof(T)>;
-    AccPack acc;
-    bool first = true;
-    int r = 0;
-    #pragma unroll 1
-    for (; r+Unroll <= nRanks; r += Unroll) {
-      Pack got[Unroll];
-      this->template recvLL</*Min=*/Unroll>(slot + r*stride, Unroll, stride, got);
-      AccPack acc0 = applyCast<T, Acc>(got[0]);
-      acc = first ? acc0 : applyReduce(red, acc, acc0);
-      first = false;
-      #pragma unroll
-      for (int i=1; i < Unroll; i++) acc = applyReduce(red, acc, applyCast<T, Acc>(got[i]));
-    }
-    if (r < nRanks) {
-      Pack got[Unroll];
-      this->template recvLL</*Min=*/1>(slot + r*stride, nRanks-r, stride, got);
-      AccPack acc0 = applyCast<T, Acc>(got[0]);
-      acc = first ? acc0 : applyReduce(red, acc, acc0);
-      #pragma unroll
-      for (int i=1; i < Unroll-1; i++) {
-        if (r+i < nRanks) acc = applyReduce(red, acc, applyCast<T, Acc>(got[i]));
-      }
-    }
-    return applyCast<Acc, T>(acc);
-  }
-
-  template<typename T>
-  __device__ T recvLL(int slot) {
-    T one[1];
-    this->template recvLL<1, 1, T>(slot, 1, 0, one);
-    return one[0];
-  }
-
-  template<typename Coop, typename T>
-  __device__ void coopRecvLL(Coop coop, int slot0, int nSlots, T* dst) {
-    int me = coop.self();
-    if (me < nSlots) {
-      uint4* buf = ncclSymDevBase_getLLBuf(base, nRanks, block, llEpoch) + slot0 + me;
-      uint4 got[divUp(sizeof(T), 8)];
-      //int spins=0;
-      #pragma unroll 1
-      while (true) {
-        #pragma unroll
-        for (int u=0; u < divUp(sizeof(T), 8); u++) {
-          asm volatile("ld.volatile.v4.u32 {%0,%1,%2,%3},[%4];" : "=r"(got[u].x), "=r"(got[u].y), "=r"(got[u].z), "=r"(got[u].w) : "l"(buf + u*ncclSymLLMaxSlots(sizeof(T))));
-        }
-        bool ok = true;
-        #pragma unroll
-        for (int u=0; u < divUp(sizeof(T), 8); u++) {
-          ok &= got[u].y == llEpoch;
-          ok &= got[u].w == llEpoch;
-        }
-        if (__builtin_expect(ok, true)) break;
-        //if (++spins == 10<<20) { spins=0; printf("r=%d LL spin @ ix=%d got=%d want=%d\n", rank, slot0+me, got[0].y, llEpoch); }
-      }
-      union { T val; uint32_t u32[divUp(sizeof(T), 8)][2]; };
-      #pragma unroll
-      for (int u=0; u < divUp(sizeof(T), 8); u++) {
-        u32[u][0] = got[u].x;
-        u32[u][1] = got[u].z;
-      }
-      dst[slot0 + me] = val;
+      fn(currentIndexHi - currentIndexLo, nAllElts, ncclSymPtr<T>(dw.inputWin, dw.inputOff) + currentIndexLo,
+         ncclSymPtr<T>(dw.outputWin, dw.outputOff) + currentIndexLo);
     }
   }
 };
-}
+} // namespace
 
-template<template<typename> typename Red, typename T, bool nvls>
-struct ncclSymAccumType { using Type = T; };
+template <template <typename> typename Red, typename T, bool nvls>
+struct ncclSymkAccumType {
+  using Type = T;
+};
 
 // Only Red's whose opArg is invariant w.r.t. the datatype can have a different
 // accumulator type. At the moment this excludes integer min/max, sumpostdiv,
 // and premulsum.
-template<> struct ncclSymAccumType<FuncSum, __half, false> { using Type = float; };
+template <>
+struct ncclSymkAccumType<FuncSum, __half, false> {
+  using Type = float;
+};
+template <>
+struct ncclSymkAccumType<FuncSumPostDiv, __half, false> {
+  using Type = float;
+};
 #if defined(__CUDA_BF16_TYPES_EXIST__)
-template<> struct ncclSymAccumType<FuncSum, __nv_bfloat16, false> { using Type = float; };
+template <>
+struct ncclSymkAccumType<FuncSum, __nv_bfloat16, false> {
+  using Type = float;
+};
+template <>
+struct ncclSymkAccumType<FuncSumPostDiv, __nv_bfloat16, false> {
+  using Type = float;
+};
 #endif
 #if defined(__CUDA_FP8_TYPES_EXIST__)
-template<> struct ncclSymAccumType<FuncSum, __nv_fp8_e4m3, false> { using Type = float; };
-template<> struct ncclSymAccumType<FuncSum, __nv_fp8_e5m2, false> { using Type = float; };
+template <>
+struct ncclSymkAccumType<FuncSum, __nv_fp8_e4m3, false> {
+  using Type = float;
+};
+template <>
+struct ncclSymkAccumType<FuncSum, __nv_fp8_e5m2, false> {
+  using Type = float;
+};
+template <>
+struct ncclSymkAccumType<FuncSumPostDiv, __nv_fp8_e4m3, false> {
+  using Type = __half;
+};
+template <>
+struct ncclSymkAccumType<FuncSumPostDiv, __nv_fp8_e5m2, false> {
+  using Type = __half;
+};
 #endif
+
+// Accumulator type held in smem for GIN algos.
+template <template <typename> typename Red, typename T>
+struct ncclSymkGinAccumType {
+  using Type = T;
+};
+
+template <>
+struct ncclSymkGinAccumType<FuncSum, __half> {
+  using Type = float;
+};
+template <>
+struct ncclSymkGinAccumType<FuncSumPostDiv, __half> {
+  using Type = float;
+};
+#if defined(__CUDA_BF16_TYPES_EXIST__)
+template <>
+struct ncclSymkGinAccumType<FuncSum, __nv_bfloat16> {
+  using Type = float;
+};
+template <>
+struct ncclSymkGinAccumType<FuncSumPostDiv, __nv_bfloat16> {
+  using Type = float;
+};
 #endif
+
+#if defined(__CUDA_FP8_TYPES_EXIST__)
+// fp8 types accumulate in fp16. Multimem algo sends fp8 on wire because it's
+// impossible to get fp16 accumulator from switch. Non-multimem sends fp16 to
+// give users a higher precision alternative.
+template <>
+struct ncclSymkGinAccumType<FuncSum, __nv_fp8_e4m3> {
+  using Type = __half;
+};
+template <>
+struct ncclSymkGinAccumType<FuncSum, __nv_fp8_e5m2> {
+  using Type = __half;
+};
+template <>
+struct ncclSymkGinAccumType<FuncSumPostDiv, __nv_fp8_e4m3> {
+  using Type = __half;
+};
+template <>
+struct ncclSymkGinAccumType<FuncSumPostDiv, __nv_fp8_e5m2> {
+  using Type = __half;
+};
+#endif
+
+#if __CUDA_ARCH__ >= 1000
+static __device__ __forceinline__ void tmaLoadStoreMc(char* dest, char* smem, char* source, size_t size,
+                                                      cuda::barrier<cuda::thread_scope_block>& bar) {
+  cuda::device::memcpy_async_tx((char*)smem, (const char*)source, cuda::aligned_size_t<16>(size), bar);
+  cuda::barrier<cuda::thread_scope_block>::arrival_token token = cuda::device::barrier_arrive_tx(bar, 1, size);
+  bar.wait(std::move(token));
+  ptx::cp_async_bulk(ptx::space_global, ptx::space_shared, dest, smem, size);
+  ptx::cp_async_bulk_commit_group();
+  ptx::cp_async_bulk_wait_group_read(ptx::n32_t<0>());
+}
+#endif
+
+// TODO: move this into data_ops.cuh
+template <typename T, bool EnableTma = false>
+static __device__ void bcastMultimem(ncclSymkArgsHandler& handler, int tn, int t, ncclSymPtr<T> input,
+                                     ncclSymPtr<T> output, size_t nElts) {
+  size_t nBytes = nElts * sizeof(T);
+  uintptr_t inputUptr = reinterpret_cast<uintptr_t>(input.localPtr());
+  uintptr_t outputUptr = reinterpret_cast<uintptr_t>(output.multimemPtr(handler.comm.lsaMultimem));
+  uint32_t alignment = uint32_t(inputUptr - outputUptr);
+  uint32_t nPreBytes =
+#if __CUDA_ARCH__ >= 1000
+    (EnableTma && alignment % 256 == 0) ? (256 - input.offset) % 256 :
+#endif
+                                          (16 - input.offset) % 16;
+
+  nPreBytes = min((size_t)nPreBytes, nBytes);
+  uintptr_t nSufBytes;
+
+#if __CUDA_ARCH__ >= 1000
+  int lane = t % WARP_SIZE;
+  int lw = threadIdx.x / WARP_SIZE;
+  extern __shared__ char smemScratch[];
+#endif
+
+  if (alignment % 16 == 0) {
+    constexpr int BytePerPack = ncclSymkBytePerPack, UnrollPacks = ncclSymkDeepUnrollPacks;
+    constexpr int BytePerChunk = ncclSymkMultimemDeepBytePerChunk;
+    uintptr_t cursor = nPreBytes;
+    uint32_t nChunks = (nBytes - cursor) / BytePerChunk;
+    uintptr_t cursorAfter = cursor + uintptr_t(nChunks) * BytePerChunk;
+
+#if __CUDA_ARCH__ >= 1000
+    // Initialize share memory pointer and barrier
+    constexpr size_t tileSize = UnrollPacks * WARP_SIZE * BytePerPack;
+    using tmaSmemStruct_t = tmaSmemStruct<BytePack<BytePerPack>, UnrollPacks>;
+    constexpr int smemSizePerWarp = ncclTmaShmemScratchWarpSize();
+    tmaSmemStruct_t* tmaSmem = reinterpret_cast<tmaSmemStruct_t*>(smemScratch + lw * smemSizePerWarp);
+    if NCCL_IF_CONSTEXPR (EnableTma) {
+      if (lane == 0) init(&tmaSmem->bar, 1);
+    }
+#endif
+
+    nSufBytes = nBytes - cursorAfter;
+    cursor += (t / WARP_SIZE) * UnrollPacks * WARP_SIZE * BytePerPack;
+    cursor += (t % WARP_SIZE) * BytePerPack;
+    int nIters = nChunks - t / WARP_SIZE;
+    NVCC_PRAGMA_UNROLL_DISABLED
+    while (0 < nIters) {
+#if __CUDA_ARCH__ >= 1000
+      if NCCL_IF_CONSTEXPR (EnableTma) {
+        if (lane == 0)
+          tmaLoadStoreMc((char*)(outputUptr + cursor), (char*)tmaSmem->buff[0], (char*)(inputUptr + cursor), tileSize,
+                         tmaSmem->bar);
+      } else
+#endif
+      {
+        BytePack<BytePerPack> tmp[UnrollPacks];
+        NVCC_PRAGMA_UNROLL_AUTO
+        for (int u = 0; u < UnrollPacks; u++) {
+          tmp[u] = *reinterpret_cast<BytePack<BytePerPack>*>(inputUptr + cursor + u * WARP_SIZE * BytePerPack);
+        }
+        NVCC_PRAGMA_UNROLL_AUTO
+        for (int u = 0; u < UnrollPacks; u++) {
+          multimem_st_global(outputUptr + cursor + u * WARP_SIZE * BytePerPack, tmp[u]);
+        }
+      }
+      cursor += tn * UnrollPacks * BytePerPack;
+      nIters -= tn / WARP_SIZE;
+    }
+  } else {
+    nPreBytes = 0;
+    nSufBytes = nBytes;
+  }
+
+  // Get the prefix+suffix element one at a time.
+  NVCC_PRAGMA_UNROLL(4)
+  for (uintptr_t i = t * sizeof(T); i < nPreBytes + nSufBytes; i += tn * sizeof(T)) {
+    uintptr_t cursor = i < nPreBytes ? i : nBytes - nSufBytes + (i - nPreBytes);
+    BytePack<sizeof(T)> val = *reinterpret_cast<BytePack<sizeof(T)>*>(inputUptr + cursor);
+    multimem_st_global(outputUptr + cursor, val);
+  }
+}
+
+extern __shared__ ulong2 ncclSymkSmem[];
+
+static __device__ void ncclSymkSmemPartition_help(int bumper) {}
+template <typename T, typename... More>
+static __device__ void ncclSymkSmemPartition_help(int bumper, T** ptr, int size, More... more) {
+  T* ans = reinterpret_cast<T*>(ncclSymkSmem + bumper);
+  __builtin_assume(__isShared(ans)); // Let compiler know this is shared memory (reinterpret_cast obscured as much).
+  __builtin_assume_aligned(ans, sizeof(ulong2));
+  *ptr = ans;
+  bumper += (size * sizeof(T) + sizeof(ulong2) - 1) / sizeof(ulong2);
+  ncclSymkSmemPartition_help(bumper, more...);
+}
+
+template <typename... Arg>
+static __device__ void ncclSymkSmemPartition(Arg... args) {
+  ncclSymkSmemPartition_help(/*bumper=*/0, args...);
+}
+
+////////////////////////////////////////////////////////////////////////////////
+// Extensions to nccl_device.h needed to help compiler make good SASS:
+////////////////////////////////////////////////////////////////////////////////
+
+template <typename T>
+struct ncclLsaPointerGetter {
+  void* base;
+  uint32_t stride4G;
+  __device__ ncclLsaPointerGetter(ncclSymPtr<T> ptr) {
+    base = (char*)nccl::utility::loadConst(&ptr.window->lsaFlatBase);
+    base = (char*)base + ptr.offset;
+    stride4G = nccl::utility::loadConst(&ptr.window->stride4G);
+  }
+  __device__ T* operator()(int lsaPeer) const {
+    return (T*)nccl::utility::add4G(base, lsaPeer * stride4G);
+  }
+};
+#endif // NCCL_DEVICE_SYMMETRIC_PRIMITIVES_H_

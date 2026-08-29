@@ -1,8 +1,9 @@
 /*************************************************************************
- * Copyright (c) 2019-2022, NVIDIA CORPORATION. All rights reserved.
+ * SPDX-FileCopyrightText: Copyright (c) 2019-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+ * SPDX-License-Identifier: Apache-2.0
  *
- * See LICENSE.txt for license information
- ************************************************************************/
+ * See LICENSE.txt for more license information
+ *************************************************************************/
 
 #ifndef NCCL_INFO_H_
 #define NCCL_INFO_H_
@@ -28,6 +29,18 @@ struct ncclInfo {
   // Algorithm details
   int chunkSteps;
   int sliceSteps;
+  // One-sided ops
+  size_t peerWinOffset;
+  ncclWindow_t peerWin;
+  int sigIdx;
+  int ctx;
+  unsigned int flags;
+  // WaitSignal descriptors
+  int nDesc;
+  ncclWaitSignalDesc_t* signalDescs;
+  // A config copied from config passed by user so older user config can be safely accessed
+  // during synchronous host scheduling (never at launch/replay).
+  ncclCollConfig_t collConfig;
 };
 
 #endif

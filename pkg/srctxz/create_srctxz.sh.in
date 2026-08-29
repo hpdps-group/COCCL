@@ -1,8 +1,9 @@
 #!/bin/bash
 #
-# Copyright (c) 2017-2019, NVIDIA CORPORATION. All rights reserved.
+# SPDX-FileCopyrightText: Copyright (c) 2017-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
 #
-# See LICENSE.txt for license information
+# See LICENSE.txt for more license information
 #
 
 # To run from $BUILDDIR/
@@ -29,7 +30,4 @@ NCCL_BUILD=${pkg:Revision}
 
 NCCLNAME="nccl-src_${NCCL_MAJOR}.${NCCL_MINOR}.${NCCL_PATCH}${NCCL_SUFFIX}-${NCCL_BUILD}"
 
-tar --exclude build \
-    --exclude ".git*" \
-    --exclude pkg/srctxz \
-    --transform "s/^$NCCLDIR/$NCCLNAME/" -Jcf $NCCLNAME.txz --owner=0 --group=0 $NCCLDIR
+tar --exclude build --exclude ".git*" --exclude plugins/net --exclude pkg/srctxz --transform "s/^$NCCLDIR/$NCCLNAME/" -Jcf $NCCLNAME.txz --owner=0 --group=0 $NCCLDIR
