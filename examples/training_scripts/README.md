@@ -1,108 +1,103 @@
-# Qwen Training With COCCL
+# Qwen3 Training With COCCL
 
 English | [简体中文](README_zh-CN.md)
 
-This example runs Qwen2.5 or Qwen3 with COCCL through
-[Pai-Megatron-Patch](Pai-Megatron-Patch). The framework is pinned as a Git
-submodule.
+This example runs Qwen3-0.6B Base with COCCL on NVIDIA Megatron-LM. The bundled
+submodule pins the tested Megatron release, `core_v0.15.3`.
 
-## Before You Run
+## Prepare
 
-Initialize the framework if the repository was cloned without submodules:
+Initialize Megatron-LM if it was not fetched with the repository:
 
 ```bash
-git submodule update --init --recursive \
-  examples/training_scripts/Pai-Megatron-Patch
+git submodule update --init examples/training_scripts/Megatron-LM
 ```
 
-Activate the Python environment used by Pai-Megatron-Patch, then edit
-`training_envs.sh`. Set:
+Create and activate an environment that satisfies the
+[Megatron-LM requirements](https://github.com/NVIDIA/Megatron-LM), then edit
+[`training_envs.sh`](training_envs.sh). Set:
 
-- `CUDA_HOME`.
-- The data prefix and model path for Qwen2.5 or Qwen3.
+- `CUDA_HOME` and, when needed, `MEGATRON_ROOT`;
+- `QWEN3_DATA_PREFIX`, the prefix of the preprocessed Megatron MMAP
+  `.bin`/`.idx` pair;
+- `QWEN3_TOKENIZER_DIR`, a Hugging Face Qwen3-0.6B tokenizer directory;
+- `QWEN3_LOAD_DIR` when continuing from a Megatron Core checkpoint;
 - `TRAIN_OUTPUT_ROOT` and `TRAIN_LOG_ROOT`.
-- `COCCL_ROOT`, `COCCL_CONFIG_FILE`, or `PAI_MEGATRON_ROOT` only when the
-  defaults should be overridden.
 
-COCCL is loaded in place of NCCL. Confirm that PyTorch uses a shared NCCL
-library:
+Build COCCL before launching. The script loads
+`$COCCL_ROOT/build/lib/libnccl.so.2` in place of NCCL. Confirm that PyTorch
+uses a shared NCCL library:
 
 ```bash
 TORCH_CUDA_LIB=$(python -c 'import pathlib, torch; print(pathlib.Path(torch.__file__).parent / "lib/libtorch_cuda.so")')
 ldd "$TORCH_CUDA_LIB" | grep libnccl
 ```
 
-If this prints nothing, PyTorch embeds NCCL statically and `LD_PRELOAD` cannot
-replace it. Use a dynamically linked PyTorch build. The launcher preloads the
-COCCL `libnccl.so.2`; compressor libraries come from the TOML file and do not
-belong in `LD_LIBRARY_PATH`.
+No output means that PyTorch embeds NCCL statically and cannot be replaced
+through `LD_PRELOAD`.
 
 ## Configure COCCL
 
-The default [`configs/training.toml`](configs/training.toml) loads SDP4Bit for
-the validated DP policies. TP and PP remain on native NCCL.
+[`configs/training.toml`](configs/training.toml) enables SDP4Bit for DP
+AllGather and ReduceScatter, enables autotuning, and leaves TP and PP on
+native NCCL. Its default topology is two nodes with four GPUs per node:
 
-Keep these classifier settings consistent with the training command:
+```text
+TP=2, PP=2, DP=2, sequence parallel enabled
+```
 
-- `data_parallel_size`, `tensor_parallel_size`, and
-  `pipeline_parallel_size` must describe the job topology.
-- `dp_strategy` must match DDP, the sharded distributed optimizer (`sdp`), or
-  FSDP.
-- `sequence_parallel` must match the TP communication pattern.
-
-The launcher computes `DP = world_size / (TP * PP * CP)`. Put that result in
-`data_parallel_size`. Keep machine-specific settings such as
-`NCCL_SOCKET_IFNAME`, `NCCL_IB_HCA`, and `CUDA_VISIBLE_DEVICES` in the job
-environment.
+Update `training.classifier` whenever the launch topology changes. This
+launcher uses Megatron's distributed optimizer, so keep `dp_strategy =
+"sdp"`. It enables sequence parallelism when `TP_SIZE > 1`.
 
 ## Launch
 
-Run the same command on every node, changing only the node rank. For two nodes
-with four GPUs each:
+Run the same command on every node and change only `node_rank`:
 
 ```bash
 # Node 0
-MASTER_ADDR=10.0.0.1 MASTER_PORT=29501 \
-bash train_qwen_coccl.sh qwen25 2 4 0
+bash train_qwen3_coccl.sh 2 4 0 10.0.0.1
 
 # Node 1
-MASTER_ADDR=10.0.0.1 MASTER_PORT=29501 \
-bash train_qwen_coccl.sh qwen25 2 4 1
+bash train_qwen3_coccl.sh 2 4 1 10.0.0.1
 ```
 
-Use `qwen3` for Qwen3. Override training controls through the environment:
+The arguments are:
+
+```text
+train_qwen3_coccl.sh <nnodes> <gpus_per_node> [node_rank]
+                     [master_addr] [master_port]
+```
+
+Common controls are environment variables:
 
 ```bash
-TP_SIZE=2 PP_SIZE=2 CP_SIZE=1 \
-TRAIN_ITERS=100 DP_OVERLAP=off \
-bash train_qwen_coccl.sh qwen3 2 4 0
+TP_SIZE=2 PP_SIZE=2 TRAIN_ITERS=200 DP_OVERLAP=on \
+  bash train_qwen3_coccl.sh 2 4 0 10.0.0.1
 ```
 
-`DP_OVERLAP` accepts `on` or `off`. The launcher also accepts
-`MICRO_BATCH_SIZE`, `GLOBAL_BATCH_SIZE`, `SEQUENCE_LENGTH`, `WARMUP_ITERS`,
-`EVAL_INTERVAL`, and `EVAL_ITERS`.
+- `DP_OVERLAP=on|off` controls Megatron gradient-reduce and parameter-gather
+  overlap.
+- `MICRO_BATCH_SIZE`, `GLOBAL_BATCH_SIZE`, `SEQUENCE_LENGTH`, `EVAL_INTERVAL`,
+  and `EVAL_ITERS` control the training run.
+- `TRANSFORMER_IMPL=auto|local|transformer_engine` selects the transformer
+  implementation.
+- `COCCL_ROOT` and `COCCL_CONFIG_FILE` override the repository and config
+  inferred by the launcher.
 
-Checkpoints are off by default. Set `SAVE_CHECKPOINTS=on` and optionally
-`SAVE_INTERVAL` to enable them.
+Checkpoint saving is intentionally disabled; `QWEN3_LOAD_DIR` is used only
+to load the initial Megatron Core model checkpoint.
 
 ## Check Automatic Routing
 
-Training code continues to call standard NCCL APIs. COCCL classifies each
-communicator and then selects its DP, TP, or PP policy:
-
-- Unique configured DP, TP, or PP sizes are classified immediately.
-- Ambiguous DP and TP communicators are identified from repeated collective
-  patterns, topology, DP strategy, and sequence parallelism.
-- Messages below 1 MiB are not classifier evidence.
-- Unknown communicators stay on native NCCL.
-- PP direction is inferred from the local rank and peer.
-
-Enable routing logs when validating a new topology:
+The training code continues to call standard NCCL APIs. COCCL classifies each
+communicator and applies the matching DP, TP, or PP policy. To inspect the
+decision:
 
 ```bash
 NCCL_DEBUG=INFO NCCL_DEBUG_SUBSYS=COCCL_TUNING \
-bash train_qwen_coccl.sh qwen3 2 4 0
+  bash train_qwen3_coccl.sh 2 4 0 10.0.0.1
 ```
 
-Look for `role=DP|TP|PP` and `COCCL route` before enabling a compressor for
-that role.
+Confirm that the log reports the expected `role=DP|TP|PP` and selected COCCL
+algorithm before enabling compression for a new topology.

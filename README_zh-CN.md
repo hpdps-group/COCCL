@@ -257,7 +257,7 @@ reduce_scatter_algorithm = "auto"
 all_reduce_algorithm = "auto"
 ```
 
-可运行的 Qwen2.5 和 Qwen3 示例位于 [examples/training_scripts](examples/training_scripts/README_zh-CN.md)。
+基于 NVIDIA Megatron-LM 的 Qwen3 示例位于 [examples/training_scripts](examples/training_scripts/README_zh-CN.md)。
 
 ### 自动调优
 

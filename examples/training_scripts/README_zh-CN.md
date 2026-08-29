@@ -1,87 +1,84 @@
-# 使用 COCCL 训练 Qwen
+# 使用 COCCL 训练 Qwen3
 
 [English](README.md) | 简体中文
 
-本示例通过 [Pai-Megatron-Patch](Pai-Megatron-Patch) 使用 COCCL 运行 Qwen2.5 或 Qwen3。训练框架以 Git 子模块形式固定版本。
+本示例使用 NVIDIA Megatron-LM 和 COCCL 运行 Qwen3-0.6B Base。仓库中的子模块固定为已验证的 Megatron `core_v0.15.3` 版本。
 
-## 运行前准备
+## 准备
 
-如果克隆仓库时未拉取子模块，请初始化训练框架：
+如果克隆仓库时没有拉取 Megatron-LM，请初始化该子模块：
 
 ```bash
-git submodule update --init --recursive \
-  examples/training_scripts/Pai-Megatron-Patch
+git submodule update --init examples/training_scripts/Megatron-LM
 ```
 
-激活 Pai-Megatron-Patch 使用的 Python 环境，然后编辑 `training_envs.sh`。需要设置：
+按 [Megatron-LM 依赖说明](https://github.com/NVIDIA/Megatron-LM)创建并激活环境，然后编辑 [`training_envs.sh`](training_envs.sh)：
 
-- `CUDA_HOME`。
-- Qwen2.5 或 Qwen3 的数据前缀和模型路径。
-- `TRAIN_OUTPUT_ROOT` 和 `TRAIN_LOG_ROOT`。
-- 仅在需要覆盖默认值时设置 `COCCL_ROOT`、`COCCL_CONFIG_FILE` 或 `PAI_MEGATRON_ROOT`。
+- 设置 `CUDA_HOME`，必要时覆盖 `MEGATRON_ROOT`；
+- 将 `QWEN3_DATA_PREFIX` 设为 Megatron MMAP 数据 `.bin`/`.idx` 文件的共同前缀；
+- 将 `QWEN3_TOKENIZER_DIR` 设为 Hugging Face Qwen3-0.6B tokenizer 目录；
+- 如需继续训练，设置 Megatron Core checkpoint 目录 `QWEN3_LOAD_DIR`；
+- 设置 `TRAIN_OUTPUT_ROOT` 和 `TRAIN_LOG_ROOT`。
 
-COCCL 会替代 NCCL 加载。请确认 PyTorch 使用动态链接的 NCCL 库：
+启动前先编译 COCCL。脚本会使用 `$COCCL_ROOT/build/lib/libnccl.so.2` 替换 NCCL。请确认 PyTorch 动态链接 NCCL：
 
 ```bash
 TORCH_CUDA_LIB=$(python -c 'import pathlib, torch; print(pathlib.Path(torch.__file__).parent / "lib/libtorch_cuda.so")')
 ldd "$TORCH_CUDA_LIB" | grep libnccl
 ```
 
-如果命令没有输出，说明 PyTorch 静态嵌入了 NCCL，无法通过 `LD_PRELOAD` 替换。请使用动态链接 NCCL 的 PyTorch。启动脚本会预加载 COCCL 的 `libnccl.so.2`；压缩器库路径来自 TOML 文件，不应加入 `LD_LIBRARY_PATH`。
+如果命令没有输出，说明 PyTorch 静态嵌入了 NCCL，无法通过 `LD_PRELOAD` 替换。
 
 ## 配置 COCCL
 
-默认的 [`configs/training.toml`](configs/training.toml) 会为已验证的 DP 策略加载 SDP4Bit，TP 和 PP 保持使用原生 NCCL。
+[`configs/training.toml`](configs/training.toml) 默认为 DP AllGather 和 ReduceScatter 启用 SDP4Bit，开启自动调优，TP 和 PP 保持使用原生 NCCL。默认拓扑为两节点、每节点四张 GPU：
 
-以下分类器配置必须与训练命令一致：
+```text
+TP=2, PP=2, DP=2, 开启 sequence parallel
+```
 
-- `data_parallel_size`、`tensor_parallel_size` 和 `pipeline_parallel_size` 必须描述实际任务拓扑。
-- `dp_strategy` 必须与 DDP、分片式 distributed optimizer（`sdp`）或 FSDP 一致。
-- `sequence_parallel` 必须与 TP 通信模式一致。
-
-启动脚本按照 `DP = world_size / (TP * PP * CP)` 计算 DP 大小，并将该结果写入 `data_parallel_size`。`NCCL_SOCKET_IFNAME`、`NCCL_IB_HCA` 和 `CUDA_VISIBLE_DEVICES` 等机器相关设置应放在任务环境中。
+启动拓扑变化时，必须同步修改 `training.classifier`。脚本使用 Megatron distributed optimizer，因此保持 `dp_strategy = "sdp"`。`TP_SIZE > 1` 时脚本会启用 sequence parallel。
 
 ## 启动
 
-在每个节点运行相同命令，只修改节点 rank。以下示例使用两个节点，每个节点四张 GPU：
+在每个节点上执行相同命令，只修改 `node_rank`：
 
 ```bash
 # Node 0
-MASTER_ADDR=10.0.0.1 MASTER_PORT=29501 \
-bash train_qwen_coccl.sh qwen25 2 4 0
+bash train_qwen3_coccl.sh 2 4 0 10.0.0.1
 
 # Node 1
-MASTER_ADDR=10.0.0.1 MASTER_PORT=29501 \
-bash train_qwen_coccl.sh qwen25 2 4 1
+bash train_qwen3_coccl.sh 2 4 1 10.0.0.1
 ```
 
-使用 `qwen3` 可运行 Qwen3。通过环境变量覆盖训练参数：
+脚本参数为：
+
+```text
+train_qwen3_coccl.sh <nnodes> <gpus_per_node> [node_rank]
+                     [master_addr] [master_port]
+```
+
+常用训练参数通过环境变量覆盖：
 
 ```bash
-TP_SIZE=2 PP_SIZE=2 CP_SIZE=1 \
-TRAIN_ITERS=100 DP_OVERLAP=off \
-bash train_qwen_coccl.sh qwen3 2 4 0
+TP_SIZE=2 PP_SIZE=2 TRAIN_ITERS=200 DP_OVERLAP=on \
+  bash train_qwen3_coccl.sh 2 4 0 10.0.0.1
 ```
 
-`DP_OVERLAP` 可设为 `on` 或 `off`。启动脚本还支持 `MICRO_BATCH_SIZE`、`GLOBAL_BATCH_SIZE`、`SEQUENCE_LENGTH`、`WARMUP_ITERS`、`EVAL_INTERVAL` 和 `EVAL_ITERS`。
+- `DP_OVERLAP=on|off` 控制 Megatron 的 gradient-reduce 和 parameter-gather overlap。
+- `MICRO_BATCH_SIZE`、`GLOBAL_BATCH_SIZE`、`SEQUENCE_LENGTH`、`EVAL_INTERVAL` 和 `EVAL_ITERS` 控制训练。
+- `TRANSFORMER_IMPL=auto|local|transformer_engine` 选择 Transformer 实现。
+- `COCCL_ROOT` 和 `COCCL_CONFIG_FILE` 用于覆盖脚本推导的仓库和配置路径。
 
-默认不保存 checkpoint。设置 `SAVE_CHECKPOINTS=on`，并可选设置 `SAVE_INTERVAL`，即可启用保存。
+脚本不保存 checkpoint；`QWEN3_LOAD_DIR` 仅用于加载初始 Megatron Core 模型。
 
 ## 检查自动路由
 
-训练代码继续调用标准 NCCL API。COCCL 会对每个 communicator 分类，然后选择对应的 DP、TP 或 PP 策略：
-
-- 配置中唯一的 DP、TP 或 PP 大小会被立即分类。
-- 存在歧义的 DP 和 TP communicator 会根据重复通信模式、拓扑、DP 策略和 sequence parallelism 进行识别。
-- 小于 1 MiB 的消息不作为分类依据。
-- 未知 communicator 保持使用原生 NCCL。
-- PP 方向根据本地 rank 和 peer 推导。
-
-验证新拓扑时启用路由日志：
+训练代码继续调用标准 NCCL API。COCCL 会分类每个 communicator，并应用匹配的 DP、TP 或 PP 策略。可以通过以下命令查看判断：
 
 ```bash
 NCCL_DEBUG=INFO NCCL_DEBUG_SUBSYS=COCCL_TUNING \
-bash train_qwen_coccl.sh qwen3 2 4 0
+  bash train_qwen3_coccl.sh 2 4 0 10.0.0.1
 ```
 
-为对应角色启用压缩器前，请确认日志中出现 `role=DP|TP|PP` 和 `COCCL route`。
+为新拓扑启用压缩前，请确认日志中的 `role=DP|TP|PP` 和 COCCL 算法选择符合预期。
