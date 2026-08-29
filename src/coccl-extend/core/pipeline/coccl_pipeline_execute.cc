@@ -201,9 +201,13 @@ int collectCommunicationComms(
     ncclComm_t comm = pipelineStage.comm;
     if (comm == nullptr) continue;
 
-    const bool symmetric = !framed && comm->nNodes == 1 &&
+    const bool zeroCta =
+        (comm->config.CTAPolicy & NCCL_CTA_POLICY_ZERO) != 0;
+    const bool symmetric = !framed &&
         (pipelineStage.kind == cocclPipelineStageAllGather ||
-         pipelineStage.kind == cocclPipelineStageReduceScatter);
+         (pipelineStage.kind == cocclPipelineStageAllToAll && zeroCta) ||
+         (pipelineStage.kind == cocclPipelineStageReduceScatter &&
+          comm->nNodes == 1));
     const cocclBufferRegistrationKind registration = symmetric
         ? cocclBufferRegistrationKind::Symmetric
         : cocclBufferRegistrationKind::Ordinary;
