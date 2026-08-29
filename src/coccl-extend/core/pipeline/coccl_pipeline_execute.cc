@@ -214,8 +214,7 @@ int collectCommunicationComms(
         (!framed &&
          (pipelineStage.kind == cocclPipelineStageAllGather ||
           (pipelineStage.kind == cocclPipelineStageAllToAll && zeroCta) ||
-          (pipelineStage.kind == cocclPipelineStageReduceScatter &&
-           comm->nNodes == 1)));
+          pipelineStage.kind == cocclPipelineStageReduceScatter));
     const cocclBufferRegistrationKind registration = framedRma
         ? cocclBufferRegistrationKind::Rma
         : (symmetric ? cocclBufferRegistrationKind::Symmetric
