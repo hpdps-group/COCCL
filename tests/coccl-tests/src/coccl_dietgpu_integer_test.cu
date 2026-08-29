@@ -371,9 +371,10 @@ void runCorrectness(const Options& options, ncclDataType_t datatype,
   std::vector<Operation> operations;
   if (options.operation == "all") {
     operations = {
+        Operation::AllReduceOneShot,
         Operation::AllToAll, Operation::AllGather,
         Operation::ReduceScatterOneShot, Operation::ReduceScatterTwoShot,
-        Operation::AllReduceOneShot, Operation::AllReduceTwoShot,
+        Operation::AllReduceTwoShot,
         Operation::AllReduceTripleShot, Operation::SendRecv,
         Operation::SendRecvCrossNode};
   } else {

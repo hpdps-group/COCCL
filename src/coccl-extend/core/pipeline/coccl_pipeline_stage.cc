@@ -187,7 +187,13 @@ ncclResult_t runAllGather(const cocclPipelineStageContext* context,
     return cocclCommitPipelineFrameExchange(
         context, stage, edge, output, stream);
   }
-  const ncclCollConfig_t config = communicationConfig(context, stage);
+  ncclCollConfig_t config = communicationConfig(context, stage);
+  constexpr size_t kAmpereNineCtaBytes = size_t{16} << 20;
+  if (stage->config == nullptr && stage->comm->cudaArch == 800 &&
+      stage->comm->nNodes == 1 && edge->bytes >= kAmpereNineCtaBytes) {
+    config.minCTAs = 9;
+    config.maxCTAs = 9;
+  }
   NCCLCHECK(ncclAllGatherConfig(
       edge->ptr, output->ptr, edge->bytes, ncclUint8, stage->comm, stream,
       &config));

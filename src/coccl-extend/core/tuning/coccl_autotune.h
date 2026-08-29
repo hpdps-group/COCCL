@@ -31,6 +31,7 @@ struct cocclCodecModel {
   cocclLinearModel drcTime;
   cocclLinearModel encodeTime;
   cocclLinearModel decodeTime;
+  cocclLinearModel drTime;
 };
 
 // Profiling is process-wide and lazy. Disabled autotune returns immediately.

@@ -6,6 +6,7 @@
 #include "runtime/coccl_runtime.h"
 #include "comm.h"
 #include "core/compression/compress.h"
+#include "core/compression/reduce_extend.h"
 #include "debug.h"
 
 #include <algorithm>
@@ -518,14 +519,40 @@ bool runDrcIteration(
              originalElements, stream) == ncclSuccess;
 }
 
+bool runDrIteration(
+    ncclComm_t comm, void* compressor, const cocclCompressorView& input,
+    void* decompressedBuffer, void* outputBuffer, size_t outputCapacity,
+    size_t reduceChunks, ncclDataType_t datatype, size_t outputElements,
+    cudaStream_t stream) {
+  cocclCompressorView output = {
+      outputBuffer, outputCapacity, 0, outputElements,
+      input.chunks / reduceChunks, datatype, nullptr, 0};
+  if (cocclCompressorSupports(
+          compressor, cocclCompressorCapabilityDecompressReduce)) {
+    return ncclDecompressReduce(
+               compressor, comm, input, &output, reduceChunks, stream) ==
+        ncclSuccess;
+  }
+
+  cocclCompressorView decompressed = {
+      decompressedBuffer, outputCapacity * reduceChunks,
+      outputCapacity * reduceChunks, outputElements * reduceChunks,
+      input.chunks, datatype, nullptr, 0};
+  return ncclDecompress(compressor, input, &decompressed, stream) ==
+             ncclSuccess &&
+      ncclReduceChunk(
+          decompressedBuffer, outputElements, outputBuffer, datatype,
+          (int)reduceChunks, stream) == ncclSuccess;
+}
+
 ncclResult_t profileCompressor(
     ncclComm_t comm, void* compressor,
     const std::vector<size_t>& sampleSizes, ncclDataType_t datatype,
-    cocclCodecModel* model) {
+    bool profileReductions, cocclCodecModel* model) {
   ncclResult_t ret = ncclSuccess;
   void* rawBuffer = nullptr;
   void* compressedBuffer = nullptr;
-  void* drcBuffer = nullptr;
+  void* reductionBuffer = nullptr;
   cocclCompressorFrameMetadata* deviceFrameMetadata = nullptr;
   cocclCompressorFrameMetadata* hostFrameMetadata = nullptr;
   cudaStream_t stream = nullptr;
@@ -536,46 +563,53 @@ ncclResult_t profileCompressor(
   std::vector<cocclAutotuneProfilePoint> encodePoints;
   std::vector<cocclAutotuneProfilePoint> decodePoints;
   std::vector<cocclAutotuneProfilePoint> drcPoints;
+  std::vector<cocclAutotuneProfilePoint> drPoints;
   std::vector<double> ratios;
   bool framed = false;
   const cocclAutotuneConfig& config = cocclGetConfig().autotune;
+  // Codec work is local. Rank 0 measures it and aggregateObservation makes
+  // the same samples available to every rank before fitting the model.
+  const bool active = comm->rank == 0;
 
   framed = cocclCompressorSupports(
       compressor, cocclCompressorCapabilityFramed);
-  const bool fusedDrc = !framed && cocclCompressorSupports(
-      compressor, cocclCompressorCapabilityDecompressReduceCompress);
+  const bool fusedDrc =
+      profileReductions && !framed && cocclCompressorSupports(
+          compressor, cocclCompressorCapabilityDecompressReduceCompress);
 
-  CUDACHECKGOTO(cudaSetDevice(comm->cudaDev), ret, fail);
-  CUDACHECKGOTO(cudaMalloc(&rawBuffer, sampleSizes.back()), ret, fail);
-  CUDACHECKGOTO(
-      cudaMalloc(&compressedBuffer, sampleSizes.back()), ret, fail);
-  if (fusedDrc) {
+  if (active) {
+    CUDACHECKGOTO(cudaSetDevice(comm->cudaDev), ret, fail);
+    CUDACHECKGOTO(cudaMalloc(&rawBuffer, sampleSizes.back()), ret, fail);
     CUDACHECKGOTO(
-        cudaMalloc(&drcBuffer,
-                   sampleSizes.back() / (size_t)comm->nRanks),
-        ret, fail);
+        cudaMalloc(&compressedBuffer, sampleSizes.back()), ret, fail);
+    if (profileReductions && !framed) {
+      CUDACHECKGOTO(
+          cudaMalloc(&reductionBuffer,
+                     sampleSizes.back() / (size_t)comm->nRanks),
+          ret, fail);
+    }
+    if (framed) {
+      CUDACHECKGOTO(
+          cudaMalloc(&deviceFrameMetadata,
+                     sizeof(cocclCompressorFrameMetadata)),
+          ret, fail);
+      CUDACHECKGOTO(
+          cudaHostAlloc(&hostFrameMetadata,
+                        sizeof(cocclCompressorFrameMetadata),
+                        cudaHostAllocDefault),
+          ret, fail);
+    }
+    CUDACHECKGOTO(
+        cudaStreamCreateWithFlags(&stream, cudaStreamNonBlocking), ret, fail);
+    CUDACHECKGOTO(cudaEventCreate(&start), ret, fail);
+    CUDACHECKGOTO(cudaEventCreate(&encoded), ret, fail);
+    CUDACHECKGOTO(cudaEventCreate(&stop), ret, fail);
   }
-  if (framed) {
-    CUDACHECKGOTO(
-        cudaMalloc(&deviceFrameMetadata,
-                   sizeof(cocclCompressorFrameMetadata)),
-        ret, fail);
-    CUDACHECKGOTO(
-        cudaHostAlloc(&hostFrameMetadata,
-                      sizeof(cocclCompressorFrameMetadata),
-                      cudaHostAllocDefault),
-        ret, fail);
-  }
-  CUDACHECKGOTO(
-      cudaStreamCreateWithFlags(&stream, cudaStreamNonBlocking), ret, fail);
-  CUDACHECKGOTO(cudaEventCreate(&start), ret, fail);
-  CUDACHECKGOTO(cudaEventCreate(&encoded), ret, fail);
-  CUDACHECKGOTO(cudaEventCreate(&stop), ret, fail);
 
   for (size_t bytes : sampleSizes) {
     cocclProfileObservation local = {};
-    local.active = 1;
-    bool valid = true;
+    local.active = active ? 1u : 0u;
+    bool valid = active;
     size_t compressedBytes = 0;
     for (int i = 0; i < config.warmup && valid; ++i) {
       valid = cudaMemsetAsync(rawBuffer, 0x3f, bytes, stream) == cudaSuccess &&
@@ -646,55 +680,118 @@ ncclResult_t profileCompressor(
       ratios.push_back(aggregate.compressionRatio);
     }
 
+    if (profileReductions && !framed) {
+      cocclProfileObservation drLocal = {};
+      drLocal.active = active ? 1u : 0u;
+      if (active) {
+        const size_t elements = bytes / (size_t)ncclTypeSize(datatype);
+        const size_t outputElements = elements / (size_t)comm->nRanks;
+        const size_t outputCapacity = bytes / (size_t)comm->nRanks;
+        const cocclCompressorView input = {
+            rawBuffer, bytes, bytes, elements, (size_t)comm->nRanks,
+            datatype, nullptr, 0};
+        cocclCompressorView compressed = {
+            compressedBuffer, bytes, 0, 0, (size_t)comm->nRanks,
+            ncclInt8, nullptr, 0};
+        bool drValid = elements % (size_t)comm->nRanks == 0 &&
+            cudaMemsetAsync(rawBuffer, 0x3f, bytes, stream) == cudaSuccess &&
+            ncclCompress(
+                compressor, input, &compressed, comm->rank, stream) ==
+                ncclSuccess &&
+            compressed.datatype != COCCL_COMPRESSOR_RAW_PASSTHROUGH &&
+            cudaStreamSynchronize(stream) == cudaSuccess;
+        const cocclCompressorView compressedInput = {
+            compressed.data, compressed.bytes, compressed.bytes,
+            compressed.elements, compressed.chunks, compressed.datatype,
+            nullptr, 0};
+        for (int i = 0; i < config.warmup && drValid; ++i) {
+          drValid = runDrIteration(
+              comm, compressor, compressedInput, rawBuffer, reductionBuffer,
+              outputCapacity, (size_t)comm->nRanks, datatype, outputElements,
+              stream);
+        }
+        if (drValid) drValid = cudaStreamSynchronize(stream) == cudaSuccess;
+
+        std::vector<double> drTimes;
+        for (int i = 0; i < config.iterations && drValid; ++i) {
+          drValid = cudaEventRecord(start, stream) == cudaSuccess &&
+              runDrIteration(
+                  comm, compressor, compressedInput, rawBuffer,
+                  reductionBuffer, outputCapacity, (size_t)comm->nRanks,
+                  datatype, outputElements, stream) &&
+              cudaEventRecord(stop, stream) == cudaSuccess &&
+              cudaEventSynchronize(stop) == cudaSuccess;
+          if (!drValid) break;
+          float elapsedMs = 0.0f;
+          drValid =
+              cudaEventElapsedTime(&elapsedMs, start, stop) == cudaSuccess;
+          if (drValid) drTimes.push_back((double)elapsedMs * 1000.0);
+        }
+        if (drValid && !drTimes.empty()) {
+          drLocal.timeUs = median(std::move(drTimes));
+          drLocal.valid = 1;
+        }
+      }
+      cocclProfileObservation drAggregate = {};
+      NCCLCHECKGOTO(
+          aggregateObservation(comm, drLocal, &drAggregate), ret, fail);
+      if (drAggregate.valid) {
+        drPoints.push_back({(double)bytes, drAggregate.timeUs});
+      }
+    }
+
     if (fusedDrc) {
       cocclProfileObservation drcLocal = {};
-      drcLocal.active = 1;
-      const size_t elements = bytes / (size_t)ncclTypeSize(datatype);
-      const size_t outputElements = elements / (size_t)comm->nRanks;
-      const size_t outputCapacity = bytes / (size_t)comm->nRanks;
-      const cocclCompressorView input = {
-          rawBuffer, bytes, bytes, elements, (size_t)comm->nRanks,
-          datatype, nullptr, 0};
-      cocclCompressorView compressed = {
-          compressedBuffer, bytes, 0, 0, (size_t)comm->nRanks,
-          ncclInt8, nullptr, 0};
-      bool drcValid = elements % (size_t)comm->nRanks == 0 &&
-          cudaMemsetAsync(rawBuffer, 0x3f, bytes, stream) == cudaSuccess &&
-          ncclCompress(
-              compressor, input, &compressed, comm->rank, stream) ==
-              ncclSuccess &&
-          compressed.datatype != COCCL_COMPRESSOR_RAW_PASSTHROUGH &&
-          cudaStreamSynchronize(stream) == cudaSuccess;
-      const cocclCompressorView compressedInput = {
-          compressed.data, compressed.bytes, compressed.bytes,
-          compressed.elements, compressed.chunks, compressed.datatype,
-          nullptr, 0};
-      for (int i = 0; i < config.warmup && drcValid; ++i) {
-        drcValid = runDrcIteration(
-            compressor, compressedInput, drcBuffer, outputCapacity,
-            (size_t)comm->nRanks, datatype, outputElements, stream);
-      }
-      if (drcValid) {
-        drcValid = cudaStreamSynchronize(stream) == cudaSuccess;
-      }
+      drcLocal.active = active ? 1u : 0u;
+      if (active) {
+        const size_t elements = bytes / (size_t)ncclTypeSize(datatype);
+        const size_t outputElements = elements / (size_t)comm->nRanks;
+        const size_t outputCapacity = bytes / (size_t)comm->nRanks;
+        const cocclCompressorView input = {
+            rawBuffer, bytes, bytes, elements, (size_t)comm->nRanks,
+            datatype, nullptr, 0};
+        cocclCompressorView compressed = {
+            compressedBuffer, bytes, 0, 0, (size_t)comm->nRanks,
+            ncclInt8, nullptr, 0};
+        bool drcValid = elements % (size_t)comm->nRanks == 0 &&
+            cudaMemsetAsync(rawBuffer, 0x3f, bytes, stream) == cudaSuccess &&
+            ncclCompress(
+                compressor, input, &compressed, comm->rank, stream) ==
+                ncclSuccess &&
+            compressed.datatype != COCCL_COMPRESSOR_RAW_PASSTHROUGH &&
+            cudaStreamSynchronize(stream) == cudaSuccess;
+        const cocclCompressorView compressedInput = {
+            compressed.data, compressed.bytes, compressed.bytes,
+            compressed.elements, compressed.chunks, compressed.datatype,
+            nullptr, 0};
+        for (int i = 0; i < config.warmup && drcValid; ++i) {
+          drcValid = runDrcIteration(
+              compressor, compressedInput, reductionBuffer, outputCapacity,
+              (size_t)comm->nRanks, datatype, outputElements, stream);
+        }
+        if (drcValid) {
+          drcValid = cudaStreamSynchronize(stream) == cudaSuccess;
+        }
 
-      std::vector<double> drcTimes;
-      for (int i = 0; i < config.iterations && drcValid; ++i) {
-        drcValid = cudaEventRecord(start, stream) == cudaSuccess &&
-            runDrcIteration(
-                compressor, compressedInput, drcBuffer, outputCapacity,
-                (size_t)comm->nRanks, datatype, outputElements, stream) &&
-            cudaEventRecord(stop, stream) == cudaSuccess &&
-            cudaEventSynchronize(stop) == cudaSuccess;
-        if (!drcValid) break;
-        float elapsedMs = 0.0f;
-        drcValid =
-            cudaEventElapsedTime(&elapsedMs, start, stop) == cudaSuccess;
-        if (drcValid) drcTimes.push_back((double)elapsedMs * 1000.0);
-      }
-      if (drcValid && !drcTimes.empty()) {
-        drcLocal.timeUs = median(std::move(drcTimes));
-        drcLocal.valid = 1;
+        std::vector<double> drcTimes;
+        for (int i = 0; i < config.iterations && drcValid; ++i) {
+          drcValid = cudaEventRecord(start, stream) == cudaSuccess &&
+              runDrcIteration(
+                  compressor, compressedInput, reductionBuffer,
+                  outputCapacity, (size_t)comm->nRanks, datatype,
+                  outputElements, stream) &&
+              cudaEventRecord(stop, stream) == cudaSuccess &&
+              cudaEventSynchronize(stop) == cudaSuccess;
+          if (!drcValid) break;
+          float elapsedMs = 0.0f;
+          drcValid =
+              cudaEventElapsedTime(&elapsedMs, start, stop) == cudaSuccess;
+          if (drcValid) drcTimes.push_back((double)elapsedMs * 1000.0);
+        }
+        if (drcValid && !drcTimes.empty()) {
+          drcLocal.timeUs = median(std::move(drcTimes));
+          drcLocal.valid = 1;
+        }
       }
       cocclProfileObservation drcAggregate = {};
       NCCLCHECKGOTO(
@@ -709,6 +806,7 @@ ncclResult_t profileCompressor(
   model->encodeTime = cocclAutotuneFitLinearModel(encodePoints);
   model->decodeTime = cocclAutotuneFitLinearModel(decodePoints);
   model->drcTime = cocclAutotuneFitLinearModel(drcPoints);
+  model->drTime = cocclAutotuneFitLinearModel(drPoints);
   model->compressionRatio = median(std::move(ratios));
   model->valid = model->time.valid && model->compressionRatio > 0.0 &&
                  std::isfinite(model->compressionRatio);
@@ -720,7 +818,7 @@ exit:
   if (stream != nullptr) (void)cudaStreamDestroy(stream);
   if (hostFrameMetadata != nullptr) (void)cudaFreeHost(hostFrameMetadata);
   if (deviceFrameMetadata != nullptr) (void)cudaFree(deviceFrameMetadata);
-  if (drcBuffer != nullptr) (void)cudaFree(drcBuffer);
+  if (reductionBuffer != nullptr) (void)cudaFree(reductionBuffer);
   if (compressedBuffer != nullptr) (void)cudaFree(compressedBuffer);
   if (rawBuffer != nullptr) (void)cudaFree(rawBuffer);
   return ret;
@@ -810,12 +908,13 @@ void publishCompressorModel(const cocclProfiledCompressor& profiled,
   pthread_mutex_unlock(&cocclAutotuneLock);
   if (rank == 0) {
     INFO(COCCL_TUNING,
-         "COCCL compressor %s policy=%s-%s datatype=%d model: time_us=%g+%g*bytes encode_us=%g+%g*bytes decode_us=%g+%g*bytes ratio=%g",
+         "COCCL compressor %s policy=%s-%s datatype=%d model: time_us=%g+%g*bytes encode_us=%g+%g*bytes decode_us=%g+%g*bytes dr_us=%g+%g*bytes ratio=%g",
          compressorName(compressor), operationName(profiled.policy.operation),
          scopeName(profiled.policy.scope), (int)datatype, model.time.alphaUs,
          model.time.betaUsPerByte, model.encodeTime.alphaUs,
          model.encodeTime.betaUsPerByte, model.decodeTime.alphaUs,
-         model.decodeTime.betaUsPerByte, model.compressionRatio);
+         model.decodeTime.betaUsPerByte, model.drTime.alphaUs,
+         model.drTime.betaUsPerByte, model.compressionRatio);
   }
 }
 
@@ -911,9 +1010,13 @@ ncclResult_t cocclAutotuneEnsureGlobalModels(ncclComm_t measurementComm) {
       for (const cocclProfiledCompressor& compressor :
            snapshotEnabledCompressors()) {
         cocclCodecModel model;
+        const bool profileReductions =
+            measurementComm->nNodes == 1 &&
+            compressor.policy.operation == cocclOperation::AllReduce &&
+            compressor.policy.scope != cocclCompressionScope::Inter;
         const ncclResult_t result = profileCompressor(
             measurementComm, compressor.compressor, sampleSizes, datatype,
-            &model);
+            profileReductions, &model);
         if (result == ncclSuccess) {
           publishCompressorModel(
               compressor, datatype, model, measurementComm->rank);

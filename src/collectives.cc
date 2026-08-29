@@ -13,6 +13,14 @@
 #include "nvtx_payload_schemas.h"
 #include "runtime/coccl_runtime.h"
 
+static bool cocclCollConfigIsScheduleNeutral(
+    const ncclCollConfig_t* config) {
+  return config->ext == NCCL_CONFIG_UNDEF_PTR &&
+      !ncclCollConfigNeedAggIsolate(config) &&
+      config->cgaClusterSize == NCCL_CONFIG_UNDEF_INT &&
+      config->CTAPolicy == NCCL_CONFIG_UNDEF_INT;
+}
+
 const char* ncclFuncToString(ncclFunc_t fn) {
   switch (fn) {
   case ncclFuncAllGather:
@@ -137,8 +145,7 @@ static inline ncclResult_t ncclAllGatherConfigImpl(const void* sendbuff, void* r
                           ALLGATHER_CHUNKSTEPS, ALLGATHER_SLICESTEPS};
   // clang-format on
   NCCLCHECK(ncclParseCollConfig(config, &info.collConfig));
-  if (ncclCollConfigIsScheduleNeutral(
-          &info.collConfig, NCCL_CONFIG_UNDEF_INT)) {
+  if (cocclCollConfigIsScheduleNeutral(&info.collConfig)) {
     cocclInfo coccl = {};
     coccl.sendbuff = sendbuff;
     coccl.recvbuff = recvbuff;
@@ -185,8 +192,7 @@ static inline ncclResult_t ncclAlltoAllConfigImpl(const void* sendbuff, void* re
                           ALLTOALL_CHUNKSTEPS, ALLTOALL_SLICESTEPS};
   // clang-format on
   NCCLCHECK(ncclParseCollConfig(config, &info.collConfig));
-  if (ncclCollConfigIsScheduleNeutral(
-          &info.collConfig, NCCL_CONFIG_UNDEF_INT)) {
+  if (cocclCollConfigIsScheduleNeutral(&info.collConfig)) {
     cocclInfo coccl = {};
     coccl.sendbuff = sendbuff;
     coccl.recvbuff = recvbuff;
@@ -231,8 +237,7 @@ static inline ncclResult_t ncclAllReduceConfigImpl(const void* sendbuff, void* r
                           ALLREDUCE_CHUNKSTEPS, ALLREDUCE_SLICESTEPS};
   // clang-format on
   NCCLCHECK(ncclParseCollConfig(config, &info.collConfig));
-  if (ncclCollConfigIsScheduleNeutral(
-          &info.collConfig, NCCL_CONFIG_UNDEF_INT)) {
+  if (cocclCollConfigIsScheduleNeutral(&info.collConfig)) {
     cocclInfo coccl = {};
     coccl.sendbuff = sendbuff;
     coccl.recvbuff = recvbuff;
@@ -376,8 +381,7 @@ static inline ncclResult_t ncclReduceScatterConfigImpl(const void* sendbuff, voi
                           REDUCESCATTER_CHUNKSTEPS, REDUCESCATTER_SLICESTEPS};
   // clang-format on
   NCCLCHECK(ncclParseCollConfig(config, &info.collConfig));
-  if (ncclCollConfigIsScheduleNeutral(
-          &info.collConfig, NCCL_CONFIG_UNDEF_INT)) {
+  if (cocclCollConfigIsScheduleNeutral(&info.collConfig)) {
     cocclInfo coccl = {};
     coccl.sendbuff = sendbuff;
     coccl.recvbuff = recvbuff;

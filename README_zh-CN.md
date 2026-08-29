@@ -2,7 +2,7 @@
 
 [English](README.md) | 简体中文
 
-COCCL 是一个面向压缩的 GPU 集合通信库，旨在简化定制压缩算法的集成与配置。COCCL 基于 NCCL 2.27.7 构建，在保持 NCCL API 兼容的同时，为 AllGather、ReduceScatter、AllReduce、AllToAll、Send 和 Recv 提供压缩感知的通信流水线。其统一的 C++17 插件模型支持固定布局和分帧变长压缩算子，并默认集成了 [SDP4Bit](https://github.com/ByteDance-Seed/SDP4Bit)、[TACO](src/coccl-extend/extensions/compressor_plugin/taco)、[ZFP](https://github.com/LLNL/zfp) 和 [dietGPU](https://github.com/facebookresearch/dietgpu)。COCCL 还提供流水线重叠、自动算法选择，以及面向数据并行、张量并行和流水线并行通信的训练策略。
+COCCL 是一个面向压缩的 GPU 集合通信库，旨在简化定制压缩算法的集成与配置。COCCL 基于 NCCL 2.31.2 构建，在保持 NCCL API 兼容的同时，为 AllGather、ReduceScatter、AllReduce、AllToAll、Send 和 Recv 提供压缩感知的通信流水线。其统一的 C++17 插件模型支持固定布局和分帧变长压缩算子，并默认集成了 [SDP4Bit](https://github.com/ByteDance-Seed/SDP4Bit)、[TACO](src/coccl-extend/extensions/compressor_plugin/taco)、[ZFP](https://github.com/LLNL/zfp) 和 [dietGPU](https://github.com/facebookresearch/dietgpu)。COCCL 还提供流水线重叠、自动算法选择，以及面向数据并行、张量并行和流水线并行通信的训练策略。
 
 例如，使用 SDP4Bit 时，相比 FP32 通信，COCCL 在 AllReduce、ReduceScatter、AllGather 和 AllToAll 上最高分别可获得 2.60 倍、2.58 倍、5.66 倍和 4.92 倍加速。在端到端三维并行训练中，COCCL 在保持模型精度的同时，最高可将训练吞吐提升 1.24 倍。
 
@@ -14,15 +14,17 @@ COCCL 是一个面向压缩的 GPU 集合通信库，旨在简化定制压缩算
 
 ## 当前版本
 
-- 后端为 NCCL 2.27.7，发布构建和验收使用 CUDA 12.8。
+- 后端为 NCCL 2.31.2，发布构建和 A800 验收使用 CUDA 12.8。
 - 已完成单节点 4 张 A800 和双节点 8 张 A800 的运行时验收。原生
   `sm_90`、`sm_100` 构建已经就绪，Hopper 和 Blackwell 的运行时验收等待对应硬件。
   A800 矩阵覆盖 depth 1/2/4/8、固定布局 SDP4Bit/ZFP 和仅节点间使用的 framed dietGPU。
-- Pipeline 通信工作区使用 NCCL registered memory。满足条件的单节点固定布局
-  AllGather 和 ReduceScatter stage 会申请 symmetric window，无法使用时自动回退到
-  ordinary registration。
+- Registered pipeline arena 只使用一个物理 allocation，可用于 NCCL symmetric window
+  或 Host RMA window；未注册的 raw staging arena 可以使用多个物理 segment 扩容。
+- 固定布局通信 stage 使用 NCCL Host Alltoall 和 per-collective Config API。Framed
+  payload 根据后端能力选择内部 AllGatherV、grouped P2P 或 opt-in Host RMA。
 - 原生 stage 内部使用 Ring 还是 PAT 仍由 NCCL 选择；COCCL 自动调优只选择压缩通信的
-  OneShot、TwoShot 或 TripleShot 上层 recipe。
+  OneShot、TwoShot 或 TripleShot 上层 recipe。压缩器 profiling 只在一个协调 rank
+  执行；在已验收的 A800 系统上，模型建立后的 Host 选择路径低于 1 微秒。
 
 ## 快速开始
 
@@ -299,7 +301,7 @@ export NCCL_DEBUG_SUBSYS=COCCL_TUNING
 
 ## 性能
 
-以下已发表结果使用 32 张 H800 GPU、CUDA 12.6、NCCL 2.21.5 和 InfiniBand，作为论文基线保留。当前 NCCL 2.27.7 版本另行完成了单节点和双节点 A800 回归验收。相比 FP32 NCCL，COCCL-SDP4Bit 在 AllReduce、ReduceScatter、AllGather 和 AllToAll 上最高分别可获得 2.60 倍、2.58 倍、5.66 倍和 4.92 倍加速。
+以下已发表结果使用 32 张 H800 GPU、CUDA 12.6、NCCL 2.21.5 和 InfiniBand，作为论文基线保留。当前 NCCL 2.31.2 版本另行完成了单节点和双节点 A800 回归验收。相比 FP32 NCCL，COCCL-SDP4Bit 在 AllReduce、ReduceScatter、AllGather 和 AllToAll 上最高分别可获得 2.60 倍、2.58 倍、5.66 倍和 4.92 倍加速。
 
 ![COCCL 通信性能](assets/results/communication_performance.png)
 

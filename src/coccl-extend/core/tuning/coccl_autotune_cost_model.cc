@@ -143,10 +143,13 @@ double flatAllReduceOneShotCost(
     bool fusedDecompressReduce) {
   // Every rank contributes one complete encoded message. DecompressReduce
   // therefore decodes ranks copies even though AllGather sends one per rank.
-  const double codecUs = fusedDecompressReduce
-      ? codecTime(codec, messageBytes)
-      : encodeTime(codec, messageBytes) +
-            decodeTime(codec, messageBytes * (double)ranks);
+  const double codecUs = codec.model != nullptr && codec.model->drTime.valid
+      ? encodeTime(codec, messageBytes) + cocclAutotunePredict(
+            codec.model->drTime, messageBytes * (double)ranks)
+      : (fusedDecompressReduce
+             ? codecTime(codec, messageBytes)
+             : encodeTime(codec, messageBytes) +
+                   decodeTime(codec, messageBytes * (double)ranks));
   if (!std::isfinite(codecUs)) {
     return std::numeric_limits<double>::infinity();
   }
@@ -175,6 +178,9 @@ double flatAllReduceTwoShotCost(
 }
 
 double communicationKnee(const cocclLinearModel& model) {
+  if (model.alphaUs > 0.0 && model.betaUsPerByte > 0.0) {
+    return model.alphaUs / model.betaUsPerByte;
+  }
   if (model.sampleCount < 2) {
     return model.betaUsPerByte > 0.0
         ? model.alphaUs / model.betaUsPerByte
@@ -247,8 +253,13 @@ double crossoverCost(cocclAutotuneCostKind costKind,
             cocclAutotuneCostKind::ReduceScatterOneShot
         ? (double)nodes / (double)(nodes - 1)
         : (double)localRanks * (double)nodes;
-    return cocclAutotunePredict(
+    double cost = cocclAutotunePredict(
         model.interP2p, messageBytes / (ratio * divisor));
+    if (costKind == cocclAutotuneCostKind::ReduceScatterTwoShot) {
+      cost += (model.allToAll.alphaUs + model.interP2p.alphaUs) /
+          (double)localRanks;
+    }
+    return cost;
   }
 
   const double knee = communicationKnee(p2p);

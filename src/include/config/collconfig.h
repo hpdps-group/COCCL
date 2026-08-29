@@ -50,11 +50,6 @@ bool ncclCollConfigHasAlgSelection(const ncclCollConfig_t* config);
 
 bool ncclCollConfigNeedAggIsolate(const ncclCollConfig_t* config);
 
-// A schedule-neutral config may carry a profiler tag, but does not override
-// resources, algorithms, extensions, or the effective CTA policy.
-bool ncclCollConfigIsScheduleNeutral(
-    const ncclCollConfig_t* config, int defaultCTAPolicy);
-
 ncclResult_t ncclCollConfigGetAlgMask(const ncclCollConfig_t* config, ncclFunc_t func, uint64_t* outMask);
 
 // Resolve the effective per-call CTAPolicy from a per-call value, the comm-level policy, and whether

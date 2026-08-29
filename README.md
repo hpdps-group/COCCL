@@ -4,7 +4,7 @@ English | [简体中文](README_zh-CN.md)
 
 COCCL is a compression-aware GPU collective communication library that makes
 customized compression easy to integrate and configure. Built upon NCCL
-2.27.7, it preserves NCCL-compatible APIs and provides compression-aware
+2.31.2, it preserves NCCL-compatible APIs and provides compression-aware
 pipelines for AllGather, ReduceScatter, AllReduce, AllToAll, Send, and Recv.
 Its unified C++17 plugin model supports fixed-layout and framed
 variable-length compression operators and includes
@@ -30,17 +30,23 @@ accuracy.
 
 ## Current Release
 
-- The backend is NCCL 2.27.7. Release builds and validation use CUDA 12.8.
+- The backend is NCCL 2.31.2. Release builds and A800 validation use CUDA
+  12.8.
 - Runtime validation covers four A800 GPUs on one node and eight A800 GPUs
   across two nodes. Native `sm_90` and `sm_100` builds are ready; Hopper and
   Blackwell runtime validation is pending target hardware. The A800 matrix
   covers depth 1/2/4/8, fixed SDP4Bit/ZFP, and inter-only framed dietGPU.
-- Pipeline communication workspaces use NCCL registered memory. Eligible
-  single-node fixed-layout AllGather and ReduceScatter stages request a
-  symmetric window and automatically fall back to ordinary registration.
+- Registered pipeline arenas use one physical allocation and can be used by
+  NCCL symmetric or Host RMA windows. Unregistered raw staging arenas may grow
+  with multiple physical segments.
+- Fixed communication stages use NCCL's Host Alltoall and per-collective
+  Config APIs. Framed payloads select internal AllGatherV, grouped P2P, or
+  opt-in Host RMA according to the available backend capability.
 - NCCL still chooses its internal Ring or PAT algorithm for native stages.
   COCCL autotuning selects only the high-level OneShot, TwoShot, or TripleShot
-  compressed recipe.
+  compressed recipe. Codec profiling runs on one coordinator rank and the
+  steady-state Host selection path is below one microsecond on the validated
+  A800 system.
 
 ## Quick Start
 
@@ -363,7 +369,7 @@ Available subsystems:
 ## Performance
 
 The following published results use 32 H800 GPUs, CUDA 12.6, NCCL 2.21.5, and
-InfiniBand. They are retained as the paper baseline; the current NCCL 2.27.7
+InfiniBand. They are retained as the paper baseline; the current NCCL 2.31.2
 release passed separate single-node and two-node A800 regression validation.
 COCCL-SDP4Bit reaches up to 2.60x AllReduce, 2.58x ReduceScatter, 5.66x
 AllGather, and 4.92x AllToAll speedup over FP32 NCCL.

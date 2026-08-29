@@ -38,6 +38,7 @@ struct Options {
   std::string path = "explicit";
   int depth = 1;
   size_t rawChunkElements = kRawChunkElements;
+  size_t prewarmRawChunkElements = 0;
 };
 
 void fail(const char* expression, const char* detail, int rank,
@@ -89,6 +90,10 @@ Options parseOptions(int argc, char** argv, int worldRank) {
     else if (key == "--depth") options.depth = std::atoi(value.c_str());
     else if (key == "--raw-chunk-elements") {
       options.rawChunkElements = std::strtoull(value.c_str(), nullptr, 10);
+    }
+    else if (key == "--prewarm-raw-chunk-elements") {
+      options.prewarmRawChunkElements =
+          std::strtoull(value.c_str(), nullptr, 10);
     }
     else fail("command line", "unknown option", worldRank, __FILE__, __LINE__);
   }
@@ -418,6 +423,14 @@ void runSuite(const Options& options, ncclDataType_t datatype,
   }
   for (Operation operation : operations) {
     if (!selectedOperation(options, operation, subAdd)) continue;
+    if (options.prewarmRawChunkElements != 0) {
+      Options prewarm = options;
+      prewarm.rawChunkElements = options.prewarmRawChunkElements;
+      prewarm.prewarmRawChunkElements = 0;
+      runCase<T>(operation, subAdd, datatype, prewarm, nativeComm,
+                 compressedComm, nativeStream, compressedStream, worldRank,
+                 worldSize);
+    }
     runCase<T>(operation, subAdd, datatype, options, nativeComm,
                compressedComm, nativeStream, compressedStream, worldRank,
                worldSize);

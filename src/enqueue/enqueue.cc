@@ -2679,6 +2679,18 @@ static ncclResult_t p2pTaskAppend(struct ncclComm* comm, struct ncclInfo* info, 
   return ncclSuccess;
 }
 
+// True when a user config sets only the observational userProfilerTag (nothing scheduling-
+// significant): no resource cap or algorithm selection (ncclCollConfigNeedAggIsolate), no CGA
+// cluster size, and no per-call CTAPolicy override. CTAPolicy is resolved in place before this
+// runs, so it is compared against the comm default (commCTAPolicy).
+static bool collConfigIsProfilerTagOnly(const ncclCollConfig_t* config, int commCTAPolicy) {
+  if (config->size == 0) return false; // no user config at all (not profiler-tag-only)
+  if (ncclCollConfigNeedAggIsolate(config)) return false;
+  if (config->cgaClusterSize != NCCL_CONFIG_UNDEF_INT) return false;
+  if (config->CTAPolicy != commCTAPolicy) return false;
+  return true;
+}
+
 static ncclResult_t collTaskAppend(struct ncclComm* comm, struct ncclInfo* info, struct ncclDevRedOpFull opDev) {
   struct ncclKernelPlanner* planner = &comm->planner;
 
@@ -2697,8 +2709,8 @@ static ncclResult_t collTaskAppend(struct ncclComm* comm, struct ncclInfo* info,
   // profiler tag through; a config with any resource/algorithm/CTA override still falls to the
   // regular path.
   if (info->coll == ncclFuncBroadcast && ncclParamAllgathervEnable() && !comm->ccEnable &&
-      ncclCollConfigIsScheduleNeutral(
-        &info->collConfig, comm->config.CTAPolicy)) {
+      (info->collConfig.size == 0 /* no user config passed */ ||
+       collConfigIsProfilerTagOnly(&info->collConfig, comm->config.CTAPolicy))) {
     // Must be in thread local group before tasks can be alloc'd in `comm->memScoped`.
     struct ncclTaskBcast* t =
       ncclMemoryPoolAlloc<struct ncclTaskBcast>(&comm->memPool_ncclTaskBcast, &comm->memPermanent);

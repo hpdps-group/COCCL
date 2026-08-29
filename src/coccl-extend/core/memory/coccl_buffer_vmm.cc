@@ -7,7 +7,6 @@
 #include "cudawrap.h"
 
 #include <algorithm>
-#include <chrono>
 #include <iterator>
 #include <stdint.h>
 
@@ -72,33 +71,9 @@ bool canGrow(VmmBlock* block) {
   return true;
 }
 
-bool registrationSatisfiesComm(
-    const VmmBlock* block, ncclComm_t comm,
-    cocclBufferRegistrationKind requested) {
-  for (const BufferRegistration& registration : block->registrations) {
-    if (registration.comm == comm &&
-        registrationSatisfies(registration, requested)) {
-      return true;
-    }
-  }
-  return false;
-}
-
 bool blockSupportsRegistration(
-    const VmmBlock* block, ncclComm_t comm,
-    cocclBufferRegistrationKind requested) {
-  if (requested == cocclBufferRegistrationKind::Rma &&
-      block->segments.size() != 1) {
-    return false;
-  }
-  if (comm == nullptr ||
-      registrationSatisfiesComm(block, comm, requested)) {
-    return true;
-  }
-  if (requested == cocclBufferRegistrationKind::Ordinary) {
-    return block->segments.size() == 1;
-  }
-  return true;
+    const VmmBlock* block, ncclComm_t comm) {
+  return comm == nullptr || block->segments.size() == 1;
 }
 
 ncclResult_t waitForBlock(VmmBlock* block) {
@@ -196,8 +171,7 @@ ncclResult_t ensureRegistration(
     VmmBlock* block, ncclComm_t comm,
     cocclBufferRegistrationKind requested) {
   if (comm == nullptr) return ncclSuccess;
-  if (block->segments.size() > 1 &&
-      requested == cocclBufferRegistrationKind::Ordinary) {
+  if (block->segments.size() > 1) {
     INFO(COCCL_MEMORY,
          "COCCL VMM registration comm %p base %p bytes %zu segments %zu kind unregistered",
          comm, block->ptr, block->capacity, block->segments.size());
@@ -210,25 +184,15 @@ ncclResult_t ensureRegistration(
   }
 
   BufferRegistration registration;
-  const auto start = std::chrono::steady_clock::now();
   NCCLCHECK(registerBuffer(comm, block->ptr, block->capacity, requested,
                            &registration));
-  if (block->segments.size() > 1 && registration.window == nullptr) {
-    NCCLCHECK(deregisterBuffer(&registration));
-    INFO(COCCL_MEMORY,
-         "COCCL VMM registration comm %p base %p bytes %zu segments %zu kind unregistered",
-         comm, block->ptr, block->capacity, block->segments.size());
-    return ncclSuccess;
-  }
-  const auto latency = std::chrono::duration_cast<std::chrono::microseconds>(
-      std::chrono::steady_clock::now() - start).count();
   block->registrations.push_back(registration);
   block->pool->registeredBytes += block->capacity;
   INFO(COCCL_MEMORY,
-       "COCCL VMM registration comm %p base %p bytes %zu segments %zu kind %s latency_us %lld total %zu",
+       "COCCL VMM registration comm %p base %p bytes %zu segments %zu kind %s total %zu",
        comm, block->ptr, block->capacity, block->segments.size(),
        registration.window != nullptr ? "symmetric" : "ordinary",
-       (long long)latency, block->pool->registeredBytes);
+       block->pool->registeredBytes);
   return ncclSuccess;
 }
 
@@ -287,27 +251,39 @@ fail:
   return ret;
 }
 
-ncclResult_t growBlock(VmmBlock* block, size_t requested) {
+ncclResult_t growBlock(VmmBlock* block, size_t requested,
+                       bool singleSegment) {
   VmmPool* pool = block->pool;
   const size_t oldCapacity = block->capacity;
   const size_t newCapacity = alignUpTo(requested, pool->chunkBytes);
   ncclResult_t ret = ncclSuccess;
   CUdeviceptr newReservation = 0;
   size_t mappedSegments = 0;
-  std::vector<VmmSegment> newSegments = block->segments;
-  const size_t oldSegmentCount = newSegments.size();
+  std::vector<VmmSegment> newSegments;
+  std::vector<VmmSegment> oldSegments;
+  size_t firstNewSegment = 0;
 
   CUDACHECK(cudaSetDevice(block->cudaDev));
   NCCLCHECK(waitForBlock(block));
   CUCHECKGOTO(cuMemAddressReserve(&newReservation, newCapacity,
                                   pool->granularity, 0, 0), ret, fail);
-  for (size_t offset = oldCapacity; offset < newCapacity;
-       offset += pool->chunkBytes) {
+  if (singleSegment) {
     VmmSegment segment;
-    NCCLCHECKGOTO(createPhysicalSegment(
-                      pool, std::min(pool->chunkBytes, newCapacity - offset),
-                      &segment), ret, fail);
+    NCCLCHECKGOTO(createPhysicalSegment(pool, newCapacity, &segment), ret,
+                  fail);
     newSegments.push_back(segment);
+  } else {
+    newSegments = block->segments;
+    firstNewSegment = newSegments.size();
+    for (size_t offset = oldCapacity; offset < newCapacity;
+         offset += pool->chunkBytes) {
+      VmmSegment segment;
+      NCCLCHECKGOTO(createPhysicalSegment(
+                        pool,
+                        std::min(pool->chunkBytes, newCapacity - offset),
+                        &segment), ret, fail);
+      newSegments.push_back(segment);
+    }
   }
   NCCLCHECKGOTO(mapSegments(newReservation, newSegments, &mappedSegments),
                 ret, fail);
@@ -320,11 +296,18 @@ ncclResult_t growBlock(VmmBlock* block, size_t requested) {
   CUCHECKGOTO(cuMemAddressFree(reinterpret_cast<CUdeviceptr>(block->ptr),
                                oldCapacity), ret, fail);
 
+  if (singleSegment) oldSegments = std::move(block->segments);
   block->ptr = reinterpret_cast<void*>(newReservation);
   block->capacity = newCapacity;
   block->segments = std::move(newSegments);
   pool->virtualBytes += newCapacity - oldCapacity;
   resetSlices(block);
+  if (singleSegment) {
+    for (const VmmSegment& segment : oldSegments) {
+      CUCHECK(cuMemRelease(segment.handle));
+      pool->physicalBytes -= segment.bytes;
+    }
+  }
   INFO(COCCL_MEMORY,
        "COCCL VMM growth comm %p base %p requested %zu reserved %zu segments %zu virtual %zu physical %zu registered %zu",
        pool->ownerComm, block->ptr, requested, newCapacity,
@@ -336,7 +319,7 @@ fail:
   if (newReservation != 0) {
     unmapSegmentsIgnore(newReservation, newSegments, mappedSegments);
   }
-  releaseSegmentsIgnore(pool, newSegments, oldSegmentCount);
+  releaseSegmentsIgnore(pool, newSegments, firstNewSegment);
   if (newReservation != 0) {
     CUCHECKIGNORE(cuMemAddressFree(newReservation, newCapacity));
   }
@@ -475,8 +458,7 @@ ncclResult_t vmmAcquire(VmmPool* pool, ncclComm_t registeredComm,
                         size_t bytes, cudaStream_t stream,
                         cocclBufferHandle* buffer) {
   for (auto& block : pool->blocks) {
-    if (!blockSupportsRegistration(
-            block.get(), registeredComm, registration)) {
+    if (!blockSupportsRegistration(block.get(), registeredComm)) {
       continue;
     }
     ncclResult_t ret = acquireFromBlock(
@@ -490,8 +472,7 @@ ncclResult_t vmmAcquire(VmmPool* pool, ncclComm_t registeredComm,
       registration == cocclBufferRegistrationKind::Symmetric;
   if (growableRegistration) {
     for (auto& block : pool->blocks) {
-      if (blockSupportsRegistration(
-              block.get(), registeredComm, registration) &&
+      if (blockSupportsRegistration(block.get(), registeredComm) &&
           block->capacity < bytes && canGrow(block.get()) &&
           (grow == nullptr || block->capacity > grow->capacity)) {
         grow = block.get();
@@ -499,7 +480,7 @@ ncclResult_t vmmAcquire(VmmPool* pool, ncclComm_t registeredComm,
     }
   }
   if (grow != nullptr) {
-    NCCLCHECK(growBlock(grow, bytes));
+    NCCLCHECK(growBlock(grow, bytes, registeredComm != nullptr));
     return acquireFromBlock(
         grow, bytes, registeredComm, registration, stream, buffer);
   }

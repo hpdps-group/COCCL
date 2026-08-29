@@ -74,12 +74,12 @@ void destroyResources(cocclPipelineResources* resources) {
   delete resources;
 }
 
-ncclResult_t createResources(int depth, cocclPipelineResources** output) {
+ncclResult_t createResources(cocclPipelineResources** output) {
   cocclPipelineResources* resources =
       new (std::nothrow) cocclPipelineResources();
   if (resources == nullptr) return ncclSystemError;
   *resources = {};
-  resources->depth = depth;
+  resources->depth = kCocclPipelineMaxDepth;
 
   int leastPriority = 0;
   int greatestPriority = 0;
@@ -96,8 +96,7 @@ ncclResult_t createResources(int depth, cocclPipelineResources** output) {
       destroyResources(resources);
       return ncclUnhandledCudaError;
     }
-    for (int slice = 0; slice < depth; ++slice) {
-      if (phase == cocclPipelinePhaseUnpack && slice != depth - 1) continue;
+    for (int slice = 0; slice < resources->depth; ++slice) {
       cudaResult = cudaEventCreateWithFlags(
           &resources->events[phase][slice], cudaEventDisableTiming);
       if (cudaResult != cudaSuccess) {
@@ -124,7 +123,7 @@ ncclResult_t createResources(int depth, cocclPipelineResources** output) {
   return ncclSuccess;
 }
 
-ncclResult_t findOrCreateResources(ncclComm_t comm, int depth,
+ncclResult_t findOrCreateResources(ncclComm_t comm,
                                    cocclPipelineResources** output) {
   auto found = resourcesByComm.find(comm);
   if (found != resourcesByComm.end()) {
@@ -133,7 +132,8 @@ ncclResult_t findOrCreateResources(ncclComm_t comm, int depth,
   }
 
   cocclPipelineResources* resources = nullptr;
-  ncclResult_t result = createResources(depth, &resources);
+  // The same communicator may alternate serial and pipelined recipes.
+  ncclResult_t result = createResources(&resources);
   if (result == ncclSuccess) {
     resourcesByComm.emplace(comm, resources);
     *output = resources;
@@ -592,8 +592,7 @@ static ncclResult_t cocclRunPipelineWithDepth(
     result = runSerial(context, workspace);
   } else {
     cocclPipelineResources* resources = nullptr;
-    result = findOrCreateResources(spec->ownerComm, context.depth,
-                                   &resources);
+    result = findOrCreateResources(spec->ownerComm, &resources);
     if (result == ncclSuccess) {
       context.stageContext.frameResources = &resources->frameResources;
       if (context.depth == 1) {
