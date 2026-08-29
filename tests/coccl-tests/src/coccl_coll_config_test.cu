@@ -43,6 +43,9 @@ struct Options {
   size_t elements = 8ULL << 20;
   int iterations = 10;
   bool tagOnly = false;
+  bool backendMatrix = false;
+  bool check = true;
+  std::string operation = "both";
 };
 
 Options parseOptions(int argc, char** argv) {
@@ -50,10 +53,16 @@ Options parseOptions(int argc, char** argv) {
   for (int index = 1; index < argc; ++index) {
     if (std::strcmp(argv[index], "--tag-only") == 0) {
       options.tagOnly = true;
+    } else if (std::strcmp(argv[index], "--backend-matrix") == 0) {
+      options.backendMatrix = true;
+    } else if (std::strcmp(argv[index], "--no-check") == 0) {
+      options.check = false;
     } else if (std::strcmp(argv[index], "--elements") == 0) {
       options.elements = std::strtoull(argv[++index], nullptr, 10);
     } else if (std::strcmp(argv[index], "--iterations") == 0) {
       options.iterations = std::atoi(argv[++index]);
+    } else if (std::strcmp(argv[index], "--operation") == 0) {
+      options.operation = argv[++index];
     } else {
       fail("command line", "unknown option", __LINE__);
     }
@@ -62,14 +71,24 @@ Options parseOptions(int argc, char** argv) {
 }
 
 template <typename Call>
-double timeCollective(const char* operation, const char* variant,
-                      size_t algorithmBytes, int iterations,
-                      cudaStream_t stream, Call call) {
+bool timeCollective(const char* operation, const char* variant,
+                    size_t algorithmBytes, int iterations,
+                    cudaStream_t stream, Call call,
+                    bool allowUnavailable = false) {
   std::printf("CONFIG_CASE rank=%d operation=%s variant=%s\n",
               worldRank, operation, variant);
   std::fflush(stdout);
   MPICHECK(MPI_Barrier(MPI_COMM_WORLD));
-  NCCLCHECK(call());
+  const ncclResult_t probe = call();
+  if (allowUnavailable && probe == ncclInvalidArgument) {
+    if (worldRank == 0) {
+      std::printf("CONFIG_UNAVAILABLE operation=%s variant=%s\n",
+                  operation, variant);
+      std::fflush(stdout);
+    }
+    return false;
+  }
+  if (probe != ncclSuccess) fail("collective", ncclGetErrorString(probe), __LINE__);
   CUDACHECK(cudaStreamSynchronize(stream));
 
   cudaEvent_t begin;
@@ -98,7 +117,7 @@ double timeCollective(const char* operation, const char* variant,
                 operation, variant, algBw);
     std::fflush(stdout);
   }
-  return algBw;
+  return true;
 }
 
 void copyInput(float* device, const std::vector<float>& host,
@@ -132,6 +151,95 @@ ncclCollConfig_t algorithmConfig(const char* algorithm, bool force) {
   config.algSelection = algorithm;
   config.forceAlgSelection = force ? 1 : 0;
   return config;
+}
+
+std::vector<std::pair<const char*, ncclCollConfig_t*>> backendVariants(
+    ncclCollConfig_t* patEnabled, ncclCollConfig_t* ring,
+    ncclCollConfig_t* nvls, ncclCollConfig_t* pat) {
+  return {{"default", nullptr},
+          {"pat-enabled-auto", patEnabled},
+          {"ring-simple", ring},
+          {"nvls-simple", nvls},
+          {"pat-simple", pat}};
+}
+
+void runBackendAllGather(float* send, float* recv, size_t count,
+                         int ranks, ncclComm_t comm, cudaStream_t stream,
+                         int iterations, bool check) {
+  std::vector<float> expected;
+  if (check) {
+    std::vector<float> input(count);
+    for (size_t index = 0; index < count; ++index) {
+      input[index] = static_cast<float>((size_t)worldRank * count + index);
+    }
+    expected.resize(count * (size_t)ranks);
+    for (int rank = 0; rank < ranks; ++rank) {
+      for (size_t index = 0; index < count; ++index) {
+        expected[(size_t)rank * count + index] =
+            static_cast<float>((size_t)rank * count + index);
+      }
+    }
+    copyInput(send, input, stream);
+  } else {
+    CUDACHECK(cudaMemsetAsync(send, 0, count * sizeof(float), stream));
+  }
+
+  ncclCollConfig_t patEnabled =
+      algorithmConfig("RING,NVLS,COLLNET_DIRECT,PAT", true);
+  ncclCollConfig_t ring = algorithmConfig("RING_SIMPLE", true);
+  ncclCollConfig_t nvls = algorithmConfig("NVLS_SIMPLE", true);
+  ncclCollConfig_t pat = algorithmConfig("PAT_SIMPLE", true);
+  const size_t logicalBytes = count * (size_t)ranks * sizeof(float);
+  if (worldRank == 0) {
+    std::printf("BACKEND_SHAPE operation=allgather logical_bytes=%zu\n",
+                logicalBytes);
+  }
+  for (const auto& variant : backendVariants(
+           &patEnabled, &ring, &nvls, &pat)) {
+    const bool available = timeCollective(
+        "allgather", variant.first, logicalBytes, iterations, stream,
+        [&] { return ncclAllGatherConfig(send, recv, count, ncclFloat32,
+                                         comm, stream, variant.second); },
+        true);
+    if (available && check) checkOutput(variant.first, recv, expected, stream);
+  }
+}
+
+void runBackendReduceScatter(float* send, float* recv, size_t count,
+                             int ranks, ncclComm_t comm,
+                             cudaStream_t stream, int iterations,
+                             bool check) {
+  std::vector<float> expected;
+  if (check) {
+    std::vector<float> input(count * (size_t)ranks,
+                             static_cast<float>(worldRank + 1));
+    expected.assign(count, static_cast<float>(ranks * (ranks + 1) / 2));
+    copyInput(send, input, stream);
+  } else {
+    CUDACHECK(cudaMemsetAsync(send, 0,
+                              count * (size_t)ranks * sizeof(float),
+                              stream));
+  }
+
+  ncclCollConfig_t patEnabled =
+      algorithmConfig("RING,NVLS,COLLNET_DIRECT,PAT", true);
+  ncclCollConfig_t ring = algorithmConfig("RING_SIMPLE", true);
+  ncclCollConfig_t nvls = algorithmConfig("NVLS_SIMPLE", true);
+  ncclCollConfig_t pat = algorithmConfig("PAT_SIMPLE", true);
+  const size_t logicalBytes = count * (size_t)ranks * sizeof(float);
+  if (worldRank == 0) {
+    std::printf("BACKEND_SHAPE operation=reducescatter logical_bytes=%zu\n",
+                logicalBytes);
+  }
+  for (const auto& variant : backendVariants(
+           &patEnabled, &ring, &nvls, &pat)) {
+    const bool available = timeCollective(
+        "reducescatter", variant.first, logicalBytes, iterations, stream,
+        [&] { return ncclReduceScatterConfig(
+            send, recv, count, ncclFloat32, ncclSum, comm, stream,
+            variant.second); }, true);
+    if (available && check) checkOutput(variant.first, recv, expected, stream);
+  }
 }
 
 void runAllGatherMatrix(float* send, float* recv, size_t count,
@@ -305,7 +413,18 @@ int main(int argc, char** argv) {
   CUDACHECK(cudaMalloc(&send, bufferElements * sizeof(float)));
   CUDACHECK(cudaMalloc(&recv, bufferElements * sizeof(float)));
 
-  if (options.tagOnly) {
+  if (options.backendMatrix) {
+    if (options.operation == "allgather" || options.operation == "both") {
+      runBackendAllGather(send, recv, options.elements, worldSize, comm,
+                          stream, options.iterations, options.check);
+    }
+    if (options.operation == "reducescatter" ||
+        options.operation == "both") {
+      runBackendReduceScatter(send, recv, options.elements, worldSize,
+                              comm, stream, options.iterations,
+                              options.check);
+    }
+  } else if (options.tagOnly) {
     runTagOnly(send, recv, options.elements, comm, stream);
   } else {
     runAllGatherMatrix(send, recv, options.elements, worldSize, comm,
