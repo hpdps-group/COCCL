@@ -18,6 +18,7 @@ struct cocclInfo {
   cocclOperation operation = cocclOperation::Count;
   ncclComm_t comm = nullptr;
   cudaStream_t stream = nullptr;
+  uint64_t profilerTag = 0;
 };
 
 ncclResult_t cocclEnqueueCheck(const cocclInfo* info, bool* isEnqueued);

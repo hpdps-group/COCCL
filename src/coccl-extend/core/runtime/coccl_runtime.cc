@@ -269,24 +269,29 @@ ncclResult_t cocclReplayNativeCall(const cocclInfo& info) {
   const bool previous = callerGuardActive;
   callerGuardActive = true;
 
+  ncclCollConfig_t config = NCCL_COLLCONFIG_INITIALIZER;
+  config.userProfilerTag = info.profilerTag;
   ncclResult_t result = ncclInvalidArgument;
   switch (info.operation) {
     case cocclOperation::AllGather:
-      result = ncclAllGather(info.sendbuff, info.recvbuff, info.count,
-                             info.datatype, info.comm, info.stream);
+      result = ncclAllGatherConfig(
+          info.sendbuff, info.recvbuff, info.count, info.datatype,
+          info.comm, info.stream, &config);
       break;
     case cocclOperation::ReduceScatter:
-      result = ncclReduceScatter(info.sendbuff, info.recvbuff, info.count,
-                                 info.datatype, info.op, info.comm,
-                                 info.stream);
+      result = ncclReduceScatterConfig(
+          info.sendbuff, info.recvbuff, info.count, info.datatype, info.op,
+          info.comm, info.stream, &config);
       break;
     case cocclOperation::AllReduce:
-      result = ncclAllReduce(info.sendbuff, info.recvbuff, info.count,
-                             info.datatype, info.op, info.comm, info.stream);
+      result = ncclAllReduceConfig(
+          info.sendbuff, info.recvbuff, info.count, info.datatype, info.op,
+          info.comm, info.stream, &config);
       break;
     case cocclOperation::AllToAll:
-      result = ncclAllToAll(info.sendbuff, info.recvbuff, info.count,
-                            info.datatype, info.comm, info.stream);
+      result = ncclAlltoAllConfig(
+          info.sendbuff, info.recvbuff, info.count, info.datatype,
+          info.comm, info.stream, &config);
       break;
     case cocclOperation::SendRecv:
       result = info.func == ncclFuncSend

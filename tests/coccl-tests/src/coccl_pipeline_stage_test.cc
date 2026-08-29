@@ -55,16 +55,18 @@ ncclResult_t ncclDecompress(
   return ncclSuccess;
 }
 
-ncclResult_t ncclAllToAll(const void*, void*, size_t count,
-                          ncclDataType_t datatype, ncclComm_t comm,
-                          cudaStream_t) {
+ncclResult_t ncclAlltoAllConfig(
+    const void*, void*, size_t count, ncclDataType_t datatype,
+    ncclComm_t comm, cudaStream_t, const ncclCollConfig_t* config) {
   ++allToAllCalls;
   EXPECT(count == 32 && datatype == ncclUint8 && comm->nRanks == 4);
+  EXPECT(config != nullptr && config->userProfilerTag == 0x1234);
   return ncclSuccess;
 }
 
-ncclResult_t ncclAllGather(const void*, void*, size_t, ncclDataType_t,
-                           ncclComm_t, cudaStream_t) {
+ncclResult_t ncclAllGatherConfig(
+    const void*, void*, size_t, ncclDataType_t, ncclComm_t, cudaStream_t,
+    const ncclCollConfig_t*) {
   return ncclInternalError;
 }
 
@@ -104,7 +106,7 @@ int main() {
   comm.rank = 2;
   const cocclPipelineStageContext context = {
       64, 256, 1024, ncclFloat32, &comm, nullptr,
-      cocclPipelineInputContiguous, 1, 4};
+      cocclPipelineInputContiguous, 1, 4, 0x1234};
   cocclPipelineEdge edge = {
       reinterpret_cast<void*>(0x100000), 1024, 256, ncclFloat32, 4,
       nullptr, nullptr, 0};

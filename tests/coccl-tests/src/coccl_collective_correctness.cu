@@ -35,6 +35,7 @@ struct Options {
   std::string topology;
   std::string operation;
   std::string algorithm;
+  std::string path = "explicit";
   int depth = 1;
   size_t rawChunkElements = kRawChunkElements;
 };
@@ -84,6 +85,7 @@ Options parseOptions(int argc, char** argv, int worldRank) {
     else if (key == "--topology") options.topology = value;
     else if (key == "--operation") options.operation = value;
     else if (key == "--algorithm") options.algorithm = value;
+    else if (key == "--path") options.path = value;
     else if (key == "--depth") options.depth = std::atoi(value.c_str());
     else if (key == "--raw-chunk-elements") {
       options.rawChunkElements = std::strtoull(value.c_str(), nullptr, 10);
@@ -215,10 +217,14 @@ void runNative(Operation operation, const void* input, void* output,
                cudaStream_t stream, int rank, int ranks,
                size_t inputCount) {
   switch (operation) {
-    case Operation::AllToAll:
-      NCCLCHECK(ncclAllToAll(input, output, inputCount / ranks,
-                             datatype, comm, stream));
+    case Operation::AllToAll: {
+      ncclCollConfig_t config = NCCL_COLLCONFIG_INITIALIZER;
+      config.minCTAs = 1;
+      config.maxCTAs = 1;
+      NCCLCHECK(ncclAlltoAllConfig(input, output, inputCount / ranks,
+                                  datatype, comm, stream, &config));
       return;
+    }
     case Operation::AllGather:
       NCCLCHECK(ncclAllGather(input, output, inputCount, datatype,
                               comm, stream));
@@ -251,11 +257,16 @@ void runNative(Operation operation, const void* input, void* output,
 void runCompressed(Operation operation, const void* input, void* output,
                    ncclDataType_t datatype, ncclComm_t comm,
                    cudaStream_t stream, int rank, int ranks,
-                   size_t inputCount) {
+                   size_t inputCount, bool autoRoute) {
   switch (operation) {
     case Operation::AllToAll:
-      NCCLCHECK(cocclAllToAllComp(input, output, inputCount / ranks,
-                                  datatype, comm, stream));
+      if (autoRoute) {
+        NCCLCHECK(ncclAlltoAll(input, output, inputCount / ranks,
+                              datatype, comm, stream));
+      } else {
+        NCCLCHECK(cocclAllToAllComp(input, output, inputCount / ranks,
+                                    datatype, comm, stream));
+      }
       return;
     case Operation::AllGather:
       NCCLCHECK(cocclAllGatherComp(input, output, inputCount, datatype,
@@ -321,7 +332,7 @@ void runCase(Operation operation, bool subAdd, ncclDataType_t datatype,
     MPICHECK(MPI_Barrier(MPI_COMM_WORLD));
     runCompressed(operation, deviceInput, compressedOutput, datatype,
                   compressedComm, compressedStream, worldRank, worldSize,
-                  inputCount);
+                  inputCount, options.path == "auto");
     CUDACHECK(cudaStreamSynchronize(compressedStream));
   }
 
@@ -341,7 +352,7 @@ void runCase(Operation operation, bool subAdd, ncclDataType_t datatype,
   MPICHECK(MPI_Barrier(MPI_COMM_WORLD));
   runCompressed(operation, deviceInput, compressedOutput, datatype,
                 compressedComm, compressedStream, worldRank, worldSize,
-                inputCount);
+                inputCount, options.path == "auto");
   CUDACHECK(cudaStreamSynchronize(compressedStream));
 
   std::vector<T> nativeHost(outputCount);
@@ -366,12 +377,12 @@ void runCase(Operation operation, bool subAdd, ncclDataType_t datatype,
         static_cast<double>(outputCount * static_cast<size_t>(worldSize));
     std::printf(
         "COCCL_CORRECTNESS topology=%s rank_count=%d operation=%s "
-        "algorithm=%s compressor=%s dtype=%s depth=%d "
+        "algorithm=%s compressor=%s path=%s dtype=%s depth=%d "
         "raw_chunk_elements=%zu output_elements=%zu "
         "mean_relative_error=%.12e\n",
         options.topology.c_str(), worldSize, operationName(operation),
         algorithmName(operation, subAdd), options.compressor.c_str(),
-        options.datatype.c_str(), options.depth,
+        options.path.c_str(), options.datatype.c_str(), options.depth,
         operation == Operation::AllGather || operation == Operation::SendRecv
             ? inputCount : inputCount / (size_t)worldSize,
         outputCount, mean);

@@ -59,12 +59,14 @@ ncclResult_t ncclDecompressReduce(
   return ncclSuccess;
 }
 
-ncclResult_t ncclReduceScatter(
+ncclResult_t ncclReduceScatterConfig(
     const void*, void*, size_t recvcount, ncclDataType_t datatype,
-    ncclRedOp_t op, ncclComm_t comm, cudaStream_t) {
+    ncclRedOp_t op, ncclComm_t comm, cudaStream_t,
+    const ncclCollConfig_t* config) {
   ++reduceScatterCalls;
   EXPECT(recvcount == 32);
   EXPECT(datatype == ncclFloat32 && op == ncclSum && comm->nRanks == 4);
+  EXPECT(config != nullptr);
   return ncclSuccess;
 }
 
@@ -79,13 +81,15 @@ ncclResult_t ncclDecompress(
   return ncclInternalError;
 }
 
-ncclResult_t ncclAllToAll(const void*, void*, size_t, ncclDataType_t,
-                          ncclComm_t, cudaStream_t) {
+ncclResult_t ncclAlltoAllConfig(
+    const void*, void*, size_t, ncclDataType_t, ncclComm_t, cudaStream_t,
+    const ncclCollConfig_t*) {
   return ncclInternalError;
 }
 
-ncclResult_t ncclAllGather(const void*, void*, size_t, ncclDataType_t,
-                           ncclComm_t, cudaStream_t) {
+ncclResult_t ncclAllGatherConfig(
+    const void*, void*, size_t, ncclDataType_t, ncclComm_t, cudaStream_t,
+    const ncclCollConfig_t*) {
   return ncclInternalError;
 }
 

@@ -285,8 +285,8 @@ static void queryModel_lsa(struct ncclTuningInput_t* input, ncclSymkKernelId k, 
   if (nUserCTAs > 0) nMinBlocks = nMaxBlocks = nUserCTAs;
   if (nMinBlocks > nMaxBlocks) nMinBlocks = nMaxBlocks;
 
-  // Even CTA counts are preferred for optimal performance, except for when CTAs==1
-  if (nMinBlocks != nMaxBlocks) {
+  // Hopper and Blackwell prefer even CTA counts. Ampere's ST kernels can peak at odd counts.
+  if (comm->cudaArch >= 900 && nMinBlocks != nMaxBlocks) {
     if (nMinBlocks != 1) nMinBlocks = roundUp(nMinBlocks, 2);
     if (nMaxBlocks != 1) nMaxBlocks = roundDown(nMaxBlocks, 2);
   }
@@ -317,7 +317,9 @@ static void queryModel_lsa(struct ncclTuningInput_t* input, ncclSymkKernelId k, 
 
   *nBlocks = nMaxBlocks;
   *timeUs = model(busBytes, baseLat, nMaxBlocks, smBw, busMultiplier, peakBw);
-  for (int bn = nMinBlocks; bn < nMaxBlocks; bn += (bn == 1) ? 1 : 2) {
+  const int blockStep = comm->cudaArch >= 900 ? 2 : 1;
+  for (int bn = nMinBlocks; bn < nMaxBlocks;
+       bn += (bn == 1) ? 1 : blockStep) {
     double time = model(busBytes, baseLat, bn, smBw, busMultiplier, peakBw);
     if (time <= 1.025 * (*timeUs)) {
       *nBlocks = bn;

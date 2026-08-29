@@ -174,8 +174,8 @@ void runPublic(Operation operation, const void* input, void* output,
                cudaStream_t stream, int rank, int ranks) {
   switch (operation) {
     case Operation::AllToAll:
-      NCCLCHECK(ncclAllToAll(input, output, elements / ranks, datatype,
-                             comm, stream));
+      NCCLCHECK(ncclAlltoAll(input, output, elements / ranks, datatype,
+                            comm, stream));
       return;
     case Operation::AllGather:
       NCCLCHECK(ncclAllGather(input, output, elements, datatype,

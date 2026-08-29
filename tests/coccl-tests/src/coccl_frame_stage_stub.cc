@@ -21,8 +21,8 @@ ncclResult_t cocclCommitFrameExchange(
   return ncclInternalError;
 }
 
-ncclResult_t ncclReduceScatter(
+ncclResult_t ncclReduceScatterConfig(
     const void*, void*, size_t, ncclDataType_t, ncclRedOp_t,
-    ncclComm_t, cudaStream_t) {
+    ncclComm_t, cudaStream_t, const ncclCollConfig_t*) {
   return ncclInternalError;
 }

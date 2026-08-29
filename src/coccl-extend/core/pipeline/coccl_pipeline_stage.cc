@@ -19,6 +19,15 @@ bool buffersOverlap(const void* first, size_t firstBytes,
       secondBegin < firstBegin + firstBytes;
 }
 
+ncclCollConfig_t communicationConfig(
+    const cocclPipelineStageContext* context,
+    const cocclPipelineStage* stage) {
+  ncclCollConfig_t config = NCCL_COLLCONFIG_INITIALIZER;
+  if (stage->config != nullptr) config = *stage->config;
+  config.userProfilerTag = context->profilerTag;
+  return config;
+}
+
 ncclResult_t ensureFrameMetadataCapacity(
     cocclPipelineFrameResources* resources, size_t frames) {
   if (resources->metadataCapacity >= frames) return ncclSuccess;
@@ -118,8 +127,10 @@ ncclResult_t runAllToAll(const cocclPipelineStageContext* context,
         context, stage, edge, output, stream);
   }
   const size_t sendBytes = edge->bytes / (size_t)stage->comm->nRanks;
-  NCCLCHECK(ncclAllToAll(edge->ptr, output->ptr, sendBytes, ncclUint8,
-                         stage->comm, stream));
+  const ncclCollConfig_t config = communicationConfig(context, stage);
+  NCCLCHECK(ncclAlltoAllConfig(
+      edge->ptr, output->ptr, sendBytes, ncclUint8, stage->comm, stream,
+      &config));
   edge->ptr = output->ptr;
   return ncclSuccess;
 }
@@ -135,8 +146,10 @@ ncclResult_t runAllGather(const cocclPipelineStageContext* context,
     return cocclCommitPipelineFrameExchange(
         context, stage, edge, output, stream);
   }
-  NCCLCHECK(ncclAllGather(edge->ptr, output->ptr, edge->bytes, ncclUint8,
-                          stage->comm, stream));
+  const ncclCollConfig_t config = communicationConfig(context, stage);
+  NCCLCHECK(ncclAllGatherConfig(
+      edge->ptr, output->ptr, edge->bytes, ncclUint8, stage->comm, stream,
+      &config));
   const size_t ranks = (size_t)stage->comm->nRanks;
   edge->ptr = output->ptr;
   edge->bytes *= ranks;
@@ -243,9 +256,10 @@ ncclResult_t runReduceScatter(
   const size_t outputChunks =
       edge->logicalChunks / (size_t)stage->comm->nRanks;
   const size_t recvcount = context->rawSliceCount * outputChunks;
-  NCCLCHECK(ncclReduceScatter(
+  const ncclCollConfig_t config = communicationConfig(context, stage);
+  NCCLCHECK(ncclReduceScatterConfig(
       edge->ptr, output->ptr, recvcount, context->rawDatatype, ncclSum,
-      stage->comm, stream));
+      stage->comm, stream, &config));
   edge->ptr = output->ptr;
   edge->bytes = recvcount * (size_t)ncclTypeSize(context->rawDatatype);
   edge->totalElements = recvcount;
@@ -310,7 +324,7 @@ bool cocclPipelineStageUsesFrameExchange(
 }
 
 ncclResult_t cocclPreparePipelineFrameExchange(
-    const cocclPipelineStageContext*,
+    const cocclPipelineStageContext* context,
     const cocclPipelineStage* stage, const cocclPipelineEdge* edge,
     const cocclPipelineStageOutput* output, cudaStream_t stream) {
   if (buffersOverlap(
@@ -321,15 +335,17 @@ ncclResult_t cocclPreparePipelineFrameExchange(
     const size_t metadataBytes =
         edge->logicalChunks / (size_t)stage->comm->nRanks *
         sizeof(cocclCompressorFrameMetadata);
-    return ncclAllToAll(
+    const ncclCollConfig_t config = communicationConfig(context, stage);
+    return ncclAlltoAllConfig(
         edge->frameMetadata, output->frameMetadata, metadataBytes,
-        ncclUint8, stage->comm, stream);
+        ncclUint8, stage->comm, stream, &config);
   }
   const size_t metadataBytes =
       edge->logicalChunks * sizeof(cocclCompressorFrameMetadata);
-  return ncclAllGather(
+  const ncclCollConfig_t config = communicationConfig(context, stage);
+  return ncclAllGatherConfig(
       edge->frameMetadata, output->frameMetadata, metadataBytes,
-      ncclUint8, stage->comm, stream);
+      ncclUint8, stage->comm, stream, &config);
 }
 
 ncclResult_t cocclCommitPipelineFrameExchange(

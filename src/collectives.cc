@@ -137,6 +137,22 @@ static inline ncclResult_t ncclAllGatherConfigImpl(const void* sendbuff, void* r
                           ALLGATHER_CHUNKSTEPS, ALLGATHER_SLICESTEPS};
   // clang-format on
   NCCLCHECK(ncclParseCollConfig(config, &info.collConfig));
+  if (ncclCollConfigIsScheduleNeutral(
+          &info.collConfig, NCCL_CONFIG_UNDEF_INT)) {
+    cocclInfo coccl = {};
+    coccl.sendbuff = sendbuff;
+    coccl.recvbuff = recvbuff;
+    coccl.count = sendcount;
+    coccl.datatype = datatype;
+    coccl.func = ncclFuncAllGather;
+    coccl.operation = cocclOperation::AllGather;
+    coccl.comm = comm;
+    coccl.stream = stream;
+    coccl.profilerTag = info.collConfig.userProfilerTag;
+    bool enqueued = false;
+    NCCLCHECK(cocclEnqueueCheck(&coccl, &enqueued));
+    if (enqueued) return ncclSuccess;
+  }
   return ncclEnqueueCheck(&info);
 }
 
@@ -144,19 +160,6 @@ NCCL_API(ncclResult_t, ncclAllGather, const void* sendbuff, void* recvbuff, size
          ncclComm_t comm, cudaStream_t stream);
 ncclResult_t ncclAllGather(const void* sendbuff, void* recvbuff, size_t sendcount, ncclDataType_t datatype,
                            ncclComm_t comm, cudaStream_t stream) {
-  cocclInfo coccl = {};
-  coccl.sendbuff = sendbuff;
-  coccl.recvbuff = recvbuff;
-  coccl.count = sendcount;
-  coccl.datatype = datatype;
-  coccl.func = ncclFuncAllGather;
-  coccl.operation = cocclOperation::AllGather;
-  coccl.comm = comm;
-  coccl.stream = stream;
-  bool enqueued = false;
-  NCCLCHECK(cocclEnqueueCheck(&coccl, &enqueued));
-  if (enqueued) return ncclSuccess;
-
   // Just pass the size of one message and not the total bytes sent/received.
   NVTX3_FUNC_WITH_PARAMS(AllGather, NcclNvtxParamsAllGather,
                          NVTX3_PAYLOAD(comm ? comm->commHash : 0, sendcount * ncclTypeSize(datatype)));
@@ -182,6 +185,22 @@ static inline ncclResult_t ncclAlltoAllConfigImpl(const void* sendbuff, void* re
                           ALLTOALL_CHUNKSTEPS, ALLTOALL_SLICESTEPS};
   // clang-format on
   NCCLCHECK(ncclParseCollConfig(config, &info.collConfig));
+  if (ncclCollConfigIsScheduleNeutral(
+          &info.collConfig, NCCL_CONFIG_UNDEF_INT)) {
+    cocclInfo coccl = {};
+    coccl.sendbuff = sendbuff;
+    coccl.recvbuff = recvbuff;
+    coccl.count = count;
+    coccl.datatype = datatype;
+    coccl.func = ncclFuncAlltoAll;
+    coccl.operation = cocclOperation::AllToAll;
+    coccl.comm = comm;
+    coccl.stream = stream;
+    coccl.profilerTag = info.collConfig.userProfilerTag;
+    bool enqueued = false;
+    NCCLCHECK(cocclEnqueueCheck(&coccl, &enqueued));
+    if (enqueued) return ncclSuccess;
+  }
   return ncclEnqueueCheck(&info);
 }
 
@@ -203,53 +222,6 @@ ncclResult_t ncclAlltoAllConfig(const void* sendbuff, void* recvbuff, size_t cou
   return ncclAlltoAllConfigImpl(sendbuff, recvbuff, count, datatype, comm, stream, config);
 }
 
-NCCL_API(ncclResult_t, ncclAllToAll, const void* sendbuff, void* recvbuff, size_t sendcount,
-         ncclDataType_t datatype, ncclComm_t comm, cudaStream_t stream);
-ncclResult_t ncclAllToAll(const void* sendbuff, void* recvbuff, size_t sendcount, ncclDataType_t datatype,
-                          ncclComm_t comm, cudaStream_t stream) {
-  cocclInfo coccl = {};
-  coccl.sendbuff = sendbuff;
-  coccl.recvbuff = recvbuff;
-  coccl.count = sendcount;
-  coccl.datatype = datatype;
-  coccl.operation = cocclOperation::AllToAll;
-  coccl.comm = comm;
-  coccl.stream = stream;
-  bool enqueued = false;
-  NCCLCHECK(cocclEnqueueCheck(&coccl, &enqueued));
-  if (enqueued) return ncclSuccess;
-
-  const size_t chunkBytes = sendcount * ncclTypeSize(datatype);
-  NCCLCHECK(ncclGroupStart());
-  for (int peer = 0; peer < comm->nRanks; ++peer) {
-    char* send = (char*)sendbuff + peer * chunkBytes;
-    char* recv = (char*)recvbuff + peer * chunkBytes;
-
-    cocclInfo recvCall = {};
-    recvCall.recvbuff = recv;
-    recvCall.count = sendcount;
-    recvCall.datatype = datatype;
-    recvCall.peer = peer;
-    recvCall.func = ncclFuncRecv;
-    recvCall.operation = cocclOperation::SendRecv;
-    recvCall.comm = comm;
-    recvCall.stream = stream;
-    NCCLCHECK(cocclReplayNativeCall(recvCall));
-
-    cocclInfo sendCall = {};
-    sendCall.sendbuff = send;
-    sendCall.count = sendcount;
-    sendCall.datatype = datatype;
-    sendCall.peer = peer;
-    sendCall.func = ncclFuncSend;
-    sendCall.operation = cocclOperation::SendRecv;
-    sendCall.comm = comm;
-    sendCall.stream = stream;
-    NCCLCHECK(cocclReplayNativeCall(sendCall));
-  }
-  return ncclGroupEnd();
-}
-
 static inline ncclResult_t ncclAllReduceConfigImpl(const void* sendbuff, void* recvbuff, size_t count,
                                                    ncclDataType_t datatype, ncclRedOp_t op, ncclComm_t comm,
                                                    cudaStream_t stream, const ncclCollConfig_t* config) {
@@ -259,6 +231,23 @@ static inline ncclResult_t ncclAllReduceConfigImpl(const void* sendbuff, void* r
                           ALLREDUCE_CHUNKSTEPS, ALLREDUCE_SLICESTEPS};
   // clang-format on
   NCCLCHECK(ncclParseCollConfig(config, &info.collConfig));
+  if (ncclCollConfigIsScheduleNeutral(
+          &info.collConfig, NCCL_CONFIG_UNDEF_INT)) {
+    cocclInfo coccl = {};
+    coccl.sendbuff = sendbuff;
+    coccl.recvbuff = recvbuff;
+    coccl.count = count;
+    coccl.datatype = datatype;
+    coccl.op = op;
+    coccl.func = ncclFuncAllReduce;
+    coccl.operation = cocclOperation::AllReduce;
+    coccl.comm = comm;
+    coccl.stream = stream;
+    coccl.profilerTag = info.collConfig.userProfilerTag;
+    bool enqueued = false;
+    NCCLCHECK(cocclEnqueueCheck(&coccl, &enqueued));
+    if (enqueued) return ncclSuccess;
+  }
   return ncclEnqueueCheck(&info);
 }
 
@@ -266,20 +255,6 @@ NCCL_API(ncclResult_t, ncclAllReduce, const void* sendbuff, void* recvbuff, size
          ncclRedOp_t op, ncclComm* comm, cudaStream_t stream);
 ncclResult_t ncclAllReduce(const void* sendbuff, void* recvbuff, size_t count, ncclDataType_t datatype, ncclRedOp_t op,
                            ncclComm* comm, cudaStream_t stream) {
-  cocclInfo coccl = {};
-  coccl.sendbuff = sendbuff;
-  coccl.recvbuff = recvbuff;
-  coccl.count = count;
-  coccl.datatype = datatype;
-  coccl.op = op;
-  coccl.func = ncclFuncAllReduce;
-  coccl.operation = cocclOperation::AllReduce;
-  coccl.comm = comm;
-  coccl.stream = stream;
-  bool enqueued = false;
-  NCCLCHECK(cocclEnqueueCheck(&coccl, &enqueued));
-  if (enqueued) return ncclSuccess;
-
   NVTX3_FUNC_WITH_PARAMS(AllReduce, NcclNvtxParamsAllReduce,
                          NVTX3_PAYLOAD(comm ? comm->commHash : 0, count * ncclTypeSize(datatype), op));
   return ncclAllReduceConfigImpl(sendbuff, recvbuff, count, datatype, op, comm, stream, nullptr);
@@ -401,6 +376,23 @@ static inline ncclResult_t ncclReduceScatterConfigImpl(const void* sendbuff, voi
                           REDUCESCATTER_CHUNKSTEPS, REDUCESCATTER_SLICESTEPS};
   // clang-format on
   NCCLCHECK(ncclParseCollConfig(config, &info.collConfig));
+  if (ncclCollConfigIsScheduleNeutral(
+          &info.collConfig, NCCL_CONFIG_UNDEF_INT)) {
+    cocclInfo coccl = {};
+    coccl.sendbuff = sendbuff;
+    coccl.recvbuff = recvbuff;
+    coccl.count = recvcount;
+    coccl.datatype = datatype;
+    coccl.op = op;
+    coccl.func = ncclFuncReduceScatter;
+    coccl.operation = cocclOperation::ReduceScatter;
+    coccl.comm = comm;
+    coccl.stream = stream;
+    coccl.profilerTag = info.collConfig.userProfilerTag;
+    bool enqueued = false;
+    NCCLCHECK(cocclEnqueueCheck(&coccl, &enqueued));
+    if (enqueued) return ncclSuccess;
+  }
   return ncclEnqueueCheck(&info);
 }
 
@@ -408,20 +400,6 @@ NCCL_API(ncclResult_t, ncclReduceScatter, const void* sendbuff, void* recvbuff, 
          ncclDataType_t datatype, ncclRedOp_t op, ncclComm* comm, cudaStream_t stream);
 ncclResult_t ncclReduceScatter(const void* sendbuff, void* recvbuff, size_t recvcount, ncclDataType_t datatype,
                                ncclRedOp_t op, ncclComm* comm, cudaStream_t stream) {
-  cocclInfo coccl = {};
-  coccl.sendbuff = sendbuff;
-  coccl.recvbuff = recvbuff;
-  coccl.count = recvcount;
-  coccl.datatype = datatype;
-  coccl.op = op;
-  coccl.func = ncclFuncReduceScatter;
-  coccl.operation = cocclOperation::ReduceScatter;
-  coccl.comm = comm;
-  coccl.stream = stream;
-  bool enqueued = false;
-  NCCLCHECK(cocclEnqueueCheck(&coccl, &enqueued));
-  if (enqueued) return ncclSuccess;
-
   NVTX3_FUNC_WITH_PARAMS(ReduceScatter, NcclNvtxParamsReduceScatter,
                          NVTX3_PAYLOAD(comm ? comm->commHash : 0, recvcount * ncclTypeSize(datatype), op));
   return ncclReduceScatterConfigImpl(sendbuff, recvbuff, recvcount, datatype, op, comm, stream, nullptr);

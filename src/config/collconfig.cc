@@ -35,6 +35,14 @@ bool ncclCollConfigNeedAggIsolate(const ncclCollConfig_t* config) {
   return false;
 }
 
+bool ncclCollConfigIsScheduleNeutral(
+    const ncclCollConfig_t* config, int defaultCTAPolicy) {
+  if (config->ext != NCCL_CONFIG_UNDEF_PTR) return false;
+  if (ncclCollConfigNeedAggIsolate(config)) return false;
+  if (config->cgaClusterSize != NCCL_CONFIG_UNDEF_INT) return false;
+  return config->CTAPolicy == defaultCTAPolicy;
+}
+
 // Validate a per-call config header and copy it into internal_config for safe access during
 // scheduling. A NULL user config is accepted (no config); internal_config->size is set to 0 when no
 // user config was passed (used to isolate configured collectives from aggregation), non-zero

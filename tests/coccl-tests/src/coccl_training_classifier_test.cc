@@ -149,20 +149,24 @@ ncclResult_t cocclExecuteSendRecv(const cocclPreparedCall* prepared) {
   return captureExecution(prepared);
 }
 
-ncclResult_t ncclAllGather(const void*, void*, size_t, ncclDataType_t,
-                           ncclComm_t, cudaStream_t) {
+ncclResult_t ncclAllGatherConfig(
+    const void*, void*, size_t, ncclDataType_t, ncclComm_t, cudaStream_t,
+    const ncclCollConfig_t*) {
   return ncclSuccess;
 }
-ncclResult_t ncclReduceScatter(const void*, void*, size_t, ncclDataType_t,
-                               ncclRedOp_t, ncclComm_t, cudaStream_t) {
+ncclResult_t ncclReduceScatterConfig(
+    const void*, void*, size_t, ncclDataType_t, ncclRedOp_t, ncclComm_t,
+    cudaStream_t, const ncclCollConfig_t*) {
   return ncclSuccess;
 }
-ncclResult_t ncclAllReduce(const void*, void*, size_t, ncclDataType_t,
-                           ncclRedOp_t, ncclComm_t, cudaStream_t) {
+ncclResult_t ncclAllReduceConfig(
+    const void*, void*, size_t, ncclDataType_t, ncclRedOp_t, ncclComm_t,
+    cudaStream_t, const ncclCollConfig_t*) {
   return ncclSuccess;
 }
-ncclResult_t ncclAllToAll(const void*, void*, size_t, ncclDataType_t,
-                          ncclComm_t, cudaStream_t) {
+ncclResult_t ncclAlltoAllConfig(
+    const void*, void*, size_t, ncclDataType_t, ncclComm_t, cudaStream_t,
+    const ncclCollConfig_t*) {
   return ncclSuccess;
 }
 ncclResult_t ncclSend(const void*, size_t, ncclDataType_t, int,
@@ -1023,9 +1027,19 @@ static int testObservationIndependentOfCompressionThreshold(bool overlap) {
   dp.rankToNode = crossNodeRankToNode;
   dp.commHash = 0x1021;
 
-  ncclComm lateDp = dp;
+  ncclComm lateDp = {};
+  lateDp.rank = 0;
+  lateDp.nRanks = 2;
+  lateDp.nNodes = 2;
+  lateDp.localRanks = 1;
+  lateDp.rankToNode = crossNodeRankToNode;
   lateDp.commHash = 0x1023;
-  ncclComm pp = dp;
+  ncclComm pp = {};
+  pp.rank = 0;
+  pp.nRanks = 2;
+  pp.nNodes = 2;
+  pp.localRanks = 1;
+  pp.rankToNode = crossNodeRankToNode;
   pp.commHash = 0x1022;
 
   float buffer[1] = {};
@@ -1142,7 +1156,8 @@ static int testImmediateConfiguredSizeClassification() {
   tp.nNodes = 1;
   tp.localRanks = 2;
   tp.commHash = 0x1011;
-  ncclComm pp = tp;
+  ncclComm pp = {};
+  pp.nRanks = 2;
   pp.nNodes = 2;
   pp.localRanks = 1;
   pp.commHash = 0x1012;

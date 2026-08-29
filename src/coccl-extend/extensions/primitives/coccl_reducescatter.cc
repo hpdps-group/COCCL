@@ -24,7 +24,7 @@ ncclResult_t runOneShot(const cocclPreparedCall* prepared) {
       (size_t)info.comm->nRanks, info.datatype, info.comm, info.stream, stages,
       (int)(sizeof(stages) / sizeof(stages[0])),
       cocclPipelineInPlaceOutputRankChunk,
-      cocclPipelineInputContiguous};
+      cocclPipelineInputContiguous, info.profilerTag};
   return cocclRunPipeline(&spec);
 }
 
@@ -42,7 +42,7 @@ ncclResult_t runTwoShot(const cocclPreparedCall* prepared) {
       (size_t)comm->nRanks, info.datatype, comm, info.stream, stages,
       stageCount,
       cocclPipelineInPlaceOutputRankChunk,
-      cocclPipelineInputHierarchicalSwizzle};
+      cocclPipelineInputHierarchicalSwizzle, info.profilerTag};
   return cocclRunPipeline(&spec);
 }
 

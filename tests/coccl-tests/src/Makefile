@@ -72,7 +72,7 @@ endif
 	buffer-tests pipeline-tests pipeline-layout-test compression-tests \
 	framed-tests autotune-tests autotune-model-selector-build training-tests \
 	training-mpi-build dietgpu-codec-build dietgpu-integer-build \
-	collective-correctness-build
+	collective-correctness-build coll-config-build
 
 BUILDDIR ?= ../build
 ifneq ($(NCCL_HOME), "")
@@ -108,8 +108,10 @@ COCCL_CORE := $(COCCL_ROOT)/core
 COCCL_EXTENSIONS := $(COCCL_ROOT)/extensions
 COCCL_INC := -I$(COCCL_ROOT)/include -I$(COCCL_ROOT) \
 	-I$(COCCL_SRC)/include -I$(COCCL_SRC)/include/plugin \
-	-I$(NCCL_HOME)/include -I$(CUDA_INC)
-TEST_CXXFLAGS := $(filter-out -std=c++11,$(CXXFLAGS)) -std=c++17
+	-I$(NCCL_HOME)/include -I$(CUDA_INC) -DNCCL_OS_LINUX
+TEST_DEBUG_STUB_OBJ := $(DST_DIR)/coccl_test_debug_stub.o
+TEST_CXXFLAGS := $(filter-out -std=c++11,$(CXXFLAGS)) -std=c++17 \
+	$(TEST_DEBUG_STUB_OBJ)
 SDK_TEST := $(DST_DIR)/coccl_compressor_sdk_test
 CONFIG_READER_TEST := $(DST_DIR)/coccl_config_reader_test
 CONFIG_POLICY_TEST := $(DST_DIR)/coccl_config_policy_test
@@ -144,6 +146,7 @@ DIETGPU_CODEC_TEST := $(DST_DIR)/coccl_dietgpu_codec_test
 SWIZZLE_PLAN_TEST := $(DST_DIR)/coccl_swizzle_plan_test
 REDUCESCATTER_RECIPE_TEST := $(DST_DIR)/coccl_reducescatter_recipe_test
 COLLECTIVE_CORRECTNESS_TEST := $(DST_DIR)/coccl_collective_correctness
+COLL_CONFIG_TEST := $(DST_DIR)/coccl_coll_config_test
 AUTOTUNE_TEST := $(DST_DIR)/coccl_autotune_test
 AUTOTUNE_MODEL_SELECTOR := $(DST_DIR)/coccl_autotune_model_selector
 AUTOTUNE_COST_MODEL_SRC := $(COCCL_CORE)/tuning/coccl_autotune_cost_model.cc
@@ -158,6 +161,26 @@ TRAINING_KNOWN_ROLES_TEST := $(DST_DIR)/coccl_training_known_roles
 TRAINING_CONFIG := ../../../examples/training_scripts/configs/training.toml
 CONFIG_TEST_TMP := $(DST_DIR)/config-test-tmp
 DIETGPU_INTEGER_TEST := $(DST_DIR)/coccl_dietgpu_integer_test
+
+HOST_TEST_BINS := $(SDK_TEST) $(CONFIG_READER_TEST) $(CONFIG_POLICY_TEST) \
+	$(PLUGIN_LOAD_TEST) $(RUNTIME_TEST) $(GROUP_TEST) \
+	$(BUFFER_MANAGER_TEST) $(VMM_BUFFER_TEST) $(PIPELINE_PLAN_TEST) \
+	$(PIPELINE_STAGE_TEST) $(ALLGATHER_PLAN_TEST) $(ALLGATHER_STAGE_TEST) \
+	$(REDUCESCATTER_PLAN_TEST) $(REDUCESCATTER_STAGE_TEST) \
+	$(ALLREDUCE_PLAN_TEST) $(ALLREDUCE_RECIPE_TEST) \
+	$(FIXED_COMPRESSOR_TEST) $(UNIFIED_ARENA_TEST) $(SIZE_QUERY_TEST) \
+	$(PIPELINE_WORKSPACE_TEST) $(INPLACE_PLAN_TEST) $(FRAME_EXCHANGE_TEST) \
+	$(GROUP_BATCH_TEST) $(FRAMED_PIPELINE_PLAN_TEST) $(AUTOTUNE_TEST) \
+	$(AUTOTUNE_MODEL_SELECTOR) \
+	$(SCOPE_CONFIG_TEST) $(HIERARCHICAL_GRAPH_TEST) $(CODEC_FLOW_TEST) \
+	$(SELECTOR_SCOPE_TEST) $(REMAINDER_PLAN_TEST) $(TRAINING_CLASSIFIER_TEST)
+
+$(HOST_TEST_BINS): | $(TEST_DEBUG_STUB_OBJ)
+
+$(TEST_DEBUG_STUB_OBJ): coccl_test_debug_stub.cc
+	@mkdir -p $(DST_DIR)
+	$(CXX) $(filter-out $(TEST_DEBUG_STUB_OBJ),$(TEST_CXXFLAGS)) \
+		$(COCCL_INC) -c $< -o $@
 
 host-tests: config-tests runtime-tests buffer-tests pipeline-tests \
 	compression-tests framed-tests autotune-tests training-tests
@@ -240,6 +263,8 @@ dietgpu-codec-build: $(DIETGPU_CODEC_TEST)
 dietgpu-integer-build: $(DIETGPU_INTEGER_TEST)
 
 collective-correctness-build: $(COLLECTIVE_CORRECTNESS_TEST)
+
+coll-config-build: $(COLL_CONFIG_TEST)
 
 $(SDK_TEST): coccl_compressor_sdk_test.cc
 	@printf "Linking  %-35s > %s\n" $< $@
@@ -331,6 +356,11 @@ $(REDUCESCATTER_RECIPE_TEST): coccl_reducescatter_recipe_test.cc \
 	$(CXX) $(TEST_CXXFLAGS) $(COCCL_INC) -I$(COCCL_SRC) -o $@ $^
 
 $(COLLECTIVE_CORRECTNESS_TEST): coccl_collective_correctness.cu
+	@printf "Linking  %-35s > %s\n" $< $@
+	@mkdir -p $(DST_DIR)
+	$(NVCC) -o $@ $(NVCUFLAGS) $< $(NVLDFLAGS)
+
+$(COLL_CONFIG_TEST): coccl_coll_config_test.cu
 	@printf "Linking  %-35s > %s\n" $< $@
 	@mkdir -p $(DST_DIR)
 	$(NVCC) -o $@ $(NVCUFLAGS) $< $(NVLDFLAGS)

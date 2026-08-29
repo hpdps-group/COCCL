@@ -528,6 +528,7 @@ ncclResult_t cocclPreparePipeline(const cocclPipelineSpec* spec,
   context->stageContext.rawDatatype = spec->datatype;
   context->stageContext.ownerComm = spec->ownerComm;
   context->stageContext.frameResources = nullptr;
+  context->stageContext.profilerTag = spec->profilerTag;
   context->stageContext.inputLayout =
       spec->inputLayout == cocclPipelineInputHierarchicalSwizzle &&
           !(spec->stages[0].kind == cocclPipelineStageCompress &&

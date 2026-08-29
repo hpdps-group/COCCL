@@ -20,6 +20,7 @@ int descriptorQueries = 0;
 int policyQueries = 0;
 int compressedCalls = 0;
 int nativeCalls = 0;
+uint64_t lastProfilerTag = 0;
 ncclResult_t resolverResult = ncclSuccess;
 cocclAlgorithmKind executedAlgorithm = cocclAlgorithmNone;
 std::array<void*, 3> scopeCompressors;
@@ -60,6 +61,7 @@ void reset() {
   policyQueries = 0;
   compressedCalls = 0;
   nativeCalls = 0;
+  lastProfilerTag = 0;
   resolverResult = ncclSuccess;
   executedAlgorithm = cocclAlgorithmNone;
   scopeCompressors = {
@@ -246,30 +248,36 @@ ncclResult_t cocclExecuteSendRecv(const cocclPreparedCall*) {
   return ncclSuccess;
 }
 
-ncclResult_t ncclAllGather(
-    const void*, void*, size_t, ncclDataType_t, ncclComm_t, cudaStream_t) {
+ncclResult_t ncclAllGatherConfig(
+    const void*, void*, size_t, ncclDataType_t, ncclComm_t, cudaStream_t,
+    const ncclCollConfig_t* config) {
   ++nativeCalls;
+  lastProfilerTag = config->userProfilerTag;
   return ncclSuccess;
 }
 
-ncclResult_t ncclReduceScatter(
+ncclResult_t ncclReduceScatterConfig(
     const void*, void*, size_t, ncclDataType_t, ncclRedOp_t, ncclComm_t,
-    cudaStream_t) {
+    cudaStream_t, const ncclCollConfig_t* config) {
   ++nativeCalls;
+  lastProfilerTag = config->userProfilerTag;
   return ncclSuccess;
 }
 
-ncclResult_t ncclAllReduce(
+ncclResult_t ncclAllReduceConfig(
     const void*, void*, size_t, ncclDataType_t, ncclRedOp_t, ncclComm_t,
-    cudaStream_t) {
+    cudaStream_t, const ncclCollConfig_t* config) {
   ++nativeCalls;
+  lastProfilerTag = config->userProfilerTag;
   return ncclSuccess;
 }
 
-ncclResult_t ncclAllToAll(
+ncclResult_t ncclAlltoAllConfig(
     const void* sendbuff, void* recvbuff, size_t count,
-    ncclDataType_t datatype, ncclComm_t comm, cudaStream_t stream) {
+    ncclDataType_t datatype, ncclComm_t comm, cudaStream_t stream,
+    const ncclCollConfig_t* config) {
   ++nativeCalls;
+  lastProfilerTag = config->userProfilerTag;
   cocclInfo nested;
   nested.sendbuff = sendbuff;
   nested.recvbuff = recvbuff;
@@ -381,8 +389,10 @@ int main() {
 
   reset();
   info = allToAllInfo(&comm);
+  info.profilerTag = 0x1234;
   EXPECT(cocclReplayNativeCall(info) == ncclSuccess);
-  EXPECT(nativeCalls == 1 && policyQueries == 0 && compressedCalls == 0);
+  EXPECT(nativeCalls == 1 && policyQueries == 0 && compressedCalls == 0 &&
+         lastProfilerTag == 0x1234);
 
   reset();
   info = allToAllInfo(&comm);

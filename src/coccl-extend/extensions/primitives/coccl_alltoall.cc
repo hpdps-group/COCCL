@@ -18,6 +18,7 @@ ncclResult_t cocclExecuteAllToAll(const cocclPreparedCall* prepared) {
       "alltoall", info.sendbuff, info.recvbuff, info.count,
       (size_t)info.comm->nRanks, info.datatype, info.comm, info.stream,
       stages, (int)(sizeof(stages) / sizeof(stages[0])),
-      cocclPipelineInPlaceNone, cocclPipelineInputContiguous};
+      cocclPipelineInPlaceNone, cocclPipelineInputContiguous,
+      info.profilerTag};
   return cocclRunPipeline(&spec);
 }

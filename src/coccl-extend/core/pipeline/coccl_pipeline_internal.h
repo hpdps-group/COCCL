@@ -51,6 +51,7 @@ struct cocclPipelineStageContext {
   cocclPipelineInputLayout inputLayout;
   int nNodes;
   int ranksPerNode;
+  uint64_t profilerTag;
 };
 
 enum cocclPipelineTempRole {
