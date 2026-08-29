@@ -338,7 +338,7 @@ reduce_scatter_algorithm = "auto"
 all_reduce_algorithm = "auto"
 ```
 
-The runnable Qwen2.5 and Qwen3 example is under
+The runnable Qwen3 example uses NVIDIA Megatron-LM and is under
 [examples/training_scripts](examples/training_scripts).
 
 ### Autotuning
