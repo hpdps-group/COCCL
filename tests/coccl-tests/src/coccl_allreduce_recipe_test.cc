@@ -1,5 +1,6 @@
 #include "core/runtime/coccl_primitive_dispatch.h"
 
+#include "core/compression/coccl_compressor_runtime.h"
 #include "core/pipeline/coccl_pipeline.h"
 #include "core/runtime/coccl_comm.h"
 #include "core/runtime/coccl_prepared_call.h"
@@ -16,6 +17,7 @@ int pipelineCalls = 0;
 int serialPipelineCalls = 0;
 cocclAlgorithmKind expectedAlgorithm = cocclAlgorithmNone;
 cocclHierarchicalComms hierarchicalComms = {};
+ncclComm_t zeroCtaComm = nullptr;
 
 void fail(const char* expression, int line) {
   std::fprintf(stderr, "line %d: %s\n", line, expression);
@@ -89,6 +91,7 @@ ncclResult_t cocclRunPipeline(const cocclPipelineSpec* spec) {
     expectStage(spec, 3, cocclPipelineStageAllToAll);
     expectStage(spec, 4, cocclPipelineStageDecompReduceComp, 2);
     expectStage(spec, 5, cocclPipelineStageAllGather);
+    EXPECT(spec->stages[5].comm == zeroCtaComm);
     expectStage(spec, 6, cocclPipelineStageDecompress);
   }
   return ncclSuccess;
@@ -104,6 +107,17 @@ ncclResult_t cocclCommGetHierarchicalComms(
     ncclComm_t, cocclHierarchicalComms* comms) {
   *comms = hierarchicalComms;
   return ncclSuccess;
+}
+
+ncclResult_t cocclCommGetZeroCtaComm(
+    ncclComm_t, ncclComm_t* comm) {
+  *comm = zeroCtaComm;
+  return ncclSuccess;
+}
+
+bool cocclCompressorSupports(
+    void*, cocclCompressorCapability) {
+  return false;
 }
 
 int main() {
@@ -124,6 +138,9 @@ int main() {
   intra.nRanks = 2;
   ncclComm inter = {};
   inter.nRanks = 2;
+  ncclComm zero = {};
+  zero.nRanks = 4;
+  zeroCtaComm = &zero;
   owner.localRanks = 2;
   owner.nNodes = 2;
   hierarchicalComms = {&owner, &intra, &inter};

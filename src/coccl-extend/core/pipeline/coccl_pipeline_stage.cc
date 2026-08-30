@@ -42,6 +42,8 @@ ncclCollConfig_t communicationConfig(
     const cocclPipelineStage* stage) {
   ncclCollConfig_t config = NCCL_COLLCONFIG_INITIALIZER;
   if (stage->config != nullptr) config = *stage->config;
+  config.CTAPolicy = cocclPipelineStageCtaPolicy(
+      context->ownerComm, *stage);
   config.userProfilerTag = context->profilerTag;
   return config;
 }
@@ -362,6 +364,24 @@ const StageHandler handlers[kCocclPipelineStageKindCount] = {
     runReduceScatter, runPack, runUnpack};
 
 }  // namespace
+
+int cocclPipelineStageCtaPolicy(
+    ncclComm_t ownerComm, const cocclPipelineStage& stage) {
+  if (stage.config != nullptr &&
+      stage.config->CTAPolicy != NCCL_CONFIG_UNDEF_INT) {
+    return stage.config->CTAPolicy;
+  }
+  if (ownerComm->nNodes <= 1) return NCCL_CONFIG_UNDEF_INT;
+  switch (stage.kind) {
+    case cocclPipelineStageAllGather:
+    case cocclPipelineStageReduceScatter:
+      return NCCL_CTA_POLICY_ZERO;
+    case cocclPipelineStageAllToAll:
+      return NCCL_CTA_POLICY_DEFAULT;
+    default:
+      return NCCL_CONFIG_UNDEF_INT;
+  }
+}
 
 bool cocclPipelineStageUsesFrameExchange(
     const cocclPipelineStage& stage, const cocclPipelineEdge& edge) {

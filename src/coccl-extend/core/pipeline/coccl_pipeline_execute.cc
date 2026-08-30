@@ -1,6 +1,7 @@
 #include "core/pipeline/coccl_pipeline.h"
 
 #include "checks.h"
+#include "config/collconfig.h"
 #include "core/memory/coccl_buffer_management.h"
 #include "core/config/coccl_config.h"
 #include "core/pipeline/coccl_pipeline_internal.h"
@@ -192,26 +193,63 @@ bool pipelineUsesFramedCompressor(const cocclPipelineSpec* spec) {
 struct cocclPipelineCommunicationComm {
   ncclComm_t comm;
   cocclBufferRegistrationKind registration;
+  bool usesRawWorkspace;
 };
 
+bool stageOutputIsFramed(
+    const cocclPipelineStage& stage, bool inputFramed) {
+  switch (stage.kind) {
+    case cocclPipelineStageCompress:
+    case cocclPipelineStageDecompReduceComp:
+      return cocclCompressorSupports(
+          stage.compressor, cocclCompressorCapabilityFramed);
+    case cocclPipelineStageDecompress:
+    case cocclPipelineStageDecompressReduce:
+    case cocclPipelineStageReduceScatter:
+      return false;
+    default:
+      return inputFramed;
+  }
+}
+
 int collectCommunicationComms(
-    const cocclPipelineSpec* spec, bool framed,
+    const cocclPipelineSpec* spec,
+    const cocclPipelinePlan& plan,
     cocclPipelineCommunicationComm* comms) {
   int count = 0;
+  bool edgeFramed = false;
+  int inputTemp = plan.inputStagingTemp;
   for (int stage = 0; stage < spec->stageCount; ++stage) {
     const cocclPipelineStage& pipelineStage = spec->stages[stage];
+    const bool inputFramed = edgeFramed;
+    edgeFramed = stageOutputIsFramed(pipelineStage, edgeFramed);
+    const int outputTemp = plan.stageOutputTemp[stage];
     ncclComm_t comm = pipelineStage.comm;
-    if (comm == nullptr) continue;
+    if (comm == nullptr) {
+      inputTemp = outputTemp;
+      continue;
+    }
 
+    const bool usesRawWorkspace =
+        (inputTemp >= 0 &&
+         plan.temps[inputTemp].storage == cocclPipelineRawRing) ||
+        (outputTemp >= 0 &&
+         plan.temps[outputTemp].storage == cocclPipelineRawRing);
+
+    const int stagePolicy = cocclPipelineStageCtaPolicy(
+        spec->ownerComm, pipelineStage);
+    const int effectivePolicy = ncclCollConfigResolveCTAPolicy(
+        stagePolicy, comm->config.CTAPolicy,
+        ncclGetEnvCtaPolicy() != NCCL_CONFIG_UNDEF_INT);
     const bool zeroCta =
-        (comm->config.CTAPolicy & NCCL_CTA_POLICY_ZERO) != 0;
-    const bool framedRma = framed &&
+        (effectivePolicy & NCCL_CTA_POLICY_ZERO) != 0;
+    const bool framedRma = inputFramed &&
         pipelineStage.kind == cocclPipelineStageAllToAll &&
         comm->config.rmaEagerInit && comm->hostRmaSupport &&
         comm->config.numRmaSig > 0 &&
         (comm->nNodes == 1 || ncclRmaProxyEnabled(comm));
     const bool symmetric = framedRma ||
-        (!framed &&
+        (!inputFramed &&
          (pipelineStage.kind == cocclPipelineStageAllGather ||
           (pipelineStage.kind == cocclPipelineStageAllToAll && zeroCta) ||
           pipelineStage.kind == cocclPipelineStageReduceScatter));
@@ -223,10 +261,14 @@ int collectCommunicationComms(
     int existing = 0;
     while (existing < count && comms[existing].comm != comm) ++existing;
     if (existing == count) {
-      comms[count++] = {comm, registration};
+      comms[count++] = {comm, registration, usesRawWorkspace};
     } else if (symmetric) {
       comms[existing].registration = registration;
     }
+    if (existing < count) {
+      comms[existing].usesRawWorkspace |= usesRawWorkspace;
+    }
+    inputTemp = outputTemp;
   }
   return count;
 }
@@ -544,7 +586,7 @@ static ncclResult_t cocclRunPipelineWithDepth(
   cocclPipelineCommunicationComm
       communicationComms[kCocclPipelineExplicitStages] = {};
   const int communicationCommCount =
-      collectCommunicationComms(spec, framed, communicationComms);
+      collectCommunicationComms(spec, context.plan, communicationComms);
   cocclBufferHandle coreWorkspace = {};
   ncclResult_t result = cocclGetBufferForComm(
       spec->ownerComm, communicationComms[0].comm,
@@ -576,9 +618,37 @@ static ncclResult_t cocclRunPipelineWithDepth(
 
   cocclBufferHandle rawWorkspace = {};
   if (context.plan.rawBytes != 0) {
-    const ncclResult_t rawResult = cocclGetUnregisteredBuffer(
-        spec->ownerComm, context.plan.rawBytes, spec->stream,
-        &rawWorkspace);
+    // Split boundary storage stays unregistered unless a Zero stage directly
+    // consumes or produces it, as in inter-only native ReduceScatter.
+    int rawRegistration = 0;
+    while (rawRegistration < communicationCommCount &&
+           (!communicationComms[rawRegistration].usesRawWorkspace ||
+            communicationComms[rawRegistration].registration ==
+                cocclBufferRegistrationKind::Ordinary)) {
+      ++rawRegistration;
+    }
+    ncclResult_t rawResult = ncclSuccess;
+    if (rawRegistration == communicationCommCount) {
+      rawResult = cocclGetUnregisteredBuffer(
+          spec->ownerComm, context.plan.rawBytes, spec->stream,
+          &rawWorkspace);
+    } else {
+      rawResult = cocclGetBufferForComm(
+          spec->ownerComm, communicationComms[rawRegistration].comm,
+          context.plan.rawBytes,
+          communicationComms[rawRegistration].registration,
+          spec->stream, &rawWorkspace);
+      for (int i = rawRegistration + 1;
+           rawResult == ncclSuccess && i < communicationCommCount; ++i) {
+        if (communicationComms[i].usesRawWorkspace &&
+            communicationComms[i].registration !=
+                cocclBufferRegistrationKind::Ordinary) {
+          rawResult = cocclRegisterBufferForComm(
+              &rawWorkspace, communicationComms[i].comm,
+              communicationComms[i].registration);
+        }
+      }
+    }
     if (rawResult != ncclSuccess) {
       (void)cocclReleaseBuffer(&coreWorkspace, spec->stream);
       return rawResult;

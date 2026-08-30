@@ -170,6 +170,8 @@ ncclResult_t cocclPlanPipelineWorkspace(cocclPipelinePlan* plan, int depth);
 ncclResult_t cocclPipelineStageOutputChunks(
     const cocclPipelineStage& stage, size_t inputChunks,
     size_t* outputChunks);
+int cocclPipelineStageCtaPolicy(
+    ncclComm_t ownerComm, const cocclPipelineStage& stage);
 ncclResult_t cocclExecutePipelineStage(
     const cocclPipelineStageContext* context,
     const cocclPipelineStage* stage, cocclPipelineEdge* edge,

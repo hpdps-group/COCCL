@@ -1,6 +1,7 @@
 #include "core/runtime/coccl_primitive_dispatch.h"
 
 #include "checks.h"
+#include "core/compression/coccl_compressor_runtime.h"
 #include "extensions/primitives/coccl_hierarchical_reduction.h"
 #include "core/pipeline/coccl_pipeline.h"
 #include "core/runtime/coccl_comm.h"
@@ -15,9 +16,16 @@ ncclResult_t runOneShot(const cocclPreparedCall* prepared) {
   const cocclCompressionScope scope = info.comm->nNodes == 1
       ? cocclCompressionScope::Intra
       : cocclCompressionScope::Default;
+  void* const compressor = prepared->compressors.get(scope);
+  ncclComm_t gatherComm = info.comm;
+  if (info.comm->nNodes > 1 &&
+      !cocclCompressorSupports(
+          compressor, cocclCompressorCapabilityFramed)) {
+    NCCLCHECK(cocclCommGetZeroCtaComm(info.comm, &gatherComm));
+  }
   const cocclPipelineStage stages[] = {
-      cocclPipelineCompress(prepared->compressors.get(scope)),
-      cocclPipelineAllGather(info.comm),
+      cocclPipelineCompress(compressor),
+      cocclPipelineAllGather(gatherComm),
       cocclPipelineDecompressReduce((size_t)info.comm->nRanks),
   };
   const cocclPipelineSpec spec = {
@@ -35,12 +43,19 @@ ncclResult_t runTwoShot(const cocclPreparedCall* prepared) {
   const cocclCompressionScope scope = info.comm->nNodes == 1
       ? cocclCompressionScope::Intra
       : cocclCompressionScope::Default;
+  void* const compressor = prepared->compressors.get(scope);
+  ncclComm_t gatherComm = info.comm;
+  if (info.comm->nNodes > 1 &&
+      !cocclCompressorSupports(
+          compressor, cocclCompressorCapabilityFramed)) {
+    NCCLCHECK(cocclCommGetZeroCtaComm(info.comm, &gatherComm));
+  }
   const cocclPipelineStage stages[] = {
-      cocclPipelineCompress(prepared->compressors.get(scope)),
+      cocclPipelineCompress(compressor),
       cocclPipelineAllToAll(info.comm),
       cocclPipelineDecompReduceComp(
-          (size_t)info.comm->nRanks, prepared->compressors.get(scope)),
-      cocclPipelineAllGather(info.comm),
+          (size_t)info.comm->nRanks, compressor),
+      cocclPipelineAllGather(gatherComm),
       cocclPipelineDecompress(),
   };
   const cocclPipelineSpec spec = {
@@ -61,11 +76,16 @@ ncclResult_t runTripleShot(const cocclPreparedCall* prepared) {
   const size_t chunkCount = info.count / (size_t)comm->nRanks;
   void* const finalCompressor =
       prepared->compressors.get(cocclCompressionScope::Default);
+  ncclComm_t gatherComm = comm;
+  if (!cocclCompressorSupports(
+          finalCompressor, cocclCompressorCapabilityFramed)) {
+    NCCLCHECK(cocclCommGetZeroCtaComm(comm, &gatherComm));
+  }
   cocclPipelineStage stages[7];
   int stageCount = cocclBuildHierarchicalReduction(
       prepared, hierarchy.intraComm, hierarchy.interComm, finalCompressor,
       stages);
-  stages[stageCount++] = cocclPipelineAllGather(comm);
+  stages[stageCount++] = cocclPipelineAllGather(gatherComm);
   if (finalCompressor != nullptr) {
     stages[stageCount++] = cocclPipelineDecompress();
   }
