@@ -93,6 +93,7 @@ struct cocclPluginCatalog {
 
 struct cocclPipelineConfig {
   int depth = 1;
+  bool autoDepth = false;
 };
 
 struct cocclBufferConfig {

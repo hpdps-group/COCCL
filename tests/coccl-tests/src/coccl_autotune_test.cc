@@ -1,4 +1,5 @@
 #include "core/tuning/coccl_autotune_internal.h"
+#include "core/pipeline/coccl_pipeline_depth.h"
 
 #include <cmath>
 #include <cstdio>
@@ -256,12 +257,25 @@ void testCostModel() {
                   "PASS"});
 }
 
+void testPipelineDepthSelection() {
+  if (cocclChoosePipelineDepthForBytes(32ULL << 20) != 1 ||
+      cocclChoosePipelineDepthForBytes(64ULL << 20) != 2 ||
+      cocclChoosePipelineDepthForBytes(128ULL << 20) != 4 ||
+      cocclChoosePipelineDepthForBytes(256ULL << 20) != 8 ||
+      cocclChoosePipelineDepthForBytes(1ULL << 30, 4) != 4) {
+    fail("pipeline depth working-set knee mismatch");
+  }
+  rows.push_back({"pipeline_depth_candidates", "1;2;4;8", "working-set",
+                  1, 0, "PASS"});
+}
+
 }  // namespace
 
 int main() {
   testEligibilityAndFallback();
   testModelSelection();
   testCostModel();
+  testPipelineDepthSelection();
 
   std::printf("scenario,eligible_candidates,selected_algorithm,used_model,forced_fallback,status\n");
   for (const ResultRow& row : rows) {

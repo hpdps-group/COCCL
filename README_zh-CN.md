@@ -17,7 +17,8 @@ COCCL 是一个面向压缩的 GPU 集合通信库，旨在简化定制压缩算
 - 后端为 NCCL 2.31.2，发布构建和 A800 验收使用 CUDA 12.8。
 - 已完成单节点 4 张 A800 和双节点 8 张 A800 的运行时验收。原生
   `sm_90`、`sm_100` 构建已经就绪，Hopper 和 Blackwell 的运行时验收等待对应硬件。
-  A800 矩阵覆盖 depth 1/2/4/8、固定布局 SDP4Bit/ZFP 和仅节点间使用的 framed dietGPU。
+  A800 矩阵覆盖固定 depth 1/2/4/8 和自动 depth 选择，以及 SDP4Bit、ZFP
+  和仅节点间使用的 framed dietGPU。
 - Registered pipeline arena 只使用一个物理 allocation，可用于 NCCL symmetric window
   或 Host RMA window；未注册的 raw staging arena 可以使用多个物理 segment 扩容。
 - 固定布局通信 stage 使用 NCCL Host Alltoall 和 per-collective Config API。Framed
@@ -144,7 +145,8 @@ build/bin/coccl-config-check path/to/config.toml
 - `runtime.compression_threshold_bytes`：自动启用压缩的最小逻辑消息大小，默认为 8 MiB。
 - `compressor_plugins.compressors`：当前配置文件使用的插件名称。
 - `compressor_plugins.library_path`：包含 `lib<name>.so` 的目录。相对路径以 TOML 文件所在目录为基准解析。
-- `pipeline.depth`：流水线重叠的 slice 数量，取值范围为 1 到 16。
+- `pipeline.depth`：可设为 1 到 16 的整数或 `"auto"`。Auto 模式根据
+  pipeline graph 和消息大小在 depth 1、2、4、8 中选择。
 
 可以使用 `normal.<operation>.threshold_bytes`、`training.{dp,tp}.<operation>.threshold_bytes` 或 `training.pp.sendrecv.{forward,backward}.threshold_bytes` 覆盖全局阈值。
 
@@ -220,6 +222,9 @@ groupCount = 128
 quantBits = 4
 quantType = "Symmetric"
 hadamard = true
+
+[pipeline]
+depth = "auto"
 ```
 
 ### Training 模式

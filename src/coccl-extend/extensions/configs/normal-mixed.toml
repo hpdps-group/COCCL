@@ -22,4 +22,4 @@ quantType = "Symmetric"
 hadamard = true
 
 [pipeline]
-depth = 4
+depth = "auto"

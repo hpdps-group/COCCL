@@ -130,7 +130,10 @@ std::vector<std::string> cocclFormatEffectiveConfig(
                   quote(config.plugins.libraryPath));
   lines.push_back("compressor_plugins.compressors = " +
                   formatStringArray(config.plugins.compressors));
-  lines.push_back("pipeline.depth = " + std::to_string(config.pipeline.depth));
+  lines.push_back("pipeline.depth = " +
+                  (config.pipeline.autoDepth
+                       ? quote("auto")
+                       : std::to_string(config.pipeline.depth)));
   lines.push_back("buffer.pool_limit_bytes = " +
                   std::to_string(config.buffer.poolLimitBytes));
   lines.push_back("buffer.legacy_block_bytes = " +

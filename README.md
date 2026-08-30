@@ -35,7 +35,8 @@ accuracy.
 - Runtime validation covers four A800 GPUs on one node and eight A800 GPUs
   across two nodes. Native `sm_90` and `sm_100` builds are ready; Hopper and
   Blackwell runtime validation is pending target hardware. The A800 matrix
-  covers depth 1/2/4/8, fixed SDP4Bit/ZFP, and inter-only framed dietGPU.
+  covers fixed depth 1/2/4/8 and automatic depth selection with SDP4Bit, ZFP,
+  and inter-only framed dietGPU.
 - Registered pipeline arenas use one physical allocation and can be used by
   NCCL symmetric or Host RMA windows. Unregistered raw staging arenas may grow
   with multiple physical segments.
@@ -187,7 +188,8 @@ build/bin/coccl-config-check path/to/config.toml
 - `compressor_plugins.compressors`: plugin names used by this file.
 - `compressor_plugins.library_path`: directory containing `lib<name>.so`.
   Relative paths are resolved from the TOML file.
-- `pipeline.depth`: overlap slices, from 1 to 16.
+- `pipeline.depth`: an integer from 1 to 16, or `"auto"`. Auto mode chooses
+  among depths 1, 2, 4, and 8 from the pipeline graph and message size.
 
 The global threshold can be overridden by
 `normal.<operation>.threshold_bytes`,
@@ -277,6 +279,9 @@ groupCount = 128
 quantBits = 4
 quantType = "Symmetric"
 hadamard = true
+
+[pipeline]
+depth = "auto"
 ```
 
 ### Training Mode

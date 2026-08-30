@@ -5,6 +5,7 @@
 #include "core/memory/coccl_buffer_management.h"
 #include "core/config/coccl_config.h"
 #include "core/pipeline/coccl_pipeline_internal.h"
+#include "core/pipeline/coccl_pipeline_depth.h"
 #include "comm.h"
 #include "core/compression/compress.h"
 #include "rma/rma.h"
@@ -688,8 +689,12 @@ ncclResult_t cocclRunPipeline(const cocclPipelineSpec* spec) {
   const bool singleNode = spec->ownerComm->localRanks ==
       spec->ownerComm->nRanks;
   // Raw boundary copies cost more than slice overlap recovers on one node.
-  const int depth = singleNode && !pipelineUsesFramedCompressor(spec)
-      ? 1 : cocclGetConfig().pipeline.depth;
+  const cocclPipelineConfig& config = cocclGetConfig().pipeline;
+  const bool serialFixedLayout =
+      singleNode && !pipelineUsesFramedCompressor(spec);
+  const int depth = serialFixedLayout
+      ? 1
+      : (config.autoDepth ? cocclAutotunePipelineDepth(spec) : config.depth);
   return cocclRunPipelineWithDepth(spec, depth);
 }
 
@@ -698,6 +703,7 @@ ncclResult_t cocclRunPipelineSerial(const cocclPipelineSpec* spec) {
 }
 
 ncclResult_t cocclPipelineCommDestroy(ncclComm_t comm) {
+  cocclPipelineDepthCommDestroy(comm);
   auto found = resourcesByComm.find(comm);
   if (found != resourcesByComm.end()) {
     cocclPipelineResources* resources = found->second;
