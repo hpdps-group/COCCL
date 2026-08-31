@@ -268,9 +268,12 @@ double cocclAutotuneEvaluateCost(
     int nodes);
 
 cocclSelectionPerformanceModel cocclAutotuneSnapshotPerformanceModel(
+    ncclComm_t ownerComm, ncclComm_t intraComm, ncclComm_t interComm,
+    ncclComm_t gatherComm);
+void cocclAutotuneSnapshotCodecModels(
     void* defaultCompressor, void* intraCompressor, void* interCompressor,
-    ncclDataType_t datatype,
-    cocclCodecModel* defaultModel, cocclCodecModel* intraModel,
-    cocclCodecModel* interModel);
+    ncclDataType_t datatype, cocclCodecModel* defaultModel,
+    cocclCodecModel* intraModel, cocclCodecModel* interModel);
+void cocclAutotuneTopologyCommDestroy(ncclComm_t comm);
 
 #endif

@@ -3,7 +3,6 @@
 #include "bootstrap.h"
 #include "checks.h"
 #include "core/config/coccl_config.h"
-#include "runtime/coccl_runtime.h"
 #include "comm.h"
 #include "core/compression/compress.h"
 #include "core/compression/reduce_extend.h"
@@ -19,10 +18,7 @@
 namespace {
 
 enum cocclProfileNeed : uint32_t {
-  cocclProfileNeedIntra = 1u << 0,
-  cocclProfileNeedInter = 1u << 1,
-  cocclProfileNeedCompressors = 1u << 2,
-  cocclProfileNeedFlatCollectives = 1u << 3,
+  cocclProfileNeedCompressors = 1u << 0,
 };
 
 struct cocclProfileObservation {
@@ -40,10 +36,6 @@ struct cocclProfiledCompressor {
 };
 
 struct cocclProcessPerformanceModel {
-  cocclLinearModel intraP2p;
-  cocclLinearModel interP2p;
-  cocclLinearModel allGather;
-  cocclLinearModel allToAll;
   std::vector<cocclProfiledCompressor> enabledCompressors;
   std::map<void*, std::map<ncclDataType_t, cocclCodecModel>>
       compressorModels;
@@ -66,28 +58,15 @@ double median(std::vector<double> values) {
   return result;
 }
 
-uint32_t localProfileNeeds(ncclComm_t comm) {
+uint32_t localProfileNeeds() {
   uint32_t needs = 0;
   pthread_mutex_lock(&cocclAutotuneLock);
   const bool hasCompressors =
       !cocclPerformanceModel.enabledCompressors.empty();
-  if (hasCompressors && comm->localRanks > 1 &&
-      (cocclPerformanceModel.attemptedProfiles & cocclProfileNeedIntra) == 0) {
-    needs |= cocclProfileNeedIntra;
-  }
-  if (hasCompressors && comm->nNodes > 1 &&
-      (cocclPerformanceModel.attemptedProfiles & cocclProfileNeedInter) == 0) {
-    needs |= cocclProfileNeedInter;
-  }
   if (hasCompressors &&
       (cocclPerformanceModel.attemptedProfiles &
        cocclProfileNeedCompressors) == 0) {
     needs |= cocclProfileNeedCompressors;
-  }
-  if (hasCompressors && comm->nNodes == 1 && comm->nRanks > 1 &&
-      (cocclPerformanceModel.attemptedProfiles &
-       cocclProfileNeedFlatCollectives) == 0) {
-    needs |= cocclProfileNeedFlatCollectives;
   }
   pthread_mutex_unlock(&cocclAutotuneLock);
   return needs;
@@ -152,56 +131,6 @@ ncclResult_t buildSampleSizes(ncclComm_t comm,
   return ncclSuccess;
 }
 
-ncclResult_t buildCollectiveSampleSizes(
-    ncclComm_t comm, const std::vector<size_t>& rawSampleSizes,
-    std::vector<size_t>* sampleSizes) {
-  size_t freeBytes = 0;
-  size_t totalBytes = 0;
-  CUDACHECK(cudaMemGetInfo(&freeBytes, &totalBytes));
-
-  const uint64_t localMax = (uint64_t)freeBytes /
-      (2u * ((uint64_t)comm->nRanks + 1u));
-  std::vector<uint64_t> allMax((size_t)comm->nRanks, 0);
-  allMax[(size_t)comm->rank] = localMax;
-  NCCLCHECK(bootstrapAllGather(
-      comm->bootstrap, allMax.data(), sizeof(uint64_t)));
-  uint64_t effectiveMax = localMax;
-  for (uint64_t rankMax : allMax) {
-    effectiveMax = std::min(effectiveMax, rankMax);
-  }
-
-  std::vector<double> ratios;
-  pthread_mutex_lock(&cocclAutotuneLock);
-  for (const auto& compressor : cocclPerformanceModel.compressorModels) {
-    for (const auto& typed : compressor.second) {
-      if (typed.second.valid) {
-        ratios.push_back(typed.second.compressionRatio);
-      }
-    }
-  }
-  pthread_mutex_unlock(&cocclAutotuneLock);
-
-  for (double ratio : ratios) {
-    for (size_t rawBytes : rawSampleSizes) {
-      const size_t encodedBytes =
-          (size_t)std::ceil((double)rawBytes / ratio);
-      for (size_t divisor : {(size_t)1, (size_t)comm->nRanks}) {
-        size_t bytes = (encodedBytes + divisor - 1) / divisor;
-        bytes = (bytes + (size_t)comm->nRanks - 1) /
-            (size_t)comm->nRanks * (size_t)comm->nRanks;
-        if (bytes > 0 && bytes <= effectiveMax) {
-          sampleSizes->push_back(bytes);
-        }
-      }
-    }
-  }
-  std::sort(sampleSizes->begin(), sampleSizes->end());
-  sampleSizes->erase(
-      std::unique(sampleSizes->begin(), sampleSizes->end()),
-      sampleSizes->end());
-  return ncclSuccess;
-}
-
 ncclResult_t aggregateObservation(ncclComm_t comm,
                                   const cocclProfileObservation& local,
                                   cocclProfileObservation* aggregate) {
@@ -235,239 +164,6 @@ ncclResult_t aggregateObservation(ncclComm_t comm,
     aggregate->compressionRatio = median(std::move(ratios));
   }
   return ncclSuccess;
-}
-
-ncclResult_t enqueueP2pExchange(ncclComm_t comm, const void* sendBuffer,
-                                void* recvBuffer, size_t bytes, int sendPeer,
-                                int recvPeer, cudaStream_t stream) {
-  ncclResult_t ret = ncclSuccess;
-  NCCLCHECKGOTO(ncclGroupStart(), ret, exit);
-  {
-    cocclInfo info;
-    info.recvbuff = recvBuffer;
-    info.count = bytes;
-    info.datatype = ncclInt8;
-    info.peer = recvPeer;
-    info.func = ncclFuncRecv;
-    info.operation = cocclOperation::SendRecv;
-    info.comm = comm;
-    info.stream = stream;
-    NCCLCHECKGOTO(cocclReplayNativeCall(info), ret, group_exit);
-  }
-  {
-    cocclInfo info;
-    info.sendbuff = sendBuffer;
-    info.count = bytes;
-    info.datatype = ncclInt8;
-    info.peer = sendPeer;
-    info.func = ncclFuncSend;
-    info.operation = cocclOperation::SendRecv;
-    info.comm = comm;
-    info.stream = stream;
-    NCCLCHECKGOTO(cocclReplayNativeCall(info), ret, group_exit);
-  }
-group_exit:
-  {
-    const ncclResult_t groupResult = ncclGroupEnd();
-    if (ret == ncclSuccess) ret = groupResult;
-  }
-exit:
-  return ret;
-}
-
-bool topologyPeers(ncclComm_t comm, bool interNode, int* sendPeer,
-                   int* recvPeer) {
-  if (!interNode) {
-    if (comm->localRanks <= 1) return false;
-    *sendPeer =
-        comm->localRankToRank[(comm->localRank + 1) % comm->localRanks];
-    *recvPeer = comm->localRankToRank[
-        (comm->localRank - 1 + comm->localRanks) % comm->localRanks];
-    return true;
-  }
-
-  if (comm->nNodes <= 1) return false;
-  int commonLocalRanks = comm->nodeRanks[0].localRanks;
-  for (int node = 1; node < comm->nNodes; ++node) {
-    commonLocalRanks =
-        std::min(commonLocalRanks, comm->nodeRanks[node].localRanks);
-  }
-  if (comm->localRank >= commonLocalRanks) return false;
-  const int sendNode = (comm->node + 1) % comm->nNodes;
-  const int recvNode = (comm->node - 1 + comm->nNodes) % comm->nNodes;
-  *sendPeer = comm->nodeRanks[sendNode].localRankToRank[comm->localRank];
-  *recvPeer = comm->nodeRanks[recvNode].localRankToRank[comm->localRank];
-  return true;
-}
-
-ncclResult_t profileP2p(ncclComm_t comm, bool interNode,
-                        const std::vector<size_t>& sampleSizes,
-                        cocclLinearModel* model) {
-  ncclResult_t ret = ncclSuccess;
-  void* sendBuffer = nullptr;
-  void* recvBuffer = nullptr;
-  cudaStream_t stream = nullptr;
-  cudaEvent_t start = nullptr;
-  cudaEvent_t stop = nullptr;
-  int sendPeer = -1;
-  int recvPeer = -1;
-  const bool active = topologyPeers(
-      comm, interNode, &sendPeer, &recvPeer);
-  const cocclAutotuneConfig& config = cocclGetConfig().autotune;
-  std::vector<cocclAutotuneProfilePoint> points;
-
-  CUDACHECKGOTO(cudaSetDevice(comm->cudaDev), ret, fail);
-  CUDACHECKGOTO(cudaMalloc(&sendBuffer, sampleSizes.back()), ret, fail);
-  CUDACHECKGOTO(cudaMalloc(&recvBuffer, sampleSizes.back()), ret, fail);
-  CUDACHECKGOTO(cudaMemset(sendBuffer, 0x3f, sampleSizes.back()), ret, fail);
-  CUDACHECKGOTO(
-      cudaStreamCreateWithFlags(&stream, cudaStreamNonBlocking), ret, fail);
-  CUDACHECKGOTO(cudaEventCreate(&start), ret, fail);
-  CUDACHECKGOTO(cudaEventCreate(&stop), ret, fail);
-
-  for (size_t bytes : sampleSizes) {
-    cocclProfileObservation local = {};
-    local.active = active ? 1u : 0u;
-    if (active) {
-      for (int i = 0; i < config.warmup; ++i) {
-        NCCLCHECKGOTO(
-            enqueueP2pExchange(
-                comm, sendBuffer, recvBuffer, bytes, sendPeer, recvPeer,
-                stream),
-            ret, fail);
-      }
-      CUDACHECKGOTO(cudaStreamSynchronize(stream), ret, fail);
-
-      std::vector<double> times;
-      for (int i = 0; i < config.iterations; ++i) {
-        CUDACHECKGOTO(cudaEventRecord(start, stream), ret, fail);
-        NCCLCHECKGOTO(
-            enqueueP2pExchange(
-                comm, sendBuffer, recvBuffer, bytes, sendPeer, recvPeer,
-                stream),
-            ret, fail);
-        CUDACHECKGOTO(cudaEventRecord(stop, stream), ret, fail);
-        CUDACHECKGOTO(cudaEventSynchronize(stop), ret, fail);
-        float elapsedMs = 0.0f;
-        CUDACHECKGOTO(
-            cudaEventElapsedTime(&elapsedMs, start, stop), ret, fail);
-        times.push_back((double)elapsedMs * 1000.0);
-      }
-      local.timeUs = median(std::move(times));
-      local.valid = local.timeUs > 0.0 ? 1u : 0u;
-    }
-
-    cocclProfileObservation aggregate = {};
-    NCCLCHECKGOTO(
-        aggregateObservation(comm, local, &aggregate), ret, fail);
-    if (aggregate.valid) {
-      points.push_back({(double)bytes, aggregate.timeUs});
-    }
-  }
-  *model = cocclAutotuneFitLinearModel(points);
-
-exit:
-  if (stop != nullptr) (void)cudaEventDestroy(stop);
-  if (start != nullptr) (void)cudaEventDestroy(start);
-  if (stream != nullptr) (void)cudaStreamDestroy(stream);
-  if (recvBuffer != nullptr) (void)cudaFree(recvBuffer);
-  if (sendBuffer != nullptr) (void)cudaFree(sendBuffer);
-  return ret;
-fail:
-  goto exit;
-}
-
-enum class cocclProfileCollective : uint8_t {
-  AllGather,
-  AllToAll,
-};
-
-ncclResult_t enqueueCollective(ncclComm_t comm,
-                               cocclProfileCollective collective,
-                               const void* sendBuffer, void* recvBuffer,
-                               size_t bytes, cudaStream_t stream) {
-  cocclInfo info;
-  info.sendbuff = sendBuffer;
-  info.recvbuff = recvBuffer;
-  info.count = collective == cocclProfileCollective::AllGather
-      ? bytes : bytes / (size_t)comm->nRanks;
-  info.datatype = ncclInt8;
-  info.operation = collective == cocclProfileCollective::AllGather
-      ? cocclOperation::AllGather : cocclOperation::AllToAll;
-  info.comm = comm;
-  info.stream = stream;
-  return cocclReplayNativeCall(info);
-}
-
-ncclResult_t profileCollective(
-    ncclComm_t comm, cocclProfileCollective collective,
-    const std::vector<size_t>& sampleSizes, cocclLinearModel* model) {
-  ncclResult_t ret = ncclSuccess;
-  void* sendBuffer = nullptr;
-  void* recvBuffer = nullptr;
-  cudaStream_t stream = nullptr;
-  cudaEvent_t start = nullptr;
-  cudaEvent_t stop = nullptr;
-  const size_t recvCapacity = collective == cocclProfileCollective::AllGather
-      ? sampleSizes.back() * (size_t)comm->nRanks : sampleSizes.back();
-  const cocclAutotuneConfig& config = cocclGetConfig().autotune;
-  std::vector<cocclAutotuneProfilePoint> points;
-
-  CUDACHECKGOTO(cudaSetDevice(comm->cudaDev), ret, fail);
-  CUDACHECKGOTO(cudaMalloc(&sendBuffer, sampleSizes.back()), ret, fail);
-  CUDACHECKGOTO(cudaMalloc(&recvBuffer, recvCapacity), ret, fail);
-  CUDACHECKGOTO(cudaMemset(sendBuffer, 0x3f, sampleSizes.back()), ret, fail);
-  CUDACHECKGOTO(
-      cudaStreamCreateWithFlags(&stream, cudaStreamNonBlocking), ret, fail);
-  CUDACHECKGOTO(cudaEventCreate(&start), ret, fail);
-  CUDACHECKGOTO(cudaEventCreate(&stop), ret, fail);
-
-  for (size_t bytes : sampleSizes) {
-    for (int i = 0; i < config.warmup; ++i) {
-      NCCLCHECKGOTO(
-          enqueueCollective(
-              comm, collective, sendBuffer, recvBuffer, bytes, stream),
-          ret, fail);
-    }
-    CUDACHECKGOTO(cudaStreamSynchronize(stream), ret, fail);
-
-    std::vector<double> times;
-    for (int i = 0; i < config.iterations; ++i) {
-      CUDACHECKGOTO(cudaEventRecord(start, stream), ret, fail);
-      NCCLCHECKGOTO(
-          enqueueCollective(
-              comm, collective, sendBuffer, recvBuffer, bytes, stream),
-          ret, fail);
-      CUDACHECKGOTO(cudaEventRecord(stop, stream), ret, fail);
-      CUDACHECKGOTO(cudaEventSynchronize(stop), ret, fail);
-      float elapsedMs = 0.0f;
-      CUDACHECKGOTO(
-          cudaEventElapsedTime(&elapsedMs, start, stop), ret, fail);
-      times.push_back((double)elapsedMs * 1000.0);
-    }
-
-    cocclProfileObservation local = {};
-    local.active = 1;
-    local.timeUs = median(std::move(times));
-    local.valid = local.timeUs > 0.0 ? 1u : 0u;
-    cocclProfileObservation aggregate = {};
-    NCCLCHECKGOTO(
-        aggregateObservation(comm, local, &aggregate), ret, fail);
-    if (aggregate.valid) {
-      points.push_back({(double)bytes, aggregate.timeUs});
-    }
-  }
-  *model = cocclAutotuneFitLinearModel(points);
-
-exit:
-  if (stop != nullptr) (void)cudaEventDestroy(stop);
-  if (start != nullptr) (void)cudaEventDestroy(start);
-  if (stream != nullptr) (void)cudaStreamDestroy(stream);
-  if (recvBuffer != nullptr) (void)cudaFree(recvBuffer);
-  if (sendBuffer != nullptr) (void)cudaFree(sendBuffer);
-  return ret;
-fail:
-  goto exit;
 }
 
 bool runCompressorIteration(
@@ -845,51 +541,6 @@ const char* scopeName(cocclCompressionScope scope) {
   return "unknown";
 }
 
-void publishP2pModel(bool interNode, const cocclLinearModel& model, int rank) {
-  if (!model.valid) {
-    if (rank == 0) {
-      WARN("COCCL failed to fit %s-node P2P profile",
-           interNode ? "inter" : "intra");
-    }
-    return;
-  }
-  pthread_mutex_lock(&cocclAutotuneLock);
-  if (interNode) {
-    cocclPerformanceModel.interP2p = model;
-  } else {
-    cocclPerformanceModel.intraP2p = model;
-  }
-  pthread_mutex_unlock(&cocclAutotuneLock);
-  if (rank == 0) {
-    INFO(COCCL_TUNING,
-         "COCCL profile %s P2P: time_us=%g+%g*bytes",
-         interNode ? "inter" : "intra", model.alphaUs,
-         model.betaUsPerByte);
-  }
-}
-
-void publishCollectiveModel(cocclProfileCollective collective,
-                            const cocclLinearModel& model, int rank) {
-  const char* name = collective == cocclProfileCollective::AllGather
-      ? "AllGather" : "AllToAll";
-  if (!model.valid) {
-    if (rank == 0) WARN("COCCL failed to fit %s profile", name);
-    return;
-  }
-  pthread_mutex_lock(&cocclAutotuneLock);
-  if (collective == cocclProfileCollective::AllGather) {
-    cocclPerformanceModel.allGather = model;
-  } else {
-    cocclPerformanceModel.allToAll = model;
-  }
-  pthread_mutex_unlock(&cocclAutotuneLock);
-  if (rank == 0) {
-    INFO(COCCL_TUNING,
-         "COCCL profile %s: time_us=%g+%g*bytes",
-         name, model.alphaUs, model.betaUsPerByte);
-  }
-}
-
 void publishCompressorModel(const cocclProfiledCompressor& profiled,
                             ncclDataType_t datatype,
                             const cocclCodecModel& model, int rank) {
@@ -929,23 +580,16 @@ void copyCompressorModelLocked(void* compressor, ncclDataType_t datatype,
 
 }  // namespace
 
-cocclSelectionPerformanceModel cocclAutotuneSnapshotPerformanceModel(
+void cocclAutotuneSnapshotCodecModels(
     void* defaultCompressor, void* intraCompressor, void* interCompressor,
     ncclDataType_t datatype,
     cocclCodecModel* defaultModel, cocclCodecModel* intraModel,
     cocclCodecModel* interModel) {
   pthread_mutex_lock(&cocclAutotuneLock);
-  const cocclSelectionPerformanceModel snapshot = {
-      cocclPerformanceModel.intraP2p,
-      cocclPerformanceModel.interP2p,
-      cocclPerformanceModel.allGather,
-      cocclPerformanceModel.allToAll,
-  };
   copyCompressorModelLocked(defaultCompressor, datatype, defaultModel);
   copyCompressorModelLocked(intraCompressor, datatype, intraModel);
   copyCompressorModelLocked(interCompressor, datatype, interModel);
   pthread_mutex_unlock(&cocclAutotuneLock);
-  return snapshot;
 }
 
 ncclResult_t cocclAutotuneRegisterEnabledCompressor(
@@ -967,7 +611,7 @@ ncclResult_t cocclAutotuneRegisterEnabledCompressor(
 ncclResult_t cocclAutotuneEnsureGlobalModels(ncclComm_t measurementComm) {
   if (!cocclGetConfig().autotune.enabled) return ncclSuccess;
 
-  const uint32_t localNeeds = localProfileNeeds(measurementComm);
+  const uint32_t localNeeds = localProfileNeeds();
   if (localNeeds == 0) return ncclSuccess;
 
   uint32_t needs = 0;
@@ -989,22 +633,6 @@ ncclResult_t cocclAutotuneEnsureGlobalModels(ncclComm_t measurementComm) {
          sampleSizes.size(), sampleSizes.front(), sampleSizes.back());
   }
 
-  if ((needs & cocclProfileNeedIntra) != 0) {
-    cocclLinearModel model;
-    const ncclResult_t result =
-        profileP2p(measurementComm, false, sampleSizes, &model);
-    if (result == ncclSuccess) {
-      publishP2pModel(false, model, measurementComm->rank);
-    }
-  }
-  if ((needs & cocclProfileNeedInter) != 0) {
-    cocclLinearModel model;
-    const ncclResult_t result =
-        profileP2p(measurementComm, true, sampleSizes, &model);
-    if (result == ncclSuccess) {
-      publishP2pModel(true, model, measurementComm->rank);
-    }
-  }
   if ((needs & cocclProfileNeedCompressors) != 0) {
     for (ncclDataType_t datatype : {ncclFloat32, ncclBfloat16}) {
       for (const cocclProfiledCompressor& compressor :
@@ -1022,26 +650,6 @@ ncclResult_t cocclAutotuneEnsureGlobalModels(ncclComm_t measurementComm) {
               compressor, datatype, model, measurementComm->rank);
         }
       }
-    }
-  }
-  if ((needs & cocclProfileNeedFlatCollectives) != 0) {
-    std::vector<size_t> collectiveSampleSizes;
-    NCCLCHECK(buildCollectiveSampleSizes(
-        measurementComm, sampleSizes, &collectiveSampleSizes));
-    if (collectiveSampleSizes.size() >= 2) {
-      for (cocclProfileCollective collective : {
-               cocclProfileCollective::AllGather,
-               cocclProfileCollective::AllToAll}) {
-        cocclLinearModel model;
-        const ncclResult_t result = profileCollective(
-            measurementComm, collective, collectiveSampleSizes, &model);
-        if (result == ncclSuccess) {
-          publishCollectiveModel(
-              collective, model, measurementComm->rank);
-        }
-      }
-    } else if (measurementComm->rank == 0) {
-      WARN("COCCL autotune has fewer than two collective profile sizes; using P2P model");
     }
   }
   return ncclSuccess;

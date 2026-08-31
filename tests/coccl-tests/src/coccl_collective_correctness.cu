@@ -263,15 +263,33 @@ void runCompressed(Operation operation, const void* input, void* output,
                    ncclDataType_t datatype, ncclComm_t comm,
                    cudaStream_t stream, int rank, int ranks,
                    size_t inputCount, bool autoRoute) {
-  switch (operation) {
-    case Operation::AllToAll:
-      if (autoRoute) {
+  if (autoRoute) {
+    switch (operation) {
+      case Operation::AllToAll:
         NCCLCHECK(ncclAlltoAll(input, output, inputCount / ranks,
                               datatype, comm, stream));
-      } else {
-        NCCLCHECK(cocclAllToAllComp(input, output, inputCount / ranks,
-                                    datatype, comm, stream));
-      }
+        return;
+      case Operation::ReduceScatterOneShot:
+      case Operation::ReduceScatterTwoShot:
+        NCCLCHECK(ncclReduceScatter(
+            input, output, inputCount / ranks, datatype, ncclSum, comm,
+            stream));
+        return;
+      case Operation::AllReduceOneShot:
+      case Operation::AllReduceTwoShot:
+      case Operation::AllReduceTripleShot:
+        NCCLCHECK(ncclAllReduce(
+            input, output, inputCount, datatype, ncclSum, comm, stream));
+        return;
+      default:
+        break;
+    }
+  }
+
+  switch (operation) {
+    case Operation::AllToAll:
+      NCCLCHECK(cocclAllToAllComp(input, output, inputCount / ranks,
+                                  datatype, comm, stream));
       return;
     case Operation::AllGather:
       NCCLCHECK(cocclAllGatherComp(input, output, inputCount, datatype,

@@ -1,6 +1,7 @@
 #include "coccl_autotune_internal.h"
 
 #include "core/config/coccl_config.h"
+#include "core/runtime/coccl_comm.h"
 #include "comm.h"
 #include "core/compression/compress.h"
 #include "debug.h"
@@ -124,11 +125,21 @@ ncclResult_t selectCandidate(cocclPreparedCall* prepared) {
       requested == cocclAlgorithmNone && config.enabled;
 
   if (scoreCandidates) {
+    cocclHierarchicalComms hierarchy = {comm, comm, comm};
+    if (comm->nNodes > 1 && comm->localRanks > 1) {
+      NCCLCHECK(cocclCommGetHierarchicalComms(comm, &hierarchy));
+    }
+    ncclComm_t gatherComm = comm;
+    if (comm->nNodes > 1 && !usesFramedCompressor(*prepared)) {
+      NCCLCHECK(cocclCommGetZeroCtaComm(comm, &gatherComm));
+    }
     cocclCodecModel defaultCodecModel;
     cocclCodecModel intraCodecModel;
     cocclCodecModel interCodecModel;
     const cocclSelectionPerformanceModel performance =
         cocclAutotuneSnapshotPerformanceModel(
+            comm, hierarchy.intraComm, hierarchy.interComm, gatherComm);
+    cocclAutotuneSnapshotCodecModels(
             prepared->compressors.get(cocclCompressionScope::Default),
             prepared->compressors.get(cocclCompressionScope::Intra),
             prepared->compressors.get(cocclCompressionScope::Inter),

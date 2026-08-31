@@ -2,6 +2,7 @@
 
 #include "core/compression/coccl_compressor_runtime.h"
 #include "core/config/coccl_config.h"
+#include "core/runtime/coccl_comm.h"
 #include "comm.h"
 #include "debug.h"
 
@@ -84,6 +85,11 @@ const cocclConfig& cocclGetConfig() {
 }
 
 cocclSelectionPerformanceModel cocclAutotuneSnapshotPerformanceModel(
+    ncclComm_t, ncclComm_t, ncclComm_t, ncclComm_t) {
+  return performance;
+}
+
+void cocclAutotuneSnapshotCodecModels(
     void* defaultCompressor, void* intraCompressor, void* interCompressor,
     ncclDataType_t datatype,
     cocclCodecModel* defaultCodec, cocclCodecModel* intraCodec,
@@ -92,7 +98,17 @@ cocclSelectionPerformanceModel cocclAutotuneSnapshotPerformanceModel(
   if (defaultCompressor != nullptr) *defaultCodec = modelFor(defaultCompressor);
   if (intraCompressor != nullptr) *intraCodec = modelFor(intraCompressor);
   if (interCompressor != nullptr) *interCodec = modelFor(interCompressor);
-  return performance;
+}
+
+ncclResult_t cocclCommGetHierarchicalComms(
+    ncclComm_t comm, cocclHierarchicalComms* hierarchy) {
+  *hierarchy = {comm, comm, comm};
+  return ncclSuccess;
+}
+
+ncclResult_t cocclCommGetZeroCtaComm(ncclComm_t comm, ncclComm_t* child) {
+  *child = comm;
+  return ncclSuccess;
 }
 
 int main() {
