@@ -97,6 +97,9 @@ ncclResult_t captureExecution(const cocclPreparedCall* prepared) {
 
 const cocclConfig& cocclGetConfig() { return testConfig; }
 bool cocclCompressionEnabled() { return true; }
+ncclResult_t cocclAutotuneEnsureGlobalModels(ncclComm_t) {
+  return ncclSuccess;
+}
 
 ncclResult_t cocclResolveCompressorPolicy(
     cocclTrainingRole role, cocclPolicyKey key,

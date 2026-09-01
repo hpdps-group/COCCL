@@ -20,6 +20,7 @@ int descriptorQueries = 0;
 int policyQueries = 0;
 int compressedCalls = 0;
 int nativeCalls = 0;
+int autotuneModelQueries = 0;
 uint64_t lastProfilerTag = 0;
 ncclResult_t resolverResult = ncclSuccess;
 cocclAlgorithmKind executedAlgorithm = cocclAlgorithmNone;
@@ -61,6 +62,7 @@ void reset() {
   policyQueries = 0;
   compressedCalls = 0;
   nativeCalls = 0;
+  autotuneModelQueries = 0;
   lastProfilerTag = 0;
   resolverResult = ncclSuccess;
   executedAlgorithm = cocclAlgorithmNone;
@@ -178,6 +180,11 @@ bool cocclOperationSupportsPolicy(const cocclOperationDescriptor*,
 
 const cocclConfig& cocclGetConfig() {
   return config;
+}
+
+ncclResult_t cocclAutotuneEnsureGlobalModels(ncclComm_t) {
+  ++autotuneModelQueries;
+  return ncclSuccess;
 }
 
 ncclResult_t cocclSelectAlgorithm(cocclPreparedCall* prepared) {
@@ -322,7 +329,8 @@ int main() {
   enabled = false;
   info.operation = cocclOperation::Count;
   EXPECT(cocclEnqueueCheck(&info, &enqueued) == ncclSuccess);
-  EXPECT(!enqueued && descriptorQueries == 0 && policyQueries == 0);
+  EXPECT(!enqueued && descriptorQueries == 0 && policyQueries == 0 &&
+         autotuneModelQueries == 0);
 
   reset();
   info = allToAllInfo(&comm);
@@ -356,18 +364,21 @@ int main() {
   info = allToAllInfo(&comm);
   resolverResult = ncclInvalidUsage;
   EXPECT(cocclEnqueueCheck(&info, &enqueued) == ncclSuccess);
-  EXPECT(!enqueued && policyQueries == 3 && compressedCalls == 0);
+  EXPECT(!enqueued && policyQueries == 3 && compressedCalls == 0 &&
+         autotuneModelQueries == 0);
 
   reset();
   info = allToAllInfo(&comm);
   thresholdBytes = std::numeric_limits<size_t>::max();
   EXPECT(cocclEnqueueCheck(&info, &enqueued) == ncclSuccess);
-  EXPECT(!enqueued && policyQueries == 3 && compressedCalls == 0);
+  EXPECT(!enqueued && policyQueries == 3 && compressedCalls == 0 &&
+         autotuneModelQueries == 0);
 
   reset();
   info = allToAllInfo(&comm);
   EXPECT(cocclEnqueueCheck(&info, &enqueued) == ncclSuccess);
-  EXPECT(enqueued && policyQueries == 3 && compressedCalls == 1);
+  EXPECT(enqueued && policyQueries == 3 && compressedCalls == 1 &&
+         autotuneModelQueries == 1);
 
   reset();
   enableOnly(cocclCompressionScope::Inter);
@@ -463,6 +474,18 @@ int main() {
   reset();
   comm.nNodes = 2;
   comm.localRanks = 2;
+  reduction = allToAllInfo(&comm);
+  reduction.operation = cocclOperation::ReduceScatter;
+  reduction.op = ncclSum;
+  ncclGroupDepth = 1;
+  EXPECT(cocclEnqueueCheck(&reduction, &enqueued) == ncclSuccess);
+  ncclGroupDepth = 0;
+  EXPECT(enqueued && grouped.size() == 1 &&
+         grouped[0].algorithm == cocclAlgorithmNone);
+  EXPECT(cocclExecutePreparedCall(&grouped[0]) == ncclSuccess);
+  EXPECT(executedAlgorithm == cocclAlgorithmReduceScatterTwoShot);
+
+  reset();
   reduction = allToAllInfo(&comm);
   reduction.operation = cocclOperation::ReduceScatter;
   reduction.op = ncclSum;
