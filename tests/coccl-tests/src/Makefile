@@ -146,6 +146,7 @@ REDUCESCATTER_RECIPE_TEST := $(DST_DIR)/coccl_reducescatter_recipe_test
 COLLECTIVE_CORRECTNESS_TEST := $(DST_DIR)/coccl_collective_correctness
 AUTOTUNE_TEST := $(DST_DIR)/coccl_autotune_test
 AUTOTUNE_MODEL_SELECTOR := $(DST_DIR)/coccl_autotune_model_selector
+AUTOTUNE_TOPOLOGY_TEST := $(DST_DIR)/coccl_autotune_topology_test
 AUTOTUNE_COST_MODEL_SRC := $(COCCL_CORE)/tuning/coccl_autotune_cost_model.cc
 AUTOTUNE_INTERNAL := $(COCCL_CORE)/tuning/coccl_autotune_internal.h
 SCOPE_CONFIG_TEST := $(DST_DIR)/coccl_scope_config_test
@@ -224,8 +225,10 @@ framed-tests: $(FRAMED_PIPELINE_PLAN_TEST) $(FRAME_EXCHANGE_TEST) \
 	$(FRAME_EXCHANGE_TEST)
 	$(GROUP_BATCH_TEST)
 
-autotune-tests: $(AUTOTUNE_TEST) $(SELECTOR_SCOPE_TEST)
+autotune-tests: $(AUTOTUNE_TEST) $(AUTOTUNE_TOPOLOGY_TEST) \
+		$(SELECTOR_SCOPE_TEST)
 	$(AUTOTUNE_TEST)
+	$(AUTOTUNE_TOPOLOGY_TEST)
 	$(SELECTOR_SCOPE_TEST)
 
 training-tests: $(TRAINING_CLASSIFIER_TEST)
@@ -348,6 +351,15 @@ $(AUTOTUNE_MODEL_SELECTOR): coccl_autotune_model_selector.cc \
 	@mkdir -p $(DST_DIR)
 	$(CXX) $(TEST_CXXFLAGS) $(COCCL_INC) -I$(COCCL_SRC) \
 		-o $@ $< $(AUTOTUNE_COST_MODEL_SRC)
+
+$(AUTOTUNE_TOPOLOGY_TEST): coccl_autotune_topology_test.cc \
+		$(COCCL_CORE)/tuning/coccl_autotune_topology.cc \
+		$(AUTOTUNE_COST_MODEL_SRC) $(AUTOTUNE_INTERNAL)
+	@printf "Linking  %-35s > %s\n" $< $@
+	@mkdir -p $(DST_DIR)
+	$(CXX) $(TEST_CXXFLAGS) $(COCCL_INC) -I$(COCCL_SRC) \
+		-o $@ $< $(COCCL_CORE)/tuning/coccl_autotune_topology.cc \
+		$(AUTOTUNE_COST_MODEL_SRC)
 
 $(SCOPE_CONFIG_TEST): coccl_scope_config_test.cc \
 		$(COCCL_CORE)/config/coccl_config.cc \

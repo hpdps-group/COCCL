@@ -3,6 +3,7 @@
 #include "checks.h"
 #include "comm.h"
 #include "core/training/coccl_training_assist.h"
+#include "core/tuning/coccl_autotune_internal.h"
 
 #include <map>
 #include <pthread.h>
@@ -40,6 +41,7 @@ ncclResult_t cocclCommCreate(ncclComm_t comm) {
 }
 
 ncclResult_t cocclCommDestroy(ncclComm_t comm) {
+  cocclAutotuneTopologyCommDestroy(comm);
   cocclHierarchicalCommState hierarchy;
   pthread_mutex_lock(&commLock);
   auto found = comms.find(comm);

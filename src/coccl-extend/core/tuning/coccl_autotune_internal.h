@@ -138,6 +138,28 @@ struct cocclAutotuneCodecSet {
   bool fusedFlatDecompressReduce = false;
 };
 
+enum class cocclAutotuneTopologyOperation : uint8_t {
+  P2p,
+  AllGather,
+  AllToAll,
+  ReduceScatter,
+};
+
+enum class cocclNcclExecutionClass : uint8_t {
+  General,
+};
+
+// Backend adapters expose one native NCCL stage estimate. The COCCL model
+// remains independent of NCCL's version-specific tuning structures.
+struct cocclNcclCostEstimate {
+  double timeUs = std::numeric_limits<double>::infinity();
+  int algorithm = -1;
+  int protocol = -1;
+  int channels = 0;
+  cocclNcclExecutionClass executionClass =
+      cocclNcclExecutionClass::General;
+};
+
 inline const cocclAutotuneCandidateSpec* cocclAutotuneFindCandidateSpec(
     cocclOperation operation, cocclAlgorithmKind algorithm) {
   for (const cocclAutotuneCandidateSpec& spec :
@@ -268,9 +290,19 @@ double cocclAutotuneEvaluateCost(
     int nodes);
 
 cocclSelectionPerformanceModel cocclAutotuneSnapshotPerformanceModel(
+    ncclComm_t ownerComm, ncclComm_t intraComm, ncclComm_t interComm,
+    ncclComm_t gatherComm);
+void cocclAutotuneSnapshotCodecModels(
     void* defaultCompressor, void* intraCompressor, void* interCompressor,
-    ncclDataType_t datatype,
-    cocclCodecModel* defaultModel, cocclCodecModel* intraModel,
-    cocclCodecModel* interModel);
+    ncclDataType_t datatype, cocclCodecModel* defaultModel,
+    cocclCodecModel* intraModel, cocclCodecModel* interModel);
+cocclCodecModel cocclAutotuneSnapshotCodecModel(
+    void* compressor, ncclDataType_t datatype);
+cocclLinearModel cocclAutotuneSnapshotTopologyStageModel(
+    ncclComm_t comm, cocclAutotuneTopologyOperation operation);
+cocclNcclCostEstimate cocclAutotuneEstimateNcclStage(
+    ncclComm_t comm, cocclAutotuneTopologyOperation operation,
+    size_t bytes);
+void cocclAutotuneTopologyCommDestroy(ncclComm_t comm);
 
 #endif

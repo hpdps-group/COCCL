@@ -474,13 +474,6 @@ ncclResult_t cocclCompressorRuntimeInit(const ncclComm_t comm) {
   if (!configReady) return ncclSuccess;
 
   cocclTrainingAssistRegister(comm);
-
-  const ncclResult_t autotuneResult =
-      cocclAutotuneEnsureGlobalModels(comm);
-  if (autotuneResult != ncclSuccess && comm->rank == 0) {
-    WARN("COCCL autotune profiling failed with %d; using heuristics",
-         autotuneResult);
-  }
   return ncclSuccess;
 }
 

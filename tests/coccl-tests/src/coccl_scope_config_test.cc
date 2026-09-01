@@ -48,6 +48,7 @@ std::string configPreamble() {
       "runtime.compression_threshold_bytes = 4096\n"
       "compressor_plugins.compressors = [\"sdp4bit\", \"zfp\", \"dietgpu\"]\n"
       "compressor_plugins.library_path = \".\"\n"
+      "pipeline.depth = \"auto\"\n"
       "normal.all_reduce.threshold_bytes = 123\n";
 }
 
@@ -96,6 +97,7 @@ void checkRoundTrip(const std::string& path, const cocclConfig& input,
   }
   cocclConfig reparsed;
   const cocclPrimitivePolicy& policy = parse(path, formatted, &reparsed);
+  EXPECT(reparsed.pipeline.autoDepth);
   checkPolicy(policy, test, false);
 }
 
@@ -182,6 +184,7 @@ int main(int argc, char** argv) {
     cocclConfig config;
     const cocclPrimitivePolicy& policy =
         parse(base + ".toml", configPreamble() + test.body, &config);
+    EXPECT(config.pipeline.autoDepth);
     checkPolicy(policy, test);
     checkRoundTrip(base + "-formatted.toml", config, test);
   }

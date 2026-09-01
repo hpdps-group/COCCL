@@ -494,8 +494,17 @@ bool parsePipeline(const toml::table& root, cocclConfig* config,
                    std::string* error) {
   const toml::table* pipeline = optionalTable(root, "pipeline", "root", error);
   if (pipeline == nullptr) return error == nullptr || error->empty();
-  return validateKeys(*pipeline, {"depth"}, "pipeline", error) &&
-         readInt(*pipeline, "depth", &config->pipeline.depth,
+  if (!validateKeys(*pipeline, {"depth"}, "pipeline", error)) return false;
+  const toml::node* depth = pipeline->get("depth");
+  if (depth == nullptr) return true;
+  if (auto value = depth->value<std::string>()) {
+    if (*value != "auto") {
+      return fail(error, "pipeline.depth must be 'auto' or an integer in [1, 16]");
+    }
+    config->pipeline.autoDepth = true;
+    return true;
+  }
+  return readInt(*pipeline, "depth", &config->pipeline.depth,
                  kCocclMinPipelineDepth, kCocclMaxPipelineDepth, "pipeline",
                  error);
 }

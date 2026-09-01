@@ -4,6 +4,7 @@
 #include "core/memory/coccl_buffer_management.h"
 #include "core/config/coccl_config.h"
 #include "core/pipeline/coccl_pipeline_internal.h"
+#include "core/tuning/coccl_autotune_pipeline.h"
 #include "comm.h"
 #include "core/compression/compress.h"
 
@@ -72,12 +73,12 @@ void destroyResources(cocclPipelineResources* resources) {
   delete resources;
 }
 
-ncclResult_t createResources(int depth, cocclPipelineResources** output) {
+ncclResult_t createResources(cocclPipelineResources** output) {
   cocclPipelineResources* resources =
       new (std::nothrow) cocclPipelineResources();
   if (resources == nullptr) return ncclSystemError;
   *resources = {};
-  resources->depth = depth;
+  resources->depth = kCocclPipelineMaxDepth;
 
   int leastPriority = 0;
   int greatestPriority = 0;
@@ -94,8 +95,7 @@ ncclResult_t createResources(int depth, cocclPipelineResources** output) {
       destroyResources(resources);
       return ncclUnhandledCudaError;
     }
-    for (int slice = 0; slice < depth; ++slice) {
-      if (phase == cocclPipelinePhaseUnpack && slice != depth - 1) continue;
+    for (int slice = 0; slice < resources->depth; ++slice) {
       cudaResult = cudaEventCreateWithFlags(
           &resources->events[phase][slice], cudaEventDisableTiming);
       if (cudaResult != cudaSuccess) {
@@ -122,7 +122,7 @@ ncclResult_t createResources(int depth, cocclPipelineResources** output) {
   return ncclSuccess;
 }
 
-ncclResult_t findOrCreateResources(ncclComm_t comm, int depth,
+ncclResult_t findOrCreateResources(ncclComm_t comm,
                                    cocclPipelineResources** output) {
   auto found = resourcesByComm.find(comm);
   if (found != resourcesByComm.end()) {
@@ -131,7 +131,8 @@ ncclResult_t findOrCreateResources(ncclComm_t comm, int depth,
   }
 
   cocclPipelineResources* resources = nullptr;
-  ncclResult_t result = createResources(depth, &resources);
+  // Auto slice selection may choose a different depth for each message.
+  ncclResult_t result = createResources(&resources);
   if (result == ncclSuccess) {
     resourcesByComm.emplace(comm, resources);
     *output = resources;
@@ -522,10 +523,16 @@ ncclResult_t runOverlap(const cocclPipelineContext& context,
 
 }  // namespace
 
-static ncclResult_t cocclRunPipelineWithDepth(
-    const cocclPipelineSpec* spec, int requestedDepth) {
+static ncclResult_t cocclRunPipelineWithLayout(
+    const cocclPipelineSpec* spec, int requestedDepth,
+    size_t targetSliceBytes, int maxDepth) {
   cocclPipelineContext context = {};
-  NCCLCHECK(cocclPreparePipeline(spec, requestedDepth, &context));
+  if (targetSliceBytes == 0) {
+    NCCLCHECK(cocclPreparePipeline(spec, requestedDepth, &context));
+  } else {
+    NCCLCHECK(cocclPreparePipelineForSlice(
+        spec, targetSliceBytes, maxDepth, &context));
+  }
   CUDACHECK(cudaSetDevice(spec->ownerComm->cudaDev));
 
   const bool framed = pipelineUsesFramedCompressor(spec);
@@ -567,8 +574,7 @@ static ncclResult_t cocclRunPipelineWithDepth(
     result = runSerial(context, workspace);
   } else {
     cocclPipelineResources* resources = nullptr;
-    result = findOrCreateResources(spec->ownerComm, context.depth,
-                                   &resources);
+    result = findOrCreateResources(spec->ownerComm, &resources);
     if (result == ncclSuccess) {
       context.stageContext.frameResources = &resources->frameResources;
       if (context.depth == 1) {
@@ -594,16 +600,27 @@ ncclResult_t cocclRunPipeline(const cocclPipelineSpec* spec) {
   const bool singleNode = spec->ownerComm->localRanks ==
       spec->ownerComm->nRanks;
   // Raw boundary copies cost more than slice overlap recovers on one node.
-  const int depth = singleNode && !pipelineUsesFramedCompressor(spec)
-      ? 1 : cocclGetConfig().pipeline.depth;
-  return cocclRunPipelineWithDepth(spec, depth);
+  const cocclPipelineConfig& config = cocclGetConfig().pipeline;
+  const bool serialFixedLayout =
+      singleNode && !pipelineUsesFramedCompressor(spec);
+  if (serialFixedLayout || !config.autoDepth) {
+    return cocclRunPipelineWithLayout(
+        spec, serialFixedLayout ? 1 : config.depth, 0,
+        kCocclPipelineMaxDepth);
+  }
+  const cocclPipelineTuningDecision tuning =
+      cocclAutotunePipelineLayout(spec);
+  return cocclRunPipelineWithLayout(
+      spec, 1, tuning.targetSliceBytes, tuning.maxDepth);
 }
 
 ncclResult_t cocclRunPipelineSerial(const cocclPipelineSpec* spec) {
-  return cocclRunPipelineWithDepth(spec, 1);
+  return cocclRunPipelineWithLayout(
+      spec, 1, 0, kCocclPipelineMaxDepth);
 }
 
 ncclResult_t cocclPipelineCommDestroy(ncclComm_t comm) {
+  cocclAutotunePipelineCommDestroy(comm);
   auto found = resourcesByComm.find(comm);
   if (found != resourcesByComm.end()) {
     cocclPipelineResources* resources = found->second;

@@ -1,4 +1,5 @@
 #include "core/tuning/coccl_autotune_internal.h"
+#include "core/tuning/coccl_autotune_pipeline.h"
 
 #include <cmath>
 #include <cstdio>
@@ -256,12 +257,24 @@ void testCostModel() {
                   "PASS"});
 }
 
+void testPipelineDepthSelection() {
+  if (cocclPipelineDepthForSlice(32ULL << 20, 32ULL << 20) != 1 ||
+      cocclPipelineDepthForSlice(64ULL << 20, 32ULL << 20) != 2 ||
+      cocclPipelineDepthForSlice(96ULL << 20, 32ULL << 20) != 3 ||
+      cocclPipelineDepthForSlice(1ULL << 30, 32ULL << 20, 16) != 16) {
+    fail("pipeline target-slice depth mismatch");
+  }
+  rows.push_back({"pipeline_slice_candidates", "target;cap", "slice-size",
+                  1, 0, "PASS"});
+}
+
 }  // namespace
 
 int main() {
   testEligibilityAndFallback();
   testModelSelection();
   testCostModel();
+  testPipelineDepthSelection();
 
   std::printf("scenario,eligible_candidates,selected_algorithm,used_model,forced_fallback,status\n");
   for (const ResultRow& row : rows) {

@@ -1,6 +1,7 @@
 #include "coccl_autotune_internal.h"
 
 #include "core/config/coccl_config.h"
+#include "core/runtime/coccl_comm.h"
 #include "comm.h"
 #include "core/compression/compress.h"
 #include "debug.h"
@@ -89,6 +90,16 @@ bool hasFusedDr(void* compressor) {
       compressor, cocclCompressorCapabilityDecompressReduce);
 }
 
+bool usesFramedCompressor(const cocclPreparedCall& prepared) {
+  for (void* compressor : prepared.compressors.handles) {
+    if (compressor != nullptr && cocclCompressorSupports(
+            compressor, cocclCompressorCapabilityFramed)) {
+      return true;
+    }
+  }
+  return false;
+}
+
 ncclResult_t selectCandidate(cocclPreparedCall* prepared) {
   const cocclInfo& info = prepared->info;
   ncclComm_t comm = info.comm;
@@ -114,11 +125,17 @@ ncclResult_t selectCandidate(cocclPreparedCall* prepared) {
       requested == cocclAlgorithmNone && config.enabled;
 
   if (scoreCandidates) {
+    cocclHierarchicalComms hierarchy = {comm, comm, comm};
+    if (comm->nNodes > 1 && comm->localRanks > 1) {
+      NCCLCHECK(cocclCommGetHierarchicalComms(comm, &hierarchy));
+    }
     cocclCodecModel defaultCodecModel;
     cocclCodecModel intraCodecModel;
     cocclCodecModel interCodecModel;
     const cocclSelectionPerformanceModel performance =
         cocclAutotuneSnapshotPerformanceModel(
+            comm, hierarchy.intraComm, hierarchy.interComm, comm);
+    cocclAutotuneSnapshotCodecModels(
             prepared->compressors.get(cocclCompressionScope::Default),
             prepared->compressors.get(cocclCompressionScope::Intra),
             prepared->compressors.get(cocclCompressionScope::Inter),
@@ -153,8 +170,20 @@ ncclResult_t selectCandidate(cocclPreparedCall* prepared) {
     }
   }
 
-  const cocclAutotuneDecision decision = cocclAutotuneChooseCandidate(
+  cocclAutotuneDecision decision = cocclAutotuneChooseCandidate(
       candidates, requested, config.enabled);
+  if (requested == cocclAlgorithmNone && config.enabled &&
+      !decision.usedModel && info.operation == cocclOperation::AllReduce &&
+      usesFramedCompressor(*prepared)) {
+    constexpr double kFramedOneShotMaxBytes = double(size_t{2} << 30);
+    const cocclAlgorithmKind fallback =
+        messageBytes(*prepared) <= kFramedOneShotMaxBytes
+        ? cocclAlgorithmAllReduceOneShot
+        : cocclAlgorithmAllReduceTwoShot;
+    const cocclAutotuneCandidate* candidate =
+        cocclAutotuneFindCandidate(candidates, fallback);
+    decision.candidate = candidate->spec;
+  }
   if (decision.candidate == nullptr) return ncclInvalidArgument;
   if (decision.forcedFallback) warnForcedFallback(info.operation);
 

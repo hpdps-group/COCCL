@@ -80,6 +80,13 @@ bool tunableReduction(cocclOperation operation) {
       operation == cocclOperation::AllReduce;
 }
 
+void ensureAutotuneModels(ncclComm_t comm) {
+  const ncclResult_t result = cocclAutotuneEnsureGlobalModels(comm);
+  if (result != ncclSuccess && comm->rank == 0) {
+    WARN("COCCL autotune profiling failed with %d; using heuristics", result);
+  }
+}
+
 bool sendRecvForward(const cocclInfo& info) {
   return info.func == ncclFuncSend
       ? info.comm->rank < info.peer
@@ -216,8 +223,10 @@ ncclResult_t cocclEnqueueCheck(const cocclInfo* info, bool* isEnqueued) {
   if (bytes <= prepared.compressors.thresholdBytes) {
     return routeNativeGroupedSendRecv(*info, isEnqueued);
   }
+  ensureAutotuneModels(info->comm);
   if (tunableReduction(info->operation)) {
-    if (cocclSelectAlgorithm(&prepared) != ncclSuccess) {
+    if (ncclGroupDepth == 0 &&
+        cocclSelectAlgorithm(&prepared) != ncclSuccess) {
       return routeNativeGroupedSendRecv(*info, isEnqueued);
     }
   } else if (!cocclPreparedAlgorithmSupported(
@@ -244,16 +253,19 @@ ncclResult_t cocclEnqueueExplicitCall(
 
   cocclPreparedCall prepared;
   NCCLCHECK(prepareCall(*info, descriptor, &prepared));
+  ensureAutotuneModels(info->comm);
   prepared.algorithm = algorithm;
-  if (algorithm == cocclAlgorithmNone &&
+  const bool deferSelection = ncclGroupDepth > 0 &&
+      algorithm == cocclAlgorithmNone && tunableReduction(info->operation);
+  if (!deferSelection && algorithm == cocclAlgorithmNone &&
       tunableReduction(info->operation)) {
     NCCLCHECK(cocclSelectAlgorithm(&prepared));
   }
-  if (!cocclPreparedAlgorithmHasCompression(
+  if (!deferSelection && !cocclPreparedAlgorithmHasCompression(
           &prepared, prepared.algorithm)) {
     return ncclInvalidUsage;
   }
-  if (!cocclPreparedAlgorithmSupported(
+  if (!deferSelection && !cocclPreparedAlgorithmSupported(
           &prepared, prepared.algorithm)) {
     return cocclReplayNativeCall(*info);
   }
@@ -307,6 +319,14 @@ ncclResult_t cocclExecutePreparedCall(const cocclPreparedCall* prepared) {
   if (prepared == nullptr || prepared->descriptor == nullptr ||
       !prepared->compressors.anyEnabled()) {
     return ncclInvalidArgument;
+  }
+
+  cocclPreparedCall selected;
+  if (prepared->algorithm == cocclAlgorithmNone &&
+      tunableReduction(prepared->info.operation)) {
+    selected = *prepared;
+    NCCLCHECK(cocclSelectAlgorithm(&selected));
+    prepared = &selected;
   }
 
   const cocclInfo& info = prepared->info;
