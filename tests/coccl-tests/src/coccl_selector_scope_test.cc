@@ -168,6 +168,12 @@ int main() {
   interModel.valid = true;
 
   framedCompressor = true;
+  interModel.valid = false;
+  prepared = makePrepared(&comm, cocclOperation::AllReduce);
+  setScope(&prepared, cocclCompressionScope::Inter, kInter);
+  checkSelection(&prepared, cocclAlgorithmAllReduceTripleShot, false);
+  interModel.valid = true;
+
   defaultModel.valid = false;
   prepared = makePrepared(&comm, cocclOperation::AllReduce);
   prepared.info.count = (size_t{2} << 30) / sizeof(float);

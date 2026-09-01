@@ -186,7 +186,7 @@ ncclResult_t selectCandidate(cocclPreparedCall* prepared) {
         : cocclAlgorithmAllReduceTwoShot;
     const cocclAutotuneCandidate* candidate =
         cocclAutotuneFindCandidate(candidates, fallback);
-    decision.candidate = candidate->spec;
+    if (candidate != nullptr) decision.candidate = candidate->spec;
   }
   if (decision.candidate == nullptr) return ncclInvalidArgument;
   if (decision.forcedFallback) warnForcedFallback(info.operation);

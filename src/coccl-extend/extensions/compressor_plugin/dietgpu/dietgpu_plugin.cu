@@ -125,6 +125,13 @@ unsigned int rawFrameGrid(size_t frames) {
       ? frames : (size_t)kMaxBatchFrames);
 }
 
+unsigned int finalizeBlocksPerFrame(size_t frameBytes) {
+  constexpr size_t kBytesPerBlock = 2048;
+  constexpr size_t kMaxBlocks = 8192;
+  const size_t blocks = (frameBytes - 1) / kBytesPerBlock + 1;
+  return (unsigned int)(blocks < kMaxBlocks ? blocks : kMaxBlocks);
+}
+
 __global__ void markRawFrames(
     cocclCompressorFrameMetadata* metadata, size_t frameBytes,
     size_t frames) {
@@ -141,7 +148,7 @@ __global__ void finalizeFrames(
     const uint32_t* candidateBytes, uint8_t* output, size_t outputStride,
     cocclCompressorFrameMetadata* metadata, size_t frameBytes,
     size_t frames, bool useCandidate) {
-  for (size_t frame = blockIdx.x; frame < frames; frame += gridDim.x) {
+  for (size_t frame = blockIdx.y; frame < frames; frame += gridDim.y) {
     const uint32_t encodedBytes =
         useCandidate ? candidateBytes[frame] : UINT32_MAX;
     const bool encoded = encodedBytes > 0 && encodedBytes < frameBytes;
@@ -150,11 +157,11 @@ __global__ void finalizeFrames(
         ? candidate + frame * candidateStride
         : input + frame * inputStride;
     uint8_t* destination = output + frame * outputStride;
-    for (size_t offset = threadIdx.x; offset < copyBytes;
-         offset += blockDim.x) {
+    for (size_t offset = (size_t)blockIdx.x * blockDim.x + threadIdx.x;
+         offset < copyBytes; offset += (size_t)gridDim.x * blockDim.x) {
       destination[offset] = source[offset];
     }
-    if (threadIdx.x == 0) {
+    if (blockIdx.x == 0 && threadIdx.x == 0) {
       metadata[frame] = {
           copyBytes,
           encoded ? cocclCompressorFrameEncoded : cocclCompressorFrameRaw,
@@ -236,7 +243,6 @@ struct DietGpuCompressor {
         outputBytes > output.capacityBytes()) {
       return ncclInvalidArgument;
     }
-    const dim3 grid(rawFrameGrid(input.chunks()));
     constexpr int kThreads = 256;
     if (!ansShapeSupported(input, frameBytes) ||
         !encodedFramesAligned(output)) {
@@ -288,7 +294,9 @@ struct DietGpuCompressor {
         stack, dietgpu::ANSCodecConfig(config.probBits, false), frames,
         input.data(), rawFrameBytes, rawFrameBytes, nullptr, candidate,
         candidateStride, sizes, context.stream());
-    finalizeFrames<<<grid, kThreads, 0, context.stream()>>>(
+    const dim3 finalizeGrid(
+        finalizeBlocksPerFrame(frameBytes), (unsigned int)input.chunks());
+    finalizeFrames<<<finalizeGrid, kThreads, 0, context.stream()>>>(
         static_cast<const uint8_t*>(input.data()), frameBytes,
         static_cast<const uint8_t*>(candidate), candidateStride, sizes,
         static_cast<uint8_t*>(output.data()), output.frameStrideBytes(),
