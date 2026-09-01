@@ -99,6 +99,29 @@ void checkDepth(ncclComm_t comm, int depth) {
   }
 }
 
+void checkTargetSlice(ncclComm_t comm) {
+  const cocclPipelineStage stages[] = {
+      cocclPipelineCompress(reinterpret_cast<void*>(0x1)),
+      cocclPipelineAllToAll(comm), cocclPipelineDecompress()};
+  cocclPipelineContext context = {};
+
+  cocclPipelineSpec tail = makeSpec(comm, 100ULL << 20, false, stages);
+  EXPECT(cocclPreparePipelineForSlice(
+             &tail, 32ULL << 20, 16, &context) == ncclSuccess);
+  EXPECT(context.depth == 4);
+  EXPECT(context.slices[0].bytes == 8ULL << 20);
+  EXPECT(context.slices[1].bytes == 8ULL << 20);
+  EXPECT(context.slices[2].bytes == 8ULL << 20);
+  EXPECT(context.slices[3].bytes == 1ULL << 20);
+
+  cocclPipelineSpec capped = makeSpec(comm, 1ULL << 30, false, stages);
+  EXPECT(cocclPreparePipelineForSlice(
+             &capped, 32ULL << 20, 16, &context) == ncclSuccess);
+  EXPECT(context.depth == 16);
+  EXPECT(context.slices[0].bytes == 16ULL << 20);
+  EXPECT(context.slices[15].bytes == 16ULL << 20);
+}
+
 void dumpPlans(ncclComm_t comm) {
   const cocclPipelineStage stages[] = {
       cocclPipelineCompress(reinterpret_cast<void*>(0x1)), cocclPipelineAllToAll(comm),
@@ -151,6 +174,7 @@ int main(int argc, char** argv) {
   checkDepth(&comm, 2);
   checkDepth(&comm, 4);
   checkDepth(&comm, 8);
+  checkTargetSlice(&comm);
 
   const cocclPipelineStage stages[] = {
       cocclPipelineCompress(reinterpret_cast<void*>(0x1)), cocclPipelineAllToAll(&comm),

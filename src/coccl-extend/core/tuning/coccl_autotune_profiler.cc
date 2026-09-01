@@ -592,6 +592,15 @@ void cocclAutotuneSnapshotCodecModels(
   pthread_mutex_unlock(&cocclAutotuneLock);
 }
 
+cocclCodecModel cocclAutotuneSnapshotCodecModel(
+    void* compressor, ncclDataType_t datatype) {
+  cocclCodecModel model;
+  pthread_mutex_lock(&cocclAutotuneLock);
+  copyCompressorModelLocked(compressor, datatype, &model);
+  pthread_mutex_unlock(&cocclAutotuneLock);
+  return model;
+}
+
 ncclResult_t cocclAutotuneRegisterEnabledCompressor(
     void* compressor, cocclPolicyKey policy) {
   pthread_mutex_lock(&cocclAutotuneLock);

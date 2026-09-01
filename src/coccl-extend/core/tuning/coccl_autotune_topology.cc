@@ -27,6 +27,9 @@ struct TopologyModelKey {
 
 thread_local std::map<TopologyModelKey, cocclSelectionPerformanceModel>
     topologyModels;
+thread_local std::map<
+    std::pair<ncclComm_t, cocclAutotuneTopologyOperation>, cocclLinearModel>
+    topologyStageModels;
 
 std::vector<size_t> topologySampleSizes() {
   const cocclAutotuneConfig& config = cocclGetConfig().autotune;
@@ -82,6 +85,39 @@ double allGatherEstimate(ncclComm_t comm, size_t bytes, bool symmetric) {
   return result.timeUs;
 }
 
+double reduceScatterEstimate(ncclComm_t comm, size_t bytes) {
+  if (comm == nullptr || comm->nRanks <= 1) return 0.0;
+
+  ncclTuningInput_t input = {};
+  input.comm = comm;
+  input.tuningMask = NCCL_TUNING_MASK_GENERAL_KERNELS |
+      NCCL_TUNING_MASK_SYM_KERNELS;
+  input.func = ncclFuncReduceScatter;
+  input.redOp = ncclSum;
+  input.devRedOp = ncclDevSum;
+  input.datatype = ncclInt8;
+  input.count = bytes / (size_t)comm->nRanks;
+  input.countMax = input.count;
+  input.nBytes = bytes;
+  input.numPipeOps = 1;
+  input.nWorks = 1;
+  input.winRegType = ncclSymSendRegRecvReg;
+  input.regBuff = 1;
+  input.collNetSupport = comm->config.collnetEnable;
+  input.nvlsSupport = comm->nvlsSupport;
+  input.symAligned16B = true;
+  input.minCTAs = comm->config.minCTAs;
+  input.maxCTAs = comm->config.maxCTAs;
+  input.CTAPolicy = comm->config.CTAPolicy;
+
+  ncclTuningResult_t result = NCCL_TUNING_RESULT_INIT;
+  if (ncclTuningCompute(&input, &result) != ncclSuccess ||
+      !result.valid || !(result.timeUs > 0.0f)) {
+    return 0.0;
+  }
+  return result.timeUs;
+}
+
 double p2pEstimate(ncclComm_t comm, size_t bytes, int peers) {
   // NCCL has no valid Send/Recv entry in ncclTuningCompute. Reuse its
   // initialized P2P channel plan and Ring link model instead.
@@ -108,6 +144,7 @@ enum class TopologyOperation {
   P2p,
   AllGather,
   AllToAll,
+  ReduceScatter,
 };
 
 cocclLinearModel fitTopologyModel(ncclComm_t comm,
@@ -120,18 +157,32 @@ cocclLinearModel fitTopologyModel(ncclComm_t comm,
       timeUs = p2pEstimate(comm, bytes, 1);
     } else if (operation == TopologyOperation::AllGather) {
       timeUs = allGatherEstimate(comm, bytes, true);
-    } else {
+    } else if (operation == TopologyOperation::AllToAll) {
       // Host AllToAll schedules every non-self peer over the shared P2P
       // channels. Model its per-rank wire volume and available concurrency.
       const int peers = std::max(1, comm->nRanks - 1);
       const size_t wireBytes = bytes * (size_t)peers /
           (size_t)comm->nRanks;
       timeUs = p2pEstimate(comm, wireBytes, peers);
+    } else {
+      timeUs = reduceScatterEstimate(comm, bytes);
     }
     if (!(timeUs > 0.0)) return {};
     points.push_back({(double)bytes, timeUs});
   }
   return cocclAutotuneFitLinearModel(points);
+}
+
+TopologyOperation topologyOperation(cocclAutotuneTopologyOperation operation) {
+  switch (operation) {
+    case cocclAutotuneTopologyOperation::AllGather:
+      return TopologyOperation::AllGather;
+    case cocclAutotuneTopologyOperation::AllToAll:
+      return TopologyOperation::AllToAll;
+    case cocclAutotuneTopologyOperation::ReduceScatter:
+      return TopologyOperation::ReduceScatter;
+  }
+  __builtin_unreachable();
 }
 
 cocclSelectionPerformanceModel buildTopologyModel(
@@ -159,10 +210,26 @@ cocclSelectionPerformanceModel cocclAutotuneSnapshotPerformanceModel(
   return found->second;
 }
 
+cocclLinearModel cocclAutotuneSnapshotTopologyStageModel(
+    ncclComm_t comm, cocclAutotuneTopologyOperation operation) {
+  const auto key = std::make_pair(comm, operation);
+  auto found = topologyStageModels.find(key);
+  if (found == topologyStageModels.end()) {
+    found = topologyStageModels.emplace(
+        key, fitTopologyModel(comm, topologyOperation(operation))).first;
+  }
+  return found->second;
+}
+
 void cocclAutotuneTopologyCommDestroy(ncclComm_t comm) {
   for (auto item = topologyModels.begin(); item != topologyModels.end();) {
     const TopologyModelKey& key = item->first;
     item = key.owner == comm ? topologyModels.erase(item)
                              : std::next(item);
+  }
+  for (auto item = topologyStageModels.begin();
+       item != topologyStageModels.end();) {
+    item = item->first.first == comm ? topologyStageModels.erase(item)
+                                     : std::next(item);
   }
 }

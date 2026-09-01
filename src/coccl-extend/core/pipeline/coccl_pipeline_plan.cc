@@ -5,6 +5,8 @@
 #include "comm.h"
 #include "core/compression/compress.h"
 
+#include <algorithm>
+
 namespace {
 
 struct cocclPipelinePlannedEdge {
@@ -450,9 +452,11 @@ ncclResult_t cocclPipelineStageOutputChunks(
   __builtin_unreachable();
 }
 
-ncclResult_t cocclPreparePipeline(const cocclPipelineSpec* spec,
-                                  int requestedDepth,
-                                  cocclPipelineContext* context) {
+static ncclResult_t preparePipeline(const cocclPipelineSpec* spec,
+                                    int requestedDepth,
+                                    size_t targetSliceBytes,
+                                    int maxDepth,
+                                    cocclPipelineContext* context) {
   if (spec == nullptr || context == nullptr || spec->input == nullptr ||
       spec->output == nullptr || spec->ownerComm == nullptr ||
       spec->rawChunkCount == 0 || spec->inputChunks == 0 ||
@@ -466,17 +470,29 @@ ncclResult_t cocclPreparePipeline(const cocclPipelineSpec* spec,
 
   *context = {};
   context->spec = spec;
-  context->depth = requestedDepth > 1 ? requestedDepth : 1;
-  if (context->depth > kCocclPipelineMaxDepth) {
-    context->depth = 1;
-  } else if (spec->rawChunkCount < (size_t)context->depth) {
-    context->depth = (int)spec->rawChunkCount;
-  }
-
   if (!cocclPipelineCheckedMultiply(
           spec->rawChunkCount, (size_t)typeBytes,
           &context->stageContext.rawChunkBytes)) {
     return ncclInvalidArgument;
+  }
+
+  context->depth = requestedDepth > 1 ? requestedDepth : 1;
+  if (targetSliceBytes != 0) {
+    size_t totalBytes = 0;
+    if (!cocclPipelineCheckedMultiply(
+            context->stageContext.rawChunkBytes, spec->inputChunks,
+            &totalBytes)) {
+      return ncclInvalidArgument;
+    }
+    context->depth = (int)std::min<size_t>(
+        (size_t)maxDepth,
+        totalBytes / targetSliceBytes +
+            (totalBytes % targetSliceBytes != 0));
+  } else if (context->depth > kCocclPipelineMaxDepth) {
+    context->depth = 1;
+  }
+  if (spec->rawChunkCount < (size_t)context->depth) {
+    context->depth = (int)spec->rawChunkCount;
   }
 
   size_t stageChunks[kCocclPipelineExplicitStages] = {};
@@ -495,11 +511,29 @@ ncclResult_t cocclPreparePipeline(const cocclPipelineSpec* spec,
 
   const size_t alignmentElements =
       kCocclPipelineSliceAlignment / (size_t)typeBytes;
-  size_t regularSliceCount =
-      spec->rawChunkCount / (size_t)context->depth;
-  if (context->depth > 1) {
-    regularSliceCount =
-        regularSliceCount / alignmentElements * alignmentElements;
+  size_t regularSliceCount = spec->rawChunkCount;
+  if (context->depth > 1 && targetSliceBytes != 0) {
+    regularSliceCount = targetSliceBytes / spec->inputChunks /
+        (size_t)typeBytes;
+    regularSliceCount = regularSliceCount / alignmentElements *
+        alignmentElements;
+    if (regularSliceCount == 0) regularSliceCount = alignmentElements;
+    size_t derivedDepth = spec->rawChunkCount / regularSliceCount +
+        (spec->rawChunkCount % regularSliceCount != 0);
+    if (derivedDepth > (size_t)context->depth) {
+      regularSliceCount = spec->rawChunkCount / (size_t)context->depth +
+          (spec->rawChunkCount % (size_t)context->depth != 0);
+      regularSliceCount =
+          (regularSliceCount + alignmentElements - 1) /
+          alignmentElements * alignmentElements;
+      derivedDepth = spec->rawChunkCount / regularSliceCount +
+          (spec->rawChunkCount % regularSliceCount != 0);
+    }
+    context->depth = (int)derivedDepth;
+  } else if (context->depth > 1) {
+    regularSliceCount = spec->rawChunkCount / (size_t)context->depth;
+    regularSliceCount = regularSliceCount / alignmentElements *
+        alignmentElements;
     if (regularSliceCount == 0) {
       context->depth = 1;
       regularSliceCount = spec->rawChunkCount;
@@ -573,4 +607,17 @@ ncclResult_t cocclPreparePipeline(const cocclPipelineSpec* spec,
     }
   }
   return cocclPlanPipelineWorkspace(&context->plan, context->depth);
+}
+
+ncclResult_t cocclPreparePipeline(const cocclPipelineSpec* spec,
+                                  int requestedDepth,
+                                  cocclPipelineContext* context) {
+  return preparePipeline(
+      spec, requestedDepth, 0, kCocclPipelineMaxDepth, context);
+}
+
+ncclResult_t cocclPreparePipelineForSlice(
+    const cocclPipelineSpec* spec, size_t targetSliceBytes, int maxDepth,
+    cocclPipelineContext* context) {
+  return preparePipeline(spec, 1, targetSliceBytes, maxDepth, context);
 }

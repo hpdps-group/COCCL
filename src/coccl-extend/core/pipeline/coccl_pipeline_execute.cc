@@ -5,7 +5,7 @@
 #include "core/memory/coccl_buffer_management.h"
 #include "core/config/coccl_config.h"
 #include "core/pipeline/coccl_pipeline_internal.h"
-#include "core/pipeline/coccl_pipeline_depth.h"
+#include "core/tuning/coccl_autotune_pipeline.h"
 #include "comm.h"
 #include "core/compression/compress.h"
 #include "rma/rma.h"
@@ -577,10 +577,16 @@ ncclResult_t runOverlap(const cocclPipelineContext& context,
 
 }  // namespace
 
-static ncclResult_t cocclRunPipelineWithDepth(
-    const cocclPipelineSpec* spec, int requestedDepth) {
+static ncclResult_t cocclRunPipelineWithLayout(
+    const cocclPipelineSpec* spec, int requestedDepth,
+    size_t targetSliceBytes, int maxDepth) {
   cocclPipelineContext context = {};
-  NCCLCHECK(cocclPreparePipeline(spec, requestedDepth, &context));
+  if (targetSliceBytes == 0) {
+    NCCLCHECK(cocclPreparePipeline(spec, requestedDepth, &context));
+  } else {
+    NCCLCHECK(cocclPreparePipelineForSlice(
+        spec, targetSliceBytes, maxDepth, &context));
+  }
   CUDACHECK(cudaSetDevice(spec->ownerComm->cudaDev));
 
   const bool framed = pipelineUsesFramedCompressor(spec);
@@ -692,18 +698,24 @@ ncclResult_t cocclRunPipeline(const cocclPipelineSpec* spec) {
   const cocclPipelineConfig& config = cocclGetConfig().pipeline;
   const bool serialFixedLayout =
       singleNode && !pipelineUsesFramedCompressor(spec);
-  const int depth = serialFixedLayout
-      ? 1
-      : (config.autoDepth ? cocclAutotunePipelineDepth(spec) : config.depth);
-  return cocclRunPipelineWithDepth(spec, depth);
+  if (serialFixedLayout || !config.autoDepth) {
+    return cocclRunPipelineWithLayout(
+        spec, serialFixedLayout ? 1 : config.depth, 0,
+        kCocclPipelineMaxDepth);
+  }
+  const cocclPipelineTuningDecision tuning =
+      cocclAutotunePipelineLayout(spec);
+  return cocclRunPipelineWithLayout(
+      spec, 1, tuning.targetSliceBytes, tuning.maxDepth);
 }
 
 ncclResult_t cocclRunPipelineSerial(const cocclPipelineSpec* spec) {
-  return cocclRunPipelineWithDepth(spec, 1);
+  return cocclRunPipelineWithLayout(
+      spec, 1, 0, kCocclPipelineMaxDepth);
 }
 
 ncclResult_t cocclPipelineCommDestroy(ncclComm_t comm) {
-  cocclPipelineDepthCommDestroy(comm);
+  cocclAutotunePipelineCommDestroy(comm);
   auto found = resourcesByComm.find(comm);
   if (found != resourcesByComm.end()) {
     cocclPipelineResources* resources = found->second;

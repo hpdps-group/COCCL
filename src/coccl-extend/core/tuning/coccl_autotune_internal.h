@@ -138,6 +138,12 @@ struct cocclAutotuneCodecSet {
   bool fusedFlatDecompressReduce = false;
 };
 
+enum class cocclAutotuneTopologyOperation : uint8_t {
+  AllGather,
+  AllToAll,
+  ReduceScatter,
+};
+
 inline const cocclAutotuneCandidateSpec* cocclAutotuneFindCandidateSpec(
     cocclOperation operation, cocclAlgorithmKind algorithm) {
   for (const cocclAutotuneCandidateSpec& spec :
@@ -274,6 +280,10 @@ void cocclAutotuneSnapshotCodecModels(
     void* defaultCompressor, void* intraCompressor, void* interCompressor,
     ncclDataType_t datatype, cocclCodecModel* defaultModel,
     cocclCodecModel* intraModel, cocclCodecModel* interModel);
+cocclCodecModel cocclAutotuneSnapshotCodecModel(
+    void* compressor, ncclDataType_t datatype);
+cocclLinearModel cocclAutotuneSnapshotTopologyStageModel(
+    ncclComm_t comm, cocclAutotuneTopologyOperation operation);
 void cocclAutotuneTopologyCommDestroy(ncclComm_t comm);
 
 #endif

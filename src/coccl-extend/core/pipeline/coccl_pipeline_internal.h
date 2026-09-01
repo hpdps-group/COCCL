@@ -162,6 +162,9 @@ inline bool cocclAlignPipelineBytes(size_t bytes, size_t* aligned) {
 ncclResult_t cocclPreparePipeline(const cocclPipelineSpec* spec,
                                   int requestedDepth,
                                   cocclPipelineContext* context);
+ncclResult_t cocclPreparePipelineForSlice(
+    const cocclPipelineSpec* spec, size_t targetSliceBytes, int maxDepth,
+    cocclPipelineContext* context);
 ncclResult_t cocclPipelineUserBuffersRequireSerial(
     const void* input, size_t inputChunks, void* output, size_t outputChunks,
     size_t rawChunkBytes, int rank,

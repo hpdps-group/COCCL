@@ -4,6 +4,7 @@
 #include <mpi.h>
 #include <nccl.h>
 
+#include <algorithm>
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
@@ -37,6 +38,7 @@ struct Options {
   std::string algorithm;
   std::string path = "explicit";
   int depth = 1;
+  bool inPlace = false;
   size_t rawChunkElements = kRawChunkElements;
   size_t prewarmRawChunkElements = 0;
 };
@@ -88,6 +90,7 @@ Options parseOptions(int argc, char** argv, int worldRank) {
     else if (key == "--algorithm") options.algorithm = value;
     else if (key == "--path") options.path = value;
     else if (key == "--depth") options.depth = std::atoi(value.c_str());
+    else if (key == "--inplace") options.inPlace = std::atoi(value.c_str());
     else if (key == "--raw-chunk-elements") {
       options.rawChunkElements = std::strtoull(value.c_str(), nullptr, 10);
     }
@@ -348,6 +351,22 @@ void runCase(Operation operation, bool subAdd, ncclDataType_t datatype,
   CUDACHECK(cudaMalloc(&nativeOutput, outputBytes));
   CUDACHECK(cudaMalloc(&compressedOutput, outputBytes));
 
+  T* nativeInPlace = nullptr;
+  T* compressedInPlace = nullptr;
+  size_t inputOffset = 0;
+  size_t outputOffset = 0;
+  if (options.inPlace) {
+    if (operation == Operation::AllGather) {
+      inputOffset = (size_t)worldRank * inputCount;
+    } else if (operation == Operation::ReduceScatterOneShot ||
+               operation == Operation::ReduceScatterTwoShot) {
+      outputOffset = (size_t)worldRank * outputCount;
+    }
+    const size_t storageBytes = std::max(inputBytes, outputBytes);
+    CUDACHECK(cudaMalloc(&nativeInPlace, storageBytes));
+    CUDACHECK(cudaMalloc(&compressedInPlace, storageBytes));
+  }
+
   if (subAdd) {
     const std::vector<T> initial = makeInput<T>(worldRank, 0, inputCount);
     CUDACHECK(cudaMemcpyAsync(deviceInput, initial.data(), inputBytes,
@@ -361,28 +380,48 @@ void runCase(Operation operation, bool subAdd, ncclDataType_t datatype,
 
   const std::vector<T> input = makeInput<T>(
       worldRank, subAdd ? 1 : 0, inputCount);
-  CUDACHECK(cudaMemcpyAsync(deviceInput, input.data(), inputBytes,
-                            cudaMemcpyHostToDevice, nativeStream));
-  CUDACHECK(cudaMemsetAsync(
-      nativeOutput, 0, outputBytes, nativeStream));
-  CUDACHECK(cudaMemsetAsync(
-      compressedOutput, 0, outputBytes, compressedStream));
+  const T* nativeInput = deviceInput;
+  const T* compressedInput = deviceInput;
+  T* nativeResult = nativeOutput;
+  T* compressedResult = compressedOutput;
+  if (options.inPlace) {
+    const size_t storageBytes = std::max(inputBytes, outputBytes);
+    CUDACHECK(cudaMemsetAsync(nativeInPlace, 0, storageBytes, nativeStream));
+    CUDACHECK(cudaMemsetAsync(
+        compressedInPlace, 0, storageBytes, compressedStream));
+    CUDACHECK(cudaMemcpyAsync(nativeInPlace + inputOffset, input.data(),
+                              inputBytes, cudaMemcpyHostToDevice,
+                              nativeStream));
+    CUDACHECK(cudaMemcpyAsync(compressedInPlace + inputOffset, input.data(),
+                              inputBytes, cudaMemcpyHostToDevice,
+                              compressedStream));
+    nativeInput = nativeInPlace + inputOffset;
+    compressedInput = compressedInPlace + inputOffset;
+    nativeResult = nativeInPlace + outputOffset;
+    compressedResult = compressedInPlace + outputOffset;
+  } else {
+    CUDACHECK(cudaMemcpyAsync(deviceInput, input.data(), inputBytes,
+                              cudaMemcpyHostToDevice, nativeStream));
+    CUDACHECK(cudaMemsetAsync(nativeOutput, 0, outputBytes, nativeStream));
+    CUDACHECK(cudaMemsetAsync(
+        compressedOutput, 0, outputBytes, compressedStream));
+  }
 
   MPICHECK(MPI_Barrier(MPI_COMM_WORLD));
-  runNative(operation, deviceInput, nativeOutput, datatype, nativeComm,
+  runNative(operation, nativeInput, nativeResult, datatype, nativeComm,
             nativeStream, worldRank, worldSize, inputCount);
   CUDACHECK(cudaStreamSynchronize(nativeStream));
   MPICHECK(MPI_Barrier(MPI_COMM_WORLD));
-  runCompressed(operation, deviceInput, compressedOutput, datatype,
+  runCompressed(operation, compressedInput, compressedResult, datatype,
                 compressedComm, compressedStream, worldRank, worldSize,
                 inputCount, options.path == "auto");
   CUDACHECK(cudaStreamSynchronize(compressedStream));
 
   std::vector<T> nativeHost(outputCount);
   std::vector<T> compressedHost(outputCount);
-  CUDACHECK(cudaMemcpy(nativeHost.data(), nativeOutput, outputBytes,
+  CUDACHECK(cudaMemcpy(nativeHost.data(), nativeResult, outputBytes,
                        cudaMemcpyDeviceToHost));
-  CUDACHECK(cudaMemcpy(compressedHost.data(), compressedOutput, outputBytes,
+  CUDACHECK(cudaMemcpy(compressedHost.data(), compressedResult, outputBytes,
                        cudaMemcpyDeviceToHost));
 
   double localRelativeError = 0.0;
@@ -417,12 +456,14 @@ void runCase(Operation operation, bool subAdd, ncclDataType_t datatype,
     std::printf(
         "COCCL_CORRECTNESS topology=%s rank_count=%d operation=%s "
         "algorithm=%s compressor=%s path=%s dtype=%s depth=%d "
+        "inplace=%d "
         "raw_chunk_elements=%zu output_elements=%zu "
         "mean_relative_error=%.12e mean_absolute_error=%.12e "
         "relative_l1_error=%.12e max_absolute_error=%.12e\n",
         options.topology.c_str(), worldSize, operationName(operation),
         algorithmName(operation, subAdd), options.compressor.c_str(),
         options.path.c_str(), options.datatype.c_str(), options.depth,
+        options.inPlace ? 1 : 0,
         operation == Operation::AllGather || operation == Operation::SendRecv
             ? inputCount : inputCount / (size_t)worldSize,
         outputCount, meanRelativeError, meanAbsoluteError, relativeL1Error,
@@ -432,6 +473,8 @@ void runCase(Operation operation, bool subAdd, ncclDataType_t datatype,
 
   CUDACHECK(cudaFree(compressedOutput));
   CUDACHECK(cudaFree(nativeOutput));
+  CUDACHECK(cudaFree(compressedInPlace));
+  CUDACHECK(cudaFree(nativeInPlace));
   CUDACHECK(cudaFree(deviceInput));
 }
 

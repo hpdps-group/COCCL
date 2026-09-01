@@ -1,5 +1,5 @@
 #include "core/tuning/coccl_autotune_internal.h"
-#include "core/pipeline/coccl_pipeline_depth.h"
+#include "core/tuning/coccl_autotune_pipeline.h"
 
 #include <cmath>
 #include <cstdio>
@@ -258,14 +258,13 @@ void testCostModel() {
 }
 
 void testPipelineDepthSelection() {
-  if (cocclChoosePipelineDepthForBytes(32ULL << 20) != 1 ||
-      cocclChoosePipelineDepthForBytes(64ULL << 20) != 2 ||
-      cocclChoosePipelineDepthForBytes(128ULL << 20) != 4 ||
-      cocclChoosePipelineDepthForBytes(256ULL << 20) != 8 ||
-      cocclChoosePipelineDepthForBytes(1ULL << 30, 4) != 4) {
-    fail("pipeline depth working-set knee mismatch");
+  if (cocclPipelineDepthForSlice(32ULL << 20, 32ULL << 20) != 1 ||
+      cocclPipelineDepthForSlice(64ULL << 20, 32ULL << 20) != 2 ||
+      cocclPipelineDepthForSlice(96ULL << 20, 32ULL << 20) != 3 ||
+      cocclPipelineDepthForSlice(1ULL << 30, 32ULL << 20, 16) != 16) {
+    fail("pipeline target-slice depth mismatch");
   }
-  rows.push_back({"pipeline_depth_candidates", "1;2;4;8", "working-set",
+  rows.push_back({"pipeline_slice_candidates", "target;cap", "slice-size",
                   1, 0, "PASS"});
 }
 
