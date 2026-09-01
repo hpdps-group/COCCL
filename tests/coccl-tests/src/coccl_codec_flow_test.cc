@@ -81,6 +81,15 @@ ncclResult_t ncclDecompress(
   return ncclInternalError;
 }
 
+bool cocclCompressorSupports(void*, cocclCompressorCapability) {
+  return false;
+}
+
+bool cocclFrameMetadataValid(
+    const cocclCompressorFrameMetadata&, size_t) {
+  return true;
+}
+
 ncclResult_t ncclAlltoAllConfig(
     const void*, void*, size_t, ncclDataType_t, ncclComm_t, cudaStream_t,
     const ncclCollConfig_t*) {

@@ -118,7 +118,8 @@ double reduceScatterEstimate(ncclComm_t comm, size_t bytes) {
   return result.timeUs;
 }
 
-double p2pEstimate(ncclComm_t comm, size_t bytes, int peers) {
+double p2pEstimate(ncclComm_t comm, size_t bytes, int peers,
+                   bool interNode) {
   // NCCL has no valid Send/Recv entry in ncclTuningCompute. Reuse its
   // initialized P2P channel plan and Ring link model instead.
   const ncclTopoGraph& ring = comm->graphs[NCCL_ALGO_RING];
@@ -129,9 +130,12 @@ double p2pEstimate(ncclComm_t comm, size_t bytes, int peers) {
       1, (bytes + (size_t)comm->p2pChunkSize - 1) /
              (size_t)comm->p2pChunkSize);
   const int activeChannels = std::min<int>(scheduledChannels, (int)chunks);
-  const double channelBandwidth = comm->nNodes > 1
+  const double channelBandwidth = interNode
       ? ring.bwInter : ring.bwIntra;
-  const double bandwidth = channelBandwidth * (double)activeChannels;
+  const int effectiveChannels = interNode
+      ? std::max(1, activeChannels / comm->localRanks)
+      : activeChannels;
+  const double bandwidth = channelBandwidth * (double)effectiveChannels;
   const double collectiveLatency =
       comm->tuningContext.generalLatencies
           [ncclFuncAllGather][NCCL_ALGO_RING][NCCL_PROTO_SIMPLE];
@@ -141,7 +145,8 @@ double p2pEstimate(ncclComm_t comm, size_t bytes, int peers) {
 }
 
 enum class TopologyOperation {
-  P2p,
+  P2pIntra,
+  P2pInter,
   AllGather,
   AllToAll,
   ReduceScatter,
@@ -153,8 +158,10 @@ cocclLinearModel fitTopologyModel(ncclComm_t comm,
   if (comm == nullptr || comm->nRanks <= 1) return {};
   for (size_t bytes : topologySampleSizes()) {
     double timeUs = 0.0;
-    if (operation == TopologyOperation::P2p) {
-      timeUs = p2pEstimate(comm, bytes, 1);
+    if (operation == TopologyOperation::P2pIntra ||
+        operation == TopologyOperation::P2pInter) {
+      timeUs = p2pEstimate(
+          comm, bytes, 1, operation == TopologyOperation::P2pInter);
     } else if (operation == TopologyOperation::AllGather) {
       timeUs = allGatherEstimate(comm, bytes, true);
     } else if (operation == TopologyOperation::AllToAll) {
@@ -163,7 +170,7 @@ cocclLinearModel fitTopologyModel(ncclComm_t comm,
       const int peers = std::max(1, comm->nRanks - 1);
       const size_t wireBytes = bytes * (size_t)peers /
           (size_t)comm->nRanks;
-      timeUs = p2pEstimate(comm, wireBytes, peers);
+      timeUs = p2pEstimate(comm, wireBytes, peers, comm->nNodes > 1);
     } else {
       timeUs = reduceScatterEstimate(comm, bytes);
     }
@@ -175,6 +182,10 @@ cocclLinearModel fitTopologyModel(ncclComm_t comm,
 
 TopologyOperation topologyOperation(cocclAutotuneTopologyOperation operation) {
   switch (operation) {
+    case cocclAutotuneTopologyOperation::P2pIntra:
+      return TopologyOperation::P2pIntra;
+    case cocclAutotuneTopologyOperation::P2pInter:
+      return TopologyOperation::P2pInter;
     case cocclAutotuneTopologyOperation::AllGather:
       return TopologyOperation::AllGather;
     case cocclAutotuneTopologyOperation::AllToAll:
@@ -188,8 +199,10 @@ TopologyOperation topologyOperation(cocclAutotuneTopologyOperation operation) {
 cocclSelectionPerformanceModel buildTopologyModel(
     const TopologyModelKey& key) {
   cocclSelectionPerformanceModel model;
-  model.intraP2p = fitTopologyModel(key.intra, TopologyOperation::P2p);
-  model.interP2p = fitTopologyModel(key.inter, TopologyOperation::P2p);
+  model.intraP2p =
+      fitTopologyModel(key.intra, TopologyOperation::P2pIntra);
+  model.interP2p =
+      fitTopologyModel(key.inter, TopologyOperation::P2pInter);
   model.allGather =
       fitTopologyModel(key.gather, TopologyOperation::AllGather);
   model.allToAll =
@@ -217,6 +230,12 @@ cocclLinearModel cocclAutotuneSnapshotTopologyStageModel(
   if (found == topologyStageModels.end()) {
     found = topologyStageModels.emplace(
         key, fitTopologyModel(comm, topologyOperation(operation))).first;
+    if (comm->rank == 0) {
+      INFO(COCCL_TUNING,
+           "COCCL topology stage operation=%d valid=%d alpha_us=%g beta_us_per_byte=%g",
+           (int)operation, (int)found->second.valid,
+           found->second.alphaUs, found->second.betaUsPerByte);
+    }
   }
   return found->second;
 }

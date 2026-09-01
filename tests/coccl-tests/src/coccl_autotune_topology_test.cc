@@ -27,6 +27,7 @@ void initComm(ncclComm* comm, uint64_t id, int ranks, int nodes,
   comm->commHash = id;
   comm->nRanks = ranks;
   comm->nNodes = nodes;
+  comm->localRanks = ranks / nodes;
   comm->p2pnChannels = p2pChannels;
   comm->p2pnChannelsPerPeer = channelsPerPeer;
   comm->p2pChunkSize = 128 << 10;
@@ -38,7 +39,8 @@ void initComm(ncclComm* comm, uint64_t id, int ranks, int nodes,
       [ncclFuncAllGather][NCCL_ALGO_RING][NCCL_PROTO_SIMPLE] = 12.0f;
 }
 
-double expectedP2p(ncclComm_t comm, size_t bytes, int peers) {
+double expectedP2p(ncclComm_t comm, size_t bytes, int peers,
+                   bool interNode) {
   const int scheduled = std::max(
       1, std::min(comm->p2pnChannels,
                   comm->p2pnChannelsPerPeer * peers));
@@ -46,9 +48,11 @@ double expectedP2p(ncclComm_t comm, size_t bytes, int peers) {
       1, (bytes + (size_t)comm->p2pChunkSize - 1) /
              (size_t)comm->p2pChunkSize);
   const int active = std::min<int>(scheduled, (int)chunks);
+  const int effective = interNode
+      ? std::max(1, active / comm->localRanks) : active;
   const double bandwidth =
-      (comm->nNodes > 1 ? comm->graphs[NCCL_ALGO_RING].bwInter
-                        : comm->graphs[NCCL_ALGO_RING].bwIntra) * active;
+      (interNode ? comm->graphs[NCCL_ALGO_RING].bwInter
+                 : comm->graphs[NCCL_ALGO_RING].bwIntra) * effective;
   const double latency = 12.0 / std::max(1, comm->nRanks - 1);
   return latency + (double)bytes / (1000.0 * bandwidth);
 }
@@ -109,17 +113,34 @@ int main() {
 
   const size_t firstBytes = 1 << 20;
   if (!close(model.intraP2p.sampleTimeUs[0],
-             expectedP2p(&intra, firstBytes, 1)) ||
+             expectedP2p(&intra, firstBytes, 1, false)) ||
       !close(model.interP2p.sampleTimeUs[0],
-             expectedP2p(&inter, firstBytes, 1))) {
+             expectedP2p(&inter, firstBytes, 1, true))) {
     std::fprintf(stderr, "P2P model did not use intra/inter topology\n");
     return 1;
   }
   const size_t allToAllWireBytes =
       firstBytes * (size_t)(owner.nRanks - 1) / (size_t)owner.nRanks;
   if (!close(model.allToAll.sampleTimeUs[0],
-             expectedP2p(&owner, allToAllWireBytes, owner.nRanks - 1))) {
+             expectedP2p(
+                 &owner, allToAllWireBytes, owner.nRanks - 1, true))) {
     std::fprintf(stderr, "AllToAll model did not use owner topology\n");
+    return 1;
+  }
+
+  const cocclLinearModel ownerIntra =
+      cocclAutotuneSnapshotTopologyStageModel(
+          &owner, cocclAutotuneTopologyOperation::P2pIntra);
+  const cocclLinearModel ownerInter =
+      cocclAutotuneSnapshotTopologyStageModel(
+          &owner, cocclAutotuneTopologyOperation::P2pInter);
+  if (!close(ownerIntra.sampleTimeUs[0],
+             expectedP2p(&owner, firstBytes, 1, false)) ||
+      !close(ownerInter.sampleTimeUs[0],
+             expectedP2p(&owner, firstBytes, 1, true)) ||
+      close(ownerIntra.sampleTimeUs[0], ownerInter.sampleTimeUs[0])) {
+    std::fprintf(stderr,
+                 "same communicator did not distinguish local/remote P2P\n");
     return 1;
   }
 

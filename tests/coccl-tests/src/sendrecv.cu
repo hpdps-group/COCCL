@@ -7,6 +7,16 @@
 #include "cuda_runtime.h"
 #include "common.h"
 
+#include <stdlib.h>
+
+static int SendRecvPeer(int rank, int nranks, int direction) {
+  const char* crossNode = getenv("COCCL_SENDRECV_CROSS_NODE");
+  if (crossNode != nullptr && crossNode[0] == '1') {
+    return (rank + nranks / 2) % nranks;
+  }
+  return (rank + direction + nranks) % nranks;
+}
+
 void SendRecvGetCollByteCount(size_t *sendcount, size_t *recvcount, size_t *paramcount, size_t *sendInplaceOffset, size_t *recvInplaceOffset, size_t count, int nranks) {
   *sendcount = count;
   *recvcount = count;
@@ -26,7 +36,7 @@ testResult_t SendRecvInitData(struct threadArgs* args, ncclDataType_t type, nccl
     CUDACHECK(cudaMemset(args->recvbuffs[i], 0, args->expectedBytes));
     void* data = in_place ? args->recvbuffs[i] : args->sendbuffs[i];
     TESTCHECK(InitData(data, sendcount, rank*sendcount, type, ncclSum, rep, 1, 0));
-    int peer = (rank-1+nranks)%nranks;
+    int peer = SendRecvPeer(rank, nranks, -1);
     TESTCHECK(InitData(args->expected[i], recvcount, peer*recvcount, type, ncclSum, rep, 1, 0));
     CUDACHECK(cudaDeviceSynchronize());
   }
@@ -48,8 +58,8 @@ testResult_t SendRecvRunColl(void* sendbuff, void* recvbuff, size_t count, ncclD
   NCCLCHECK(ncclCommCount(comm, &nRanks));
   int rank;
   NCCLCHECK(ncclCommUserRank(comm, &rank));
-  int recvPeer = (rank-1+nRanks) % nRanks;
-  int sendPeer = (rank+1) % nRanks;
+  int recvPeer = SendRecvPeer(rank, nRanks, -1);
+  int sendPeer = SendRecvPeer(rank, nRanks, 1);
 
   NCCLCHECK(ncclGroupStart());
   

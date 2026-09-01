@@ -18,6 +18,12 @@ enum cocclPipelineStageKind {
   // them in their explicit stage arrays.
   cocclPipelineStagePack = 7,
   cocclPipelineStageUnpack = 8,
+  cocclPipelineStageSendRecv = 9,
+};
+
+enum cocclPipelineSendRecvDirection {
+  cocclPipelineSend = 0,
+  cocclPipelineRecv = 1,
 };
 
 // The planner preserves overlap only when user buffers match the primitive's
@@ -40,6 +46,8 @@ struct cocclPipelineStage {
   size_t reduceChunks;
   void* compressor;
   const ncclCollConfig_t* config;
+  int peer = -1;
+  cocclPipelineSendRecvDirection direction = cocclPipelineSend;
 };
 
 static inline cocclPipelineStage cocclPipelineCompress(void* compressor) {
@@ -85,6 +93,13 @@ static inline cocclPipelineStage cocclPipelineUnpack() {
   return {cocclPipelineStageUnpack, nullptr, 0, nullptr, nullptr};
 }
 
+static inline cocclPipelineStage cocclPipelineSendRecv(
+    ncclComm_t comm, int peer, cocclPipelineSendRecvDirection direction,
+    void* compressor) {
+  return {cocclPipelineStageSendRecv, comm, 0, compressor, nullptr,
+          peer, direction};
+}
+
 // rawChunkCount is the unsliced element count in one rank chunk.
 // inputChunks is the number of rank chunks entering the pipeline.
 struct cocclPipelineSpec {
@@ -104,6 +119,8 @@ struct cocclPipelineSpec {
 };
 
 ncclResult_t cocclRunPipeline(const cocclPipelineSpec* spec);
+ncclResult_t cocclRunPipelineBatch(
+    const cocclPipelineSpec* specs, size_t count);
 ncclResult_t cocclRunPipelineSerial(const cocclPipelineSpec* spec);
 ncclResult_t cocclPipelineCommDestroy(ncclComm_t comm);
 

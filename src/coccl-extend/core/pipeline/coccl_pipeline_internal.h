@@ -6,10 +6,10 @@
 #include "core/pipeline/coccl_frame_exchange.h"
 #include "core/pipeline/coccl_pipeline.h"
 
-constexpr int kCocclPipelineExplicitStages = 7;
-constexpr int kCocclPipelinePhysicalStages = 9;
-constexpr int kCocclPipelineStageKindCount = 9;
-constexpr int kCocclPipelineMaxTemps = 8;
+constexpr int kCocclPipelineExplicitStages = 8;
+constexpr int kCocclPipelinePhysicalStages = 10;
+constexpr int kCocclPipelineStageKindCount = 10;
+constexpr int kCocclPipelineMaxTemps = 9;
 constexpr int kCocclPipelineMaxDepth = 16;
 constexpr int kCocclPipelineRawRingSlots = 2;
 constexpr size_t kCocclPipelineSliceAlignment = 16;
@@ -74,6 +74,7 @@ enum cocclPipelineTempRole {
   cocclPipelineTempDecompReduceCompOutput,
   cocclPipelineTempDecompressReduceOutput,
   cocclPipelineTempReduceScatterOutput,
+  cocclPipelineTempSendRecvOutput,
   cocclPipelineTempOutputStaging,
 };
 

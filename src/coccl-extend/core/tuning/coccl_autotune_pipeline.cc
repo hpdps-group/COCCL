@@ -21,8 +21,13 @@ constexpr int kMaxStageTerms = 3;
 constexpr double kLayoutAlphaUs = 4.0;
 constexpr double kLayoutBetaUsPerByte = 1.16e-6;
 constexpr double kReductionBetaUsPerByte = 5.0e-7;
+constexpr double kSendRecvMetadataAlphaUs = 6.0;
 constexpr size_t kEfficientElements = size_t{16} << 20;
 constexpr size_t kFramedTargetSliceBytes = size_t{32} << 20;
+constexpr size_t kFramedSendRecvMinPipelineBytes = size_t{32} << 20;
+constexpr size_t kFramedSendRecvMinSliceBytes = size_t{16} << 20;
+constexpr size_t kFramedSendRecvTargetSliceBytes = size_t{128} << 20;
+constexpr size_t kFixedSendRecvMinPipelineBytes = size_t{512} << 20;
 
 enum class StageResource : uint8_t {
   Layout,
@@ -166,6 +171,12 @@ cocclLinearModel communicationModel(const cocclPipelineStage& stage) {
     case cocclPipelineStageReduceScatter:
       return cocclAutotuneSnapshotTopologyStageModel(
           stage.comm, cocclAutotuneTopologyOperation::ReduceScatter);
+    case cocclPipelineStageSendRecv:
+      return cocclAutotuneSnapshotTopologyStageModel(
+          stage.comm,
+          stage.comm->rankToNode[stage.peer] == stage.comm->node
+              ? cocclAutotuneTopologyOperation::P2pIntra
+              : cocclAutotuneTopologyOperation::P2pInter);
     default:
       __builtin_unreachable();
   }
@@ -173,11 +184,17 @@ cocclLinearModel communicationModel(const cocclPipelineStage& stage) {
 
 StageGraph buildStageGraph(const cocclPipelineSpec* spec) {
   StageGraph graph;
-  cocclAutotuneStageModel pack = {
-      cocclPipelineStagePack, StageResource::Layout};
-  addTerm(&pack, fixedModel(kLayoutAlphaUs, kLayoutBetaUsPerByte), 1.0,
-          &graph);
-  addStage(pack, &graph);
+  bool sendRecv = false;
+  for (int index = 0; index < spec->stageCount; ++index) {
+    sendRecv |= spec->stages[index].kind == cocclPipelineStageSendRecv;
+  }
+  if (!sendRecv) {
+    cocclAutotuneStageModel pack = {
+        cocclPipelineStagePack, StageResource::Layout};
+    addTerm(&pack, fixedModel(kLayoutAlphaUs, kLayoutBetaUsPerByte), 1.0,
+            &graph);
+    addStage(pack, &graph);
+  }
 
   double rawScale = 1.0;
   double wireScale = 1.0;
@@ -217,6 +234,22 @@ StageGraph buildStageGraph(const cocclPipelineSpec* spec) {
           currentCompressor = nullptr;
           currentCodec = {};
         }
+        break;
+      }
+      case cocclPipelineStageSendRecv: {
+        if (currentCompressor == nullptr) {
+          currentCompressor = pipelineStage.compressor;
+          currentCodec = cocclAutotuneSnapshotCodecModel(
+              currentCompressor, spec->datatype);
+          graph.framed |= cocclCompressorSupports(
+              currentCompressor, cocclCompressorCapabilityFramed);
+          wireScale = rawScale / currentCodec.compressionRatio;
+        }
+        stage.resource = StageResource::NcclSm;
+        addTerm(&stage, communicationModel(pipelineStage), wireScale,
+                &graph);
+        addTerm(&stage, fixedModel(kSendRecvMetadataAlphaUs, 0.0), 1.0,
+                &graph);
         break;
       }
       case cocclPipelineStageDecompReduceComp: {
@@ -279,11 +312,13 @@ StageGraph buildStageGraph(const cocclPipelineSpec* spec) {
     addStage(stage, &graph);
   }
 
-  cocclAutotuneStageModel unpack = {
-      cocclPipelineStageUnpack, StageResource::Layout};
-  addTerm(&unpack, fixedModel(kLayoutAlphaUs, kLayoutBetaUsPerByte),
-          wireScale, &graph);
-  addStage(unpack, &graph);
+  if (!sendRecv) {
+    cocclAutotuneStageModel unpack = {
+        cocclPipelineStageUnpack, StageResource::Layout};
+    addTerm(&unpack, fixedModel(kLayoutAlphaUs, kLayoutBetaUsPerByte),
+            wireScale, &graph);
+    addStage(unpack, &graph);
+  }
   return graph;
 }
 
@@ -361,11 +396,32 @@ cocclPipelineTuningDecision chooseLayout(const cocclPipelineSpec* spec) {
   size_t totalBytes = spec->rawChunkCount * spec->inputChunks *
       (size_t)ncclTypeSize(spec->datatype);
   const StageGraph graph = buildStageGraph(spec);
-  if (!graph.valid || (spec->stageCount < 4 && !graph.framed)) {
+  bool sendRecv = false;
+  for (int stage = 0; stage < spec->stageCount; ++stage) {
+    sendRecv |= spec->stages[stage].kind == cocclPipelineStageSendRecv;
+  }
+  if (graph.framed && sendRecv) {
+    if (totalBytes < kFramedSendRecvMinPipelineBytes) {
+      return {totalBytes, 1};
+    }
+    return {std::min(
+                kFramedSendRecvTargetSliceBytes,
+                std::max(kFramedSendRecvMinSliceBytes, totalBytes / 4)),
+            kCocclAutotuneMaxPipelineDepth};
+  }
+
+  if (sendRecv) {
+    return totalBytes < kFixedSendRecvMinPipelineBytes
+        ? cocclPipelineTuningDecision{totalBytes, 1}
+        : cocclPipelineTuningDecision{totalBytes / 2, 2};
+  }
+
+  if (!graph.valid ||
+      (spec->stageCount < 4 && !graph.framed && !sendRecv)) {
     return {totalBytes, 1};
   }
 
-  if (graph.framed) {
+  if (graph.framed && !sendRecv) {
     bool hasAllGather = false;
     for (int stage = 0; stage < spec->stageCount; ++stage) {
       hasAllGather |=

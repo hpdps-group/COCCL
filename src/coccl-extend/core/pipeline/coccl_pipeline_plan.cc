@@ -136,6 +136,8 @@ cocclPipelineTempRole outputRole(cocclPipelineStageKind kind) {
       return cocclPipelineTempDecompressReduceOutput;
     case cocclPipelineStageReduceScatter:
       return cocclPipelineTempReduceScatterOutput;
+    case cocclPipelineStageSendRecv:
+      return cocclPipelineTempSendRecvOutput;
     case cocclPipelineStageDecompress:
     case cocclPipelineStagePack:
     case cocclPipelineStageUnpack:
@@ -225,6 +227,19 @@ ncclResult_t planStageOutput(
       *output = input;
       output->logicalChunks = outputChunks;
       break;
+    case cocclPipelineStageSendRecv:
+      if (stage.direction == cocclPipelineSend) {
+        *output = input;
+      } else {
+        size_t encodedBytes = 0;
+        NCCLCHECK(queryEncodedBound(
+            stage.compressor, cocclCompressorOperationCompress, input,
+            &encodedBytes));
+        if (encodedBytes > input.bytes) encodedBytes = input.bytes;
+        *output = {encodedBytes, encodedBytes, ncclInt8, outputChunks,
+                   stage.compressor, true, encodedBytes};
+      }
+      break;
     case cocclPipelineStageAllGather:
       if (!cocclPipelineCheckedMultiply(
               input.bytes, (size_t)stage.comm->nRanks, &output->bytes) ||
@@ -310,6 +325,14 @@ ncclResult_t buildLogicalPlan(
     cocclPipelinePlannedEdge output = {};
     NCCLCHECK(planStageOutput(&planning, context->spec->stages[stage],
                               stageChunks[stage], edge, &output));
+    if (context->spec->stages[stage].kind ==
+            cocclPipelineStageCompress &&
+        stage + 1 < context->spec->stageCount &&
+        context->spec->stages[stage + 1].kind ==
+            cocclPipelineStageSendRecv) {
+      output.framed = true;
+      output.frameStrideBytes = output.bytes;
+    }
     plan->stageOutputCapacityBytes[stage] = output.bytes;
     const bool finalStage = stage + 1 == context->spec->stageCount;
     if (finalStage) {
@@ -429,6 +452,7 @@ ncclResult_t cocclPipelineStageOutputChunks(
     case cocclPipelineStageDecompress:
     case cocclPipelineStagePack:
     case cocclPipelineStageUnpack:
+    case cocclPipelineStageSendRecv:
       *outputChunks = inputChunks;
       return ncclSuccess;
     case cocclPipelineStageAllGather:

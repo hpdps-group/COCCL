@@ -150,6 +150,7 @@ COLL_CONFIG_TEST := $(DST_DIR)/coccl_coll_config_test
 AUTOTUNE_TEST := $(DST_DIR)/coccl_autotune_test
 AUTOTUNE_MODEL_SELECTOR := $(DST_DIR)/coccl_autotune_model_selector
 AUTOTUNE_TOPOLOGY_TEST := $(DST_DIR)/coccl_autotune_topology_test
+AUTOTUNE_PIPELINE_QUERY_TEST := $(DST_DIR)/coccl_autotune_pipeline_query_test
 AUTOTUNE_COST_MODEL_SRC := $(COCCL_CORE)/tuning/coccl_autotune_cost_model.cc
 AUTOTUNE_INTERNAL := $(COCCL_CORE)/tuning/coccl_autotune_internal.h
 SCOPE_CONFIG_TEST := $(DST_DIR)/coccl_scope_config_test
@@ -250,9 +251,11 @@ framed-tests: $(FRAMED_PIPELINE_PLAN_TEST) $(FRAME_EXCHANGE_TEST) \
 	$(GROUP_BATCH_TEST)
 
 autotune-tests: $(AUTOTUNE_TEST) $(AUTOTUNE_TOPOLOGY_TEST) \
+		$(AUTOTUNE_PIPELINE_QUERY_TEST) \
 		$(SELECTOR_SCOPE_TEST)
 	$(AUTOTUNE_TEST)
 	$(AUTOTUNE_TOPOLOGY_TEST)
+	$(AUTOTUNE_PIPELINE_QUERY_TEST)
 	$(SELECTOR_SCOPE_TEST)
 
 training-tests: $(TRAINING_CLASSIFIER_TEST)
@@ -391,6 +394,14 @@ $(AUTOTUNE_TOPOLOGY_TEST): coccl_autotune_topology_test.cc \
 	$(CXX) $(TEST_CXXFLAGS) $(COCCL_INC) -I$(COCCL_SRC) \
 		-o $@ $< $(COCCL_CORE)/tuning/coccl_autotune_topology.cc \
 		$(AUTOTUNE_COST_MODEL_SRC)
+
+$(AUTOTUNE_PIPELINE_QUERY_TEST): coccl_autotune_pipeline_query_test.cc \
+		$(COCCL_CORE)/tuning/coccl_autotune_pipeline.cc \
+		$(AUTOTUNE_COST_MODEL_SRC)
+	@printf "Linking  %-35s > %s\n" $< $@
+	@mkdir -p $(DST_DIR)
+	$(CXX) $(TEST_CXXFLAGS) $(COCCL_INC) -I$(COCCL_SRC) \
+		-o $@ $^
 
 $(SCOPE_CONFIG_TEST): coccl_scope_config_test.cc \
 		$(COCCL_CORE)/config/coccl_config.cc \

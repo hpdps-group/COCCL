@@ -2,6 +2,7 @@
 #include <mpi.h>
 #include <nccl.h>
 
+#include <algorithm>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
@@ -13,6 +14,41 @@ namespace {
 
 constexpr size_t kCorrectnessElements = 4096;
 int gWorldRank = 0;
+
+__global__ void fillRatio130Kernel(unsigned char* data, size_t bytes,
+                                   uint32_t seed) {
+  for (size_t index = blockIdx.x * blockDim.x + threadIdx.x;
+       index < bytes; index += (size_t)blockDim.x * gridDim.x) {
+    uint32_t value = static_cast<uint32_t>(index) ^
+        static_cast<uint32_t>(index >> 32) ^ seed;
+    value ^= value >> 16;
+    value *= 0x7feb352du;
+    value ^= value >> 15;
+    data[index] = static_cast<unsigned char>(value & 0x3f);
+  }
+}
+
+__global__ void countMismatchKernel(
+    const unsigned char* expected, const unsigned char* actual,
+    size_t bytes, unsigned long long* mismatches) {
+  __shared__ unsigned long long blockCounts[256];
+  unsigned long long count = 0;
+  for (size_t index = blockIdx.x * blockDim.x + threadIdx.x;
+       index < bytes; index += (size_t)blockDim.x * gridDim.x) {
+    count += expected[index] != actual[index];
+  }
+  blockCounts[threadIdx.x] = count;
+  __syncthreads();
+  for (int width = blockDim.x / 2; width > 0; width /= 2) {
+    if (threadIdx.x < width) {
+      blockCounts[threadIdx.x] += blockCounts[threadIdx.x + width];
+    }
+    __syncthreads();
+  }
+  if (threadIdx.x == 0 && blockCounts[0] != 0) {
+    atomicAdd(mismatches, blockCounts[0]);
+  }
+}
 
 enum class Operation {
   AllToAll,
@@ -72,6 +108,10 @@ void fail(const char* expression, const char* detail,
       fail(#call, ncclGetErrorString(result), __FILE__, __LINE__);            \
     }                                                                         \
   } while (0)
+
+int byteKernelBlocks(size_t bytes) {
+  return static_cast<int>(std::min<size_t>(65535, (bytes + 255) / 256));
+}
 
 Options parseOptions(int argc, char** argv) {
   Options options;
@@ -182,6 +222,20 @@ std::vector<T> makeRandomInput(int rank, size_t elements) {
     state ^= state >> 17;
     state ^= state << 5;
     bytes[index] = static_cast<unsigned char>(state);
+  }
+  return values;
+}
+
+template <typename T>
+std::vector<T> makeRatio130Input(int rank, size_t elements) {
+  std::vector<T> values(elements);
+  uint32_t state = 0x85ebca6bu ^ static_cast<uint32_t>(rank + 1);
+  auto* bytes = reinterpret_cast<unsigned char*>(values.data());
+  for (size_t index = 0; index < elements * sizeof(T); ++index) {
+    state ^= state << 13;
+    state ^= state >> 17;
+    state ^= state << 5;
+    bytes[index] = static_cast<unsigned char>(state & 0x3f);
   }
   return values;
 }
@@ -311,15 +365,22 @@ void runCorrectnessCase(Operation operation, ncclDataType_t datatype,
   CUDACHECK(cudaMalloc(&input, inputBytes));
   CUDACHECK(cudaMalloc(&nativeOutput, outputBytes));
   CUDACHECK(cudaMalloc(&compressedOutput, outputBytes));
-  const std::vector<T> hostInput = options.pattern == "mixed"
-      ? (rank % 2 == 0
-             ? makeInput<T>(rank, inputElements, true)
-             : makeRandomInput<T>(rank, inputElements))
-      : (options.pattern == "random"
-             ? makeRandomInput<T>(rank, inputElements)
-             : makeInput<T>(rank, inputElements, false));
-  CUDACHECK(cudaMemcpy(input, hostInput.data(), inputBytes,
-                       cudaMemcpyHostToDevice));
+  if (options.pattern == "ratio130") {
+    fillRatio130Kernel<<<byteKernelBlocks(inputBytes), 256>>>(
+        reinterpret_cast<unsigned char*>(input), inputBytes,
+        0x85ebca6bu ^ static_cast<uint32_t>(rank + 1));
+    CUDACHECK(cudaGetLastError());
+  } else {
+    const std::vector<T> hostInput = options.pattern == "mixed"
+        ? (rank % 2 == 0
+               ? makeInput<T>(rank, inputElements, true)
+               : makeRandomInput<T>(rank, inputElements))
+        : (options.pattern == "random"
+               ? makeRandomInput<T>(rank, inputElements)
+               : makeInput<T>(rank, inputElements, false));
+    CUDACHECK(cudaMemcpy(input, hostInput.data(), inputBytes,
+                         cudaMemcpyHostToDevice));
+  }
   CUDACHECK(cudaMemset(nativeOutput, 0, outputBytes));
   CUDACHECK(cudaMemset(compressedOutput, 0, outputBytes));
 
@@ -332,16 +393,18 @@ void runCorrectnessCase(Operation operation, ncclDataType_t datatype,
                 compressedComm, compressedStream, rank, ranks);
   CUDACHECK(cudaStreamSynchronize(compressedStream));
 
-  std::vector<T> nativeHost(resultElements);
-  std::vector<T> compressedHost(resultElements);
-  CUDACHECK(cudaMemcpy(nativeHost.data(), nativeOutput, outputBytes,
-                       cudaMemcpyDeviceToHost));
-  CUDACHECK(cudaMemcpy(compressedHost.data(), compressedOutput, outputBytes,
-                       cudaMemcpyDeviceToHost));
+  unsigned long long* deviceMismatches = nullptr;
+  CUDACHECK(cudaMalloc(&deviceMismatches, sizeof(*deviceMismatches)));
+  CUDACHECK(cudaMemset(deviceMismatches, 0, sizeof(*deviceMismatches)));
+  countMismatchKernel<<<byteKernelBlocks(outputBytes), 256>>>(
+      reinterpret_cast<const unsigned char*>(nativeOutput),
+      reinterpret_cast<const unsigned char*>(compressedOutput), outputBytes,
+      deviceMismatches);
+  CUDACHECK(cudaGetLastError());
   unsigned long long localMismatches = 0;
-  for (size_t index = 0; index < resultElements; ++index) {
-    localMismatches += nativeHost[index] != compressedHost[index];
-  }
+  CUDACHECK(cudaMemcpy(&localMismatches, deviceMismatches,
+                       sizeof(localMismatches), cudaMemcpyDeviceToHost));
+  CUDACHECK(cudaFree(deviceMismatches));
   unsigned long long mismatches = 0;
   MPICHECK(MPI_Reduce(&localMismatches, &mismatches, 1,
                       MPI_UNSIGNED_LONG_LONG, MPI_SUM, 0, MPI_COMM_WORLD));
@@ -453,6 +516,10 @@ void runPerformance(const Options& options, ncclDataType_t datatype,
     CUDACHECK(cudaMemset(input, 0, inputBytes));
   } else if (random) {
     const std::vector<T> hostInput = makeRandomInput<T>(rank, elements);
+    CUDACHECK(cudaMemcpy(input, hostInput.data(), inputBytes,
+                         cudaMemcpyHostToDevice));
+  } else if (options.pattern == "ratio130") {
+    const std::vector<T> hostInput = makeRatio130Input<T>(rank, elements);
     CUDACHECK(cudaMemcpy(input, hostInput.data(), inputBytes,
                          cudaMemcpyHostToDevice));
   } else {
