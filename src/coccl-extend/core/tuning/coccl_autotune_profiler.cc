@@ -643,9 +643,16 @@ ncclResult_t cocclAutotuneEnsureGlobalModels(ncclComm_t measurementComm) {
   }
 
   if ((needs & cocclProfileNeedCompressors) != 0) {
-    for (ncclDataType_t datatype : {ncclFloat32, ncclBfloat16}) {
-      for (const cocclProfiledCompressor& compressor :
-           snapshotEnabledCompressors()) {
+    for (const cocclProfiledCompressor& compressor :
+         snapshotEnabledCompressors()) {
+      const bool framed = cocclCompressorSupports(
+          compressor.compressor, cocclCompressorCapabilityFramed);
+      for (ncclDataType_t datatype : {
+               ncclFloat32, ncclBfloat16, ncclInt8, ncclInt32, ncclInt64}) {
+        if (!framed && datatype != ncclFloat32 &&
+            datatype != ncclBfloat16) {
+          continue;
+        }
         cocclCodecModel model;
         const bool profileReductions =
             measurementComm->nNodes == 1 &&
