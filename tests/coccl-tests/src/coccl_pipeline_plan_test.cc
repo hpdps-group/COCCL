@@ -122,6 +122,51 @@ void checkTargetSlice(ncclComm_t comm) {
   EXPECT(context.slices[15].bytes == 16ULL << 20);
 }
 
+void checkSendRecvSlices(ncclComm_t comm) {
+  constexpr size_t bytes = 64ULL << 20;
+  void* compressor = reinterpret_cast<void*>(0x1);
+  const void* buffer = reinterpret_cast<const void*>(0x100000000ULL);
+
+  const cocclPipelineStage sendStages[] = {
+      cocclPipelineCompress(compressor),
+      cocclPipelineSendRecv(
+          comm, 1, cocclPipelineSend, compressor)};
+  cocclPipelineSpec send = {
+      "send", buffer, const_cast<void*>(buffer), bytes / sizeof(float), 1,
+      ncclFloat32, comm, nullptr, sendStages, 2,
+      cocclPipelineInPlaceSameBuffer, cocclPipelineInputContiguous};
+  cocclPipelineContext context = {};
+  EXPECT(cocclPreparePipeline(&send, 4, &context) == ncclSuccess);
+  EXPECT(context.depth == 4);
+  EXPECT(context.plan.inputStagingTemp == -1);
+  EXPECT(context.plan.outputStagingTemp == -1);
+  EXPECT(context.plan.stageOutputTemp[0] >= 0);
+  EXPECT(context.plan.stageOutputTemp[1] == -1);
+  const cocclPipelineTempPlan& sendPayload =
+      context.plan.temps[context.plan.stageOutputTemp[0]];
+  EXPECT(sendPayload.frameMetadataBytes ==
+         sizeof(cocclCompressorFrameMetadata));
+
+  const cocclPipelineStage recvStages[] = {
+      cocclPipelineSendRecv(
+          comm, 0, cocclPipelineRecv, compressor),
+      cocclPipelineDecompress()};
+  cocclPipelineSpec recv = {
+      "recv", buffer, const_cast<void*>(buffer), bytes / sizeof(float), 1,
+      ncclFloat32, comm, nullptr, recvStages, 2,
+      cocclPipelineInPlaceSameBuffer, cocclPipelineInputContiguous};
+  EXPECT(cocclPreparePipeline(&recv, 4, &context) == ncclSuccess);
+  EXPECT(context.depth == 4);
+  EXPECT(context.plan.inputStagingTemp == -1);
+  EXPECT(context.plan.outputStagingTemp == -1);
+  EXPECT(context.plan.stageOutputTemp[0] >= 0);
+  EXPECT(context.plan.stageOutputTemp[1] == -1);
+  const cocclPipelineTempPlan& recvPayload =
+      context.plan.temps[context.plan.stageOutputTemp[0]];
+  EXPECT(recvPayload.frameMetadataBytes ==
+         sizeof(cocclCompressorFrameMetadata));
+}
+
 void dumpPlans(ncclComm_t comm) {
   const cocclPipelineStage stages[] = {
       cocclPipelineCompress(reinterpret_cast<void*>(0x1)), cocclPipelineAllToAll(comm),
@@ -175,6 +220,7 @@ int main(int argc, char** argv) {
   checkDepth(&comm, 4);
   checkDepth(&comm, 8);
   checkTargetSlice(&comm);
+  checkSendRecvSlices(&comm);
 
   const cocclPipelineStage stages[] = {
       cocclPipelineCompress(reinterpret_cast<void*>(0x1)), cocclPipelineAllToAll(&comm),

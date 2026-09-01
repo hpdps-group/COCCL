@@ -134,7 +134,7 @@ cocclNcclCostEstimate collectiveEstimate(
 }
 
 cocclNcclCostEstimate p2pEstimate(
-    ncclComm_t comm, size_t bytes, int peers) {
+    ncclComm_t comm, size_t bytes, int peers, bool interNode) {
   cocclNcclCostEstimate estimate;
   const ncclTopoGraph& ring = comm->graphs[NCCL_ALGO_RING];
   const int channelsPerPeer = std::max(1, comm->p2pnChannelsPerPeer);
@@ -144,18 +144,20 @@ cocclNcclCostEstimate p2pEstimate(
       1, (bytes + (size_t)comm->p2pChunkSize - 1) /
              (size_t)comm->p2pChunkSize);
   const int activeChannels = std::min<int>(scheduledChannels, (int)chunks);
-  const double channelBandwidth = comm->nNodes > 1
-      ? ring.bwInter : ring.bwIntra;
+  const double channelBandwidth = interNode ? ring.bwInter : ring.bwIntra;
   if (!(channelBandwidth > 0.0)) return estimate;
+  const int effectiveChannels = interNode
+      ? std::max(1, activeChannels / comm->localRanks)
+      : activeChannels;
 
   const double latency =
       comm->latencies[ncclFuncAllGather][NCCL_ALGO_RING][NCCL_PROTO_SIMPLE] /
       (double)std::max(1, comm->nRanks - 1);
   estimate.timeUs = latency +
-      (double)bytes / (1000.0 * channelBandwidth * activeChannels);
+      (double)bytes / (1000.0 * channelBandwidth * effectiveChannels);
   estimate.algorithm = NCCL_ALGO_RING;
   estimate.protocol = NCCL_PROTO_SIMPLE;
-  estimate.channels = activeChannels;
+  estimate.channels = effectiveChannels;
   return estimate;
 }
 
@@ -176,9 +178,9 @@ cocclSelectionPerformanceModel buildTopologyModel(
     const TopologyModelKey& key) {
   cocclSelectionPerformanceModel model;
   model.intraP2p = fitTopologyModel(
-      key.intra, cocclAutotuneTopologyOperation::P2p);
+      key.intra, cocclAutotuneTopologyOperation::P2pIntra);
   model.interP2p = fitTopologyModel(
-      key.inter, cocclAutotuneTopologyOperation::P2p);
+      key.inter, cocclAutotuneTopologyOperation::P2pInter);
   model.allGather = fitTopologyModel(
       key.gather, cocclAutotuneTopologyOperation::AllGather);
   model.allToAll = fitTopologyModel(
@@ -197,14 +199,17 @@ cocclNcclCostEstimate cocclAutotuneEstimateNcclStage(
     estimate.channels = 1;
     return estimate;
   }
-  if (operation == cocclAutotuneTopologyOperation::P2p) {
-    return p2pEstimate(comm, bytes, 1);
+  if (operation == cocclAutotuneTopologyOperation::P2pIntra ||
+      operation == cocclAutotuneTopologyOperation::P2pInter) {
+    return p2pEstimate(
+        comm, bytes, 1,
+        operation == cocclAutotuneTopologyOperation::P2pInter);
   }
   if (operation == cocclAutotuneTopologyOperation::AllToAll) {
     const int peers = std::max(1, comm->nRanks - 1);
     const size_t wireBytes = bytes * (size_t)peers /
         (size_t)comm->nRanks;
-    return p2pEstimate(comm, wireBytes, peers);
+    return p2pEstimate(comm, wireBytes, peers, comm->nNodes > 1);
   }
   return collectiveEstimate(comm, operation, bytes);
 }

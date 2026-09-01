@@ -91,6 +91,19 @@ int main() {
     fail("AllGather did not use NCCL 2.27 total-byte semantics");
   }
 
+  const cocclNcclCostEstimate p2pIntra =
+      cocclAutotuneEstimateNcclStage(
+          &owner, cocclAutotuneTopologyOperation::P2pIntra, 1 << 20);
+  const cocclNcclCostEstimate p2pInter =
+      cocclAutotuneEstimateNcclStage(
+          &owner, cocclAutotuneTopologyOperation::P2pInter, 1 << 20);
+  if (!std::isfinite(p2pIntra.timeUs) ||
+      !std::isfinite(p2pInter.timeUs) ||
+      !(p2pInter.timeUs > p2pIntra.timeUs) ||
+      p2pInter.channels >= p2pIntra.channels) {
+    fail("P2P topology model did not distinguish intra/inter peers");
+  }
+
   ncclComm unavailable = {};
   initComm(&unavailable, 4, 1, 40.0f, 0.0f);
   unavailable.bandwidths[ncclFuncAllGather][NCCL_ALGO_RING]

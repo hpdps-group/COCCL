@@ -10,8 +10,10 @@
 
 #include <stdlib.h>
 
+#include <algorithm>
 #include <map>
 #include <new>
+#include <vector>
 
 namespace {
 
@@ -38,6 +40,30 @@ struct cocclPipelineWorkspace {
   void* registeredBase;
   void* rawBase;
 };
+
+struct cocclPipelineExecution {
+  cocclPipelineContext context;
+  cocclBufferHandle coreWorkspace;
+  cocclBufferHandle rawWorkspace;
+  cocclPipelineWorkspace workspace;
+  cocclPipelineResources* resources;
+};
+
+struct cocclPipelineBatchState {
+  cocclPipelineExecution execution;
+  cocclPipelineEdge edges[kCocclPipelineMaxDepth];
+  cocclPipelineStageOutput outputs[kCocclPipelineMaxDepth];
+  int communicationStage;
+};
+
+struct alignas(16) cocclPipelineBatchPlan {
+  uint64_t targetSliceBytes;
+  uint32_t maxDepth;
+  uint32_t reserved;
+};
+
+static_assert(sizeof(cocclPipelineBatchPlan) == 16,
+              "Pipeline batch plan is a fixed control message");
 
 thread_local std::map<ncclComm_t, cocclPipelineResources*> resourcesByComm;
 
@@ -178,6 +204,9 @@ cocclPipelineEdge inputEdge(const cocclPipelineContext& context,
 
 bool pipelineUsesFramedCompressor(const cocclPipelineSpec* spec) {
   for (int stage = 0; stage < spec->stageCount; ++stage) {
+    if (spec->stages[stage].kind == cocclPipelineStageSendRecv) {
+      return true;
+    }
     if (spec->stages[stage].compressor != nullptr &&
         cocclCompressorSupports(
             spec->stages[stage].compressor,
@@ -218,6 +247,74 @@ int collectCommunicationComms(
     }
   }
   return count;
+}
+
+ncclResult_t releaseExecution(cocclPipelineExecution* execution,
+                              cudaStream_t stream) {
+  const ncclResult_t raw =
+      cocclReleaseBuffer(&execution->rawWorkspace, stream);
+  const ncclResult_t core =
+      cocclReleaseBuffer(&execution->coreWorkspace, stream);
+  return raw == ncclSuccess ? core : raw;
+}
+
+ncclResult_t prepareExecution(
+    const cocclPipelineSpec* spec, int requestedDepth,
+    size_t targetSliceBytes, int maxDepth,
+    cocclPipelineExecution* execution) {
+  *execution = {};
+  if (targetSliceBytes == 0) {
+    NCCLCHECK(cocclPreparePipeline(
+        spec, requestedDepth, &execution->context));
+  } else {
+    NCCLCHECK(cocclPreparePipelineForSlice(
+        spec, targetSliceBytes, maxDepth, &execution->context));
+  }
+
+  cocclPipelineCommunicationComm
+      communicationComms[kCocclPipelineExplicitStages] = {};
+  const bool framed = pipelineUsesFramedCompressor(spec);
+  const int communicationCommCount = collectCommunicationComms(
+      spec, framed, communicationComms);
+  ncclResult_t result = cocclGetBufferForComm(
+      spec->ownerComm, communicationComms[0].comm,
+      execution->context.plan.registeredBytes,
+      communicationComms[0].registration, spec->stream,
+      &execution->coreWorkspace);
+  if (result != ncclSuccess) return result;
+  for (int i = 1; i < communicationCommCount; ++i) {
+    result = cocclRegisterBufferForComm(
+        &execution->coreWorkspace, communicationComms[i].comm,
+        communicationComms[i].registration);
+    if (result != ncclSuccess) {
+      (void)releaseExecution(execution, spec->stream);
+      return result;
+    }
+  }
+
+  if (execution->context.plan.rawBytes != 0) {
+    result = cocclGetUnregisteredBuffer(
+        spec->ownerComm, execution->context.plan.rawBytes,
+        spec->stream, &execution->rawWorkspace);
+    if (result != ncclSuccess) {
+      (void)releaseExecution(execution, spec->stream);
+      return result;
+    }
+  }
+  execution->workspace = {
+      execution->coreWorkspace.ptr, execution->rawWorkspace.ptr};
+
+  if (execution->context.depth > 1 || framed) {
+    result = findOrCreateResources(
+        spec->ownerComm, &execution->resources);
+    if (result != ncclSuccess) {
+      (void)releaseExecution(execution, spec->stream);
+      return result;
+    }
+    execution->context.stageContext.frameResources =
+        &execution->resources->frameResources;
+  }
+  return ncclSuccess;
 }
 
 cocclPipelineStageOutput stageOutput(const cocclPipelineContext& context,
@@ -521,79 +618,325 @@ ncclResult_t runOverlap(const cocclPipelineContext& context,
   return ncclSuccess;
 }
 
+int sendRecvStage(const cocclPipelineSpec* spec) {
+  for (int stage = 0; stage < spec->stageCount; ++stage) {
+    if (spec->stages[stage].kind == cocclPipelineStageSendRecv) {
+      return stage;
+    }
+  }
+  return -1;
+}
+
+ncclResult_t exchangeBatchPlans(
+    const cocclPipelineSpec* specs, size_t count,
+    std::vector<cocclPipelineBatchPlan>* plans) {
+  ncclResult_t result = ncclSuccess;
+  std::vector<cocclBufferHandle> buffers(count);
+  std::vector<cocclFrameExchange> exchanges(count);
+  const cocclPipelineConfig& config = cocclGetConfig().pipeline;
+  for (size_t i = 0; i < count; ++i) {
+    const int stageIndex = sendRecvStage(specs + i);
+    const cocclPipelineStage& stage = specs[i].stages[stageIndex];
+    NCCLCHECKGOTO(cocclGetBuffer(
+        specs[i].ownerComm, sizeof(cocclPipelineBatchPlan),
+        specs[i].stream, &buffers[i]), result, cleanup);
+    if (stage.direction == cocclPipelineSend) {
+      if (config.autoDepth) {
+        const cocclPipelineTuningDecision tuning =
+            cocclAutotunePipelineLayout(specs + i);
+        (*plans)[i] = {(uint64_t)tuning.targetSliceBytes,
+                       (uint32_t)tuning.maxDepth, 0};
+      } else {
+        (*plans)[i] = {0, (uint32_t)std::max(1, config.depth), 0};
+      }
+      CUDACHECKGOTO(cudaMemcpyAsync(
+          buffers[i].ptr, plans->data() + i, sizeof((*plans)[i]),
+          cudaMemcpyHostToDevice, specs[i].stream), result, cleanup);
+    }
+    exchanges[i] = {
+        stage.peer,
+        stage.direction == cocclPipelineSend ? buffers[i].ptr : nullptr,
+        stage.direction == cocclPipelineRecv ? buffers[i].ptr : nullptr,
+        stage.direction == cocclPipelineSend ? sizeof((*plans)[i]) : 0,
+        stage.direction == cocclPipelineRecv ? sizeof((*plans)[i]) : 0,
+        sizeof((*plans)[i]), stage.comm, specs[i].stream};
+  }
+  NCCLCHECKGOTO(cocclCommitFrameExchange(
+      exchanges.data(), exchanges.size(), nullptr, nullptr), result,
+      cleanup);
+  for (size_t i = 0; i < count; ++i) {
+    const cocclPipelineStage& stage =
+        specs[i].stages[sendRecvStage(specs + i)];
+    if (stage.direction == cocclPipelineRecv) {
+      CUDACHECKGOTO(cudaMemcpyAsync(
+          plans->data() + i, buffers[i].ptr, sizeof((*plans)[i]),
+          cudaMemcpyDeviceToHost, specs[i].stream), result, cleanup);
+    }
+  }
+  for (size_t i = 0; i < count; ++i) {
+    const cocclPipelineStage& stage =
+        specs[i].stages[sendRecvStage(specs + i)];
+    if (stage.direction == cocclPipelineRecv) {
+      CUDACHECKGOTO(cudaStreamSynchronize(specs[i].stream), result,
+                    cleanup);
+      if ((*plans)[i].maxDepth == 0 ||
+          (*plans)[i].maxDepth > kCocclPipelineMaxDepth) {
+        result = ncclInvalidUsage;
+        goto cleanup;
+      }
+    }
+  }
+
+cleanup:
+  for (size_t i = 0; i < count; ++i) {
+    if (buffers[i].ptr == nullptr) continue;
+    const ncclResult_t release =
+        cocclReleaseBuffer(&buffers[i], specs[i].stream);
+    if (result == ncclSuccess) result = release;
+  }
+  return result;
+}
+
+struct cocclPipelineBatchFrame {
+  cocclPipelineBatchState* state;
+  int slice;
+  int phase;
+  cocclCompressorFrameMetadata* deviceMetadata;
+  size_t slotBytes;
+};
+
+void applyReceivedFrame(
+    const cocclPipelineStage& stage,
+    const cocclCompressorFrameMetadata& metadata,
+    cocclPipelineEdge* edge, const cocclPipelineStageOutput& output) {
+  edge->ptr = output.ptr;
+  edge->compressor = stage.compressor;
+  if (cocclCompressorSupports(
+          stage.compressor, cocclCompressorCapabilityFramed)) {
+    edge->bytes = output.capacityBytes;
+    edge->totalElements = output.capacityBytes;
+    edge->datatype = ncclInt8;
+    edge->frameMetadata = output.frameMetadata;
+    edge->frameStrideBytes = output.frameStrideBytes;
+  } else {
+    edge->bytes = (size_t)metadata.payloadBytes;
+    edge->totalElements = edge->bytes;
+    edge->datatype = metadata.encoding == cocclCompressorFrameRaw
+        ? COCCL_COMPRESSOR_RAW_PASSTHROUGH : ncclInt8;
+    edge->frameMetadata = nullptr;
+    edge->frameStrideBytes = 0;
+  }
+}
+
+ncclResult_t runPipelineBatchWave(
+    std::vector<cocclPipelineBatchState>* states, int slice) {
+  std::vector<cocclPipelineBatchFrame> frames;
+  std::vector<cocclFrameExchange> metadataExchanges;
+  for (cocclPipelineBatchState& state : *states) {
+    cocclPipelineContext& context = state.execution.context;
+    if (slice >= context.depth) continue;
+    cocclPipelineResources* resources = state.execution.resources;
+    const int stage = state.communicationStage;
+    const int phase = cocclPipelinePhaseFirstStage + stage;
+    if (stage != 0) {
+      NCCLCHECK(waitForPhase(resources, phase, phase - 1, slice));
+    }
+    state.outputs[slice] = stageOutput(
+        context, state.execution.workspace, stage, slice);
+    const cocclPipelineStage& exchangeStage = context.spec->stages[stage];
+    cocclCompressorFrameMetadata* metadata =
+        exchangeStage.direction == cocclPipelineSend
+        ? state.edges[slice].frameMetadata
+        : state.outputs[slice].frameMetadata;
+    frames.push_back({&state, slice, phase, metadata,
+                      exchangeStage.direction == cocclPipelineSend
+                      ? state.edges[slice].frameStrideBytes
+                      : state.outputs[slice].frameStrideBytes});
+    metadataExchanges.push_back({
+        exchangeStage.peer,
+        exchangeStage.direction == cocclPipelineSend
+            ? metadata : nullptr,
+        exchangeStage.direction == cocclPipelineRecv
+            ? metadata : nullptr,
+        exchangeStage.direction == cocclPipelineSend
+            ? sizeof(*metadata) : 0,
+        exchangeStage.direction == cocclPipelineRecv
+            ? sizeof(*metadata) : 0,
+        sizeof(*metadata), exchangeStage.comm,
+        resources->streams[phase]});
+  }
+
+  NCCLCHECK(cocclCommitFrameExchange(
+      metadataExchanges.data(), metadataExchanges.size(), nullptr, nullptr));
+  std::vector<cocclCompressorFrameMetadata> hostMetadata(frames.size());
+  for (size_t i = 0; i < frames.size(); ++i) {
+    cocclPipelineBatchFrame& frame = frames[i];
+    cocclPipelineResources* resources =
+        frame.state->execution.resources;
+    CUDACHECK(cudaMemcpyAsync(
+        hostMetadata.data() + i, frame.deviceMetadata,
+        sizeof(cocclCompressorFrameMetadata), cudaMemcpyDeviceToHost,
+        resources->streams[frame.phase]));
+  }
+  std::vector<cudaStream_t> synchronizedStreams;
+  for (const cocclPipelineBatchFrame& frame : frames) {
+    const cudaStream_t stream =
+        frame.state->execution.resources->streams[frame.phase];
+    bool seen = false;
+    for (cudaStream_t existing : synchronizedStreams) {
+      if (existing == stream) seen = true;
+    }
+    if (!seen) {
+      CUDACHECK(cudaStreamSynchronize(stream));
+      synchronizedStreams.push_back(stream);
+    }
+  }
+
+  std::vector<cocclFrameExchange> payloadExchanges(frames.size());
+  for (size_t i = 0; i < frames.size(); ++i) {
+    cocclPipelineBatchFrame& frame = frames[i];
+    cocclPipelineBatchState& state = *frame.state;
+    cocclPipelineContext& context = state.execution.context;
+    const cocclPipelineStage& stage =
+        context.spec->stages[state.communicationStage];
+    if (!cocclFrameMetadataValid(hostMetadata[i], frame.slotBytes)) {
+      return ncclInvalidUsage;
+    }
+    payloadExchanges[i] = {
+        stage.peer,
+        stage.direction == cocclPipelineSend
+            ? state.edges[slice].ptr : nullptr,
+        stage.direction == cocclPipelineRecv
+            ? state.outputs[slice].ptr : nullptr,
+        stage.direction == cocclPipelineSend
+            ? (size_t)hostMetadata[i].payloadBytes : 0,
+        stage.direction == cocclPipelineRecv
+            ? (size_t)hostMetadata[i].payloadBytes : 0,
+        frame.slotBytes, stage.comm,
+        state.execution.resources->streams[frame.phase]};
+  }
+  NCCLCHECK(cocclCommitFrameExchange(
+      payloadExchanges.data(), payloadExchanges.size(), nullptr, nullptr));
+  for (size_t i = 0; i < frames.size(); ++i) {
+    cocclPipelineBatchFrame& frame = frames[i];
+    cocclPipelineBatchState& state = *frame.state;
+    cocclPipelineContext& context = state.execution.context;
+    const cocclPipelineStage& stage =
+        context.spec->stages[state.communicationStage];
+    if (stage.direction == cocclPipelineRecv) {
+      applyReceivedFrame(stage, hostMetadata[i], state.edges + slice,
+                         state.outputs[slice]);
+    }
+    NCCLCHECK(recordPhase(
+        state.execution.resources, frame.phase, slice));
+  }
+
+  for (cocclPipelineBatchState& state : *states) {
+    cocclPipelineContext& context = state.execution.context;
+    if (slice >= context.depth) continue;
+    cocclPipelineResources* resources = state.execution.resources;
+    for (int stage = state.communicationStage + 1;
+         stage < context.spec->stageCount; ++stage) {
+      const int phase = cocclPipelinePhaseFirstStage + stage;
+      NCCLCHECK(waitForPhase(resources, phase, phase - 1, slice));
+      const cocclPipelineStageContext stageContext =
+          stageContextForSlice(context, slice);
+      const cocclPipelineStageOutput output = stageOutput(
+          context, state.execution.workspace, stage, slice);
+      NCCLCHECK(cocclExecutePipelineStage(
+          &stageContext, context.spec->stages + stage,
+          state.edges + slice, &output, resources->streams[phase]));
+      NCCLCHECK(recordPhase(resources, phase, slice));
+    }
+  }
+  return ncclSuccess;
+}
+
+ncclResult_t runPipelineBatch(
+    std::vector<cocclPipelineBatchState>* states) {
+  for (cocclPipelineBatchState& state : *states) {
+    cocclPipelineContext& context = state.execution.context;
+    cocclPipelineResources* resources = state.execution.resources;
+    CUDACHECK(cudaEventRecord(resources->inputReady,
+                               context.spec->stream));
+    CUDACHECK(cudaStreamWaitEvent(
+        resources->streams[cocclPipelinePhaseFirstStage],
+        resources->inputReady, 0));
+    for (int slice = 0; slice < context.depth; ++slice) {
+      state.edges[slice] = inputEdge(context, slice);
+    }
+  }
+
+  int maxDepth = 0;
+  for (const cocclPipelineBatchState& state : *states) {
+    maxDepth = std::max(maxDepth, state.execution.context.depth);
+  }
+
+  // Queue the same wave for every call before later waves. Calls sharing one
+  // communicator then reach the grouped metadata exchange together.
+  for (int slice = 0; slice < maxDepth; ++slice) {
+    for (cocclPipelineBatchState& state : *states) {
+      cocclPipelineContext& context = state.execution.context;
+      if (slice >= context.depth) continue;
+      cocclPipelineResources* resources = state.execution.resources;
+      for (int stage = 0; stage < state.communicationStage; ++stage) {
+        const int phase = cocclPipelinePhaseFirstStage + stage;
+        if (stage != 0) {
+          NCCLCHECK(waitForPhase(
+              resources, phase, phase - 1, slice));
+        }
+        const cocclPipelineStageContext stageContext =
+            stageContextForSlice(context, slice);
+        const cocclPipelineStageOutput output = stageOutput(
+            context, state.execution.workspace, stage, slice);
+        NCCLCHECK(cocclExecutePipelineStage(
+            &stageContext, context.spec->stages + stage,
+            state.edges + slice, &output, resources->streams[phase]));
+        NCCLCHECK(recordPhase(resources, phase, slice));
+      }
+    }
+  }
+
+  for (int slice = 0; slice < maxDepth; ++slice) {
+    NCCLCHECK(runPipelineBatchWave(states, slice));
+  }
+
+  for (cocclPipelineBatchState& state : *states) {
+    const cocclPipelineContext& context = state.execution.context;
+    const int finalPhase = cocclPipelinePhaseFirstStage +
+        context.spec->stageCount - 1;
+    CUDACHECK(cudaStreamWaitEvent(
+        context.spec->stream,
+        state.execution.resources->events[finalPhase][context.depth - 1],
+        0));
+  }
+  return ncclSuccess;
+}
+
 }  // namespace
 
 static ncclResult_t cocclRunPipelineWithLayout(
     const cocclPipelineSpec* spec, int requestedDepth,
     size_t targetSliceBytes, int maxDepth) {
-  cocclPipelineContext context = {};
-  if (targetSliceBytes == 0) {
-    NCCLCHECK(cocclPreparePipeline(spec, requestedDepth, &context));
-  } else {
-    NCCLCHECK(cocclPreparePipelineForSlice(
-        spec, targetSliceBytes, maxDepth, &context));
-  }
   CUDACHECK(cudaSetDevice(spec->ownerComm->cudaDev));
-
+  cocclPipelineExecution execution = {};
+  NCCLCHECK(prepareExecution(
+      spec, requestedDepth, targetSliceBytes, maxDepth, &execution));
+  cocclPipelineContext& context = execution.context;
   const bool framed = pipelineUsesFramedCompressor(spec);
-  cocclPipelineCommunicationComm
-      communicationComms[kCocclPipelineExplicitStages] = {};
-  const int communicationCommCount =
-      collectCommunicationComms(spec, framed, communicationComms);
-  cocclBufferHandle coreWorkspace = {};
-  ncclResult_t result = cocclGetBufferForComm(
-      spec->ownerComm, communicationComms[0].comm,
-      context.plan.registeredBytes, communicationComms[0].registration,
-      spec->stream, &coreWorkspace);
-  if (result != ncclSuccess) return result;
-  for (int i = 1; i < communicationCommCount; ++i) {
-    result = cocclRegisterBufferForComm(
-        &coreWorkspace, communicationComms[i].comm,
-        communicationComms[i].registration);
-    if (result != ncclSuccess) {
-      (void)cocclReleaseBuffer(&coreWorkspace, spec->stream);
-      return result;
-    }
-  }
-
-  cocclBufferHandle rawWorkspace = {};
-  if (context.plan.rawBytes != 0) {
-    const ncclResult_t rawResult = cocclGetUnregisteredBuffer(
-        spec->ownerComm, context.plan.rawBytes, spec->stream,
-        &rawWorkspace);
-    if (rawResult != ncclSuccess) {
-      (void)cocclReleaseBuffer(&coreWorkspace, spec->stream);
-      return rawResult;
-    }
-  }
-  const cocclPipelineWorkspace workspace = {
-      coreWorkspace.ptr, rawWorkspace.ptr};
-
-  result = ncclSuccess;
-  if (context.depth == 1 && !framed) {
-    result = runSerial(context, workspace);
+  ncclResult_t result = ncclSuccess;
+  if (context.depth == 1) {
+    result = runSerial(context, execution.workspace);
+  } else if (framed) {
+    result = runFramedOverlap(
+        context, execution.workspace, execution.resources);
   } else {
-    cocclPipelineResources* resources = nullptr;
-    result = findOrCreateResources(spec->ownerComm, &resources);
-    if (result == ncclSuccess) {
-      context.stageContext.frameResources = &resources->frameResources;
-      if (context.depth == 1) {
-        result = runSerial(context, workspace);
-      } else if (framed) {
-        result = runFramedOverlap(context, workspace, resources);
-      } else {
-        result = runOverlap(context, workspace, resources);
-      }
-    }
+    result = runOverlap(context, execution.workspace, execution.resources);
   }
 
   if (result != ncclSuccess) (void)cudaDeviceSynchronize();
-  const ncclResult_t rawRelease =
-      cocclReleaseBuffer(&rawWorkspace, spec->stream);
-  const ncclResult_t coreRelease =
-      cocclReleaseBuffer(&coreWorkspace, spec->stream);
-  if (result == ncclSuccess) result = rawRelease;
-  return result == ncclSuccess ? coreRelease : result;
+  const ncclResult_t release = releaseExecution(&execution, spec->stream);
+  return result == ncclSuccess ? release : result;
 }
 
 ncclResult_t cocclRunPipeline(const cocclPipelineSpec* spec) {
@@ -612,6 +955,44 @@ ncclResult_t cocclRunPipeline(const cocclPipelineSpec* spec) {
       cocclAutotunePipelineLayout(spec);
   return cocclRunPipelineWithLayout(
       spec, 1, tuning.targetSliceBytes, tuning.maxDepth);
+}
+
+ncclResult_t cocclRunPipelineBatch(
+    const cocclPipelineSpec* specs, size_t count) {
+  if (specs == nullptr || count == 0) return ncclInvalidArgument;
+  CUDACHECK(cudaSetDevice(specs[0].ownerComm->cudaDev));
+  std::vector<cocclPipelineBatchState> states(count);
+  std::vector<cocclPipelineBatchPlan> plans(count);
+  ncclResult_t result = ncclSuccess;
+  NCCLCHECK(exchangeBatchPlans(specs, count, &plans));
+  size_t prepared = 0;
+  for (; prepared < count; ++prepared) {
+    cocclPipelineBatchState& state = states[prepared];
+    state.communicationStage = sendRecvStage(specs + prepared);
+    if (state.communicationStage < 0) {
+      result = ncclInvalidArgument;
+      break;
+    }
+    if (plans[prepared].targetSliceBytes != 0) {
+      result = prepareExecution(
+          specs + prepared, 1,
+          (size_t)plans[prepared].targetSliceBytes,
+          (int)plans[prepared].maxDepth, &state.execution);
+    } else {
+      result = prepareExecution(
+          specs + prepared, (int)plans[prepared].maxDepth, 0,
+          kCocclPipelineMaxDepth, &state.execution);
+    }
+    if (result != ncclSuccess) break;
+  }
+  if (result == ncclSuccess) result = runPipelineBatch(&states);
+  if (result != ncclSuccess) (void)cudaDeviceSynchronize();
+  for (size_t i = 0; i < prepared; ++i) {
+    const ncclResult_t release = releaseExecution(
+        &states[i].execution, specs[i].stream);
+    if (result == ncclSuccess) result = release;
+  }
+  return result;
 }
 
 ncclResult_t cocclRunPipelineSerial(const cocclPipelineSpec* spec) {

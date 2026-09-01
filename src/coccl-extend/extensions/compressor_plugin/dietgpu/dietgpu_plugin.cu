@@ -103,15 +103,22 @@ bool decodeStackBytes(uint32_t frames, int probBits, size_t* stackBytes) {
       stackBytes);
 }
 
-bool ansBatchShapeSupported(size_t frames, size_t frameBytes) {
-  return frames <= kMaxBatchFrames && frameBytes != 0 &&
-      frameBytes <= (size_t)INT32_MAX / 2 &&
-      frameBytes % dietgpu::kANSRequiredAlignment == 0;
-}
+uint32_t ansCandidateStride(size_t frameBytes) {
+  if (frameBytes == 0 || frameBytes > UINT32_MAX ||
+      frameBytes % dietgpu::kANSRequiredAlignment != 0) {
+    return 0;
+  }
 
-bool ansShapeSupported(const coccl::Input& input, size_t frameBytes) {
-  return ansBatchShapeSupported(input.chunks(), frameBytes) &&
-      ((uintptr_t)input.data() % dietgpu::kANSRequiredAlignment) == 0;
+  const uint64_t blocks =
+      (frameBytes + dietgpu::kDefaultBlockSize - 1) /
+      dietgpu::kDefaultBlockSize;
+  uint64_t bytes =
+      dietgpu::ANSCoalescedHeader::getCompressedOverhead(
+          dietgpu::kDefaultBlockSize) +
+      blocks * dietgpu::getMaxBlockSizeCoalesced(
+          dietgpu::kDefaultBlockSize);
+  bytes = (bytes + sizeof(uint4) - 1) / sizeof(uint4) * sizeof(uint4);
+  return bytes <= INT32_MAX ? (uint32_t)bytes : 0;
 }
 
 bool encodedFramesAligned(const coccl::Output& output) {
@@ -125,7 +132,7 @@ unsigned int rawFrameGrid(size_t frames) {
       ? frames : (size_t)kMaxBatchFrames);
 }
 
-unsigned int finalizeBlocksPerFrame(size_t frameBytes) {
+unsigned int frameCopyBlocks(size_t frameBytes) {
   constexpr size_t kBytesPerBlock = 2048;
   constexpr size_t kMaxBlocks = 8192;
   const size_t blocks = (frameBytes - 1) / kBytesPerBlock + 1;
@@ -174,17 +181,17 @@ __global__ void prepareDecodeFrames(
     const uint8_t* input, size_t inputStride,
     const cocclCompressorFrameMetadata* metadata, uint8_t* output,
     size_t outputStride, size_t frameBytes, size_t frames,
-    uint8_t* active, bool forceRaw) {
-  for (size_t frame = blockIdx.x; frame < frames; frame += gridDim.x) {
+    uint8_t* active) {
+  for (size_t frame = blockIdx.y; frame < frames; frame += gridDim.y) {
     const cocclCompressorFrameMetadata frameMetadata = metadata[frame];
-    const bool encoded = !forceRaw &&
+    const bool encoded =
         frameMetadata.encoding == cocclCompressorFrameEncoded;
-    if (threadIdx.x == 0 && active != nullptr) {
+    if (blockIdx.x == 0 && threadIdx.x == 0 && active != nullptr) {
       active[frame] = encoded ? 1 : 0;
     }
     if (!encoded) {
-      for (size_t offset = threadIdx.x; offset < frameBytes;
-           offset += blockDim.x) {
+      for (size_t offset = (size_t)blockIdx.x * blockDim.x + threadIdx.x;
+           offset < frameBytes; offset += (size_t)gridDim.x * blockDim.x) {
         output[frame * outputStride + offset] =
             input[frame * inputStride + offset];
       }
@@ -236,6 +243,7 @@ struct DietGpuCompressor {
       return ncclInvalidArgument;
     }
     const size_t frameBytes = input.bytes() / input.chunks();
+    const uint32_t candidateStride = ansCandidateStride(frameBytes);
     size_t outputBytes = 0;
     if (output.frameStrideBytes() < frameBytes ||
         !coccl::checkedMultiply(output.frameStrideBytes(), input.chunks(),
@@ -244,7 +252,8 @@ struct DietGpuCompressor {
       return ncclInvalidArgument;
     }
     constexpr int kThreads = 256;
-    if (!ansShapeSupported(input, frameBytes) ||
+    if (input.chunks() > kMaxBatchFrames || candidateStride == 0 ||
+        ((uintptr_t)input.data() % dietgpu::kANSRequiredAlignment) != 0 ||
         !encodedFramesAligned(output)) {
       if (cudaMemcpy2DAsync(
               output.data(), output.frameStrideBytes(), input.data(),
@@ -262,8 +271,6 @@ struct DietGpuCompressor {
 
     const uint32_t frames = (uint32_t)input.chunks();
     const uint32_t rawFrameBytes = (uint32_t)frameBytes;
-    const uint32_t candidateStride =
-        dietgpu::getMaxCompressedSize(rawFrameBytes);
     size_t candidateBytes = 0;
     size_t candidateRegion = 0;
     size_t sizeRegion = 0;
@@ -295,7 +302,7 @@ struct DietGpuCompressor {
         input.data(), rawFrameBytes, rawFrameBytes, nullptr, candidate,
         candidateStride, sizes, context.stream());
     const dim3 finalizeGrid(
-        finalizeBlocksPerFrame(frameBytes), (unsigned int)input.chunks());
+        frameCopyBlocks(frameBytes), (unsigned int)input.chunks());
     finalizeFrames<<<finalizeGrid, kThreads, 0, context.stream()>>>(
         static_cast<const uint8_t*>(input.data()), frameBytes,
         static_cast<const uint8_t*>(candidate), candidateStride, sizes,
@@ -330,7 +337,8 @@ struct DietGpuCompressor {
       return ncclInvalidArgument;
     }
     constexpr int kThreads = 256;
-    if (!ansBatchShapeSupported(input.chunks(), frameBytes)) {
+    if (input.chunks() > kMaxBatchFrames ||
+        ansCandidateStride(frameBytes) == 0) {
       if (cudaMemcpy2DAsync(
               output.data(), frameBytes, input.data(), frameStrideBytes,
               frameBytes, input.chunks(), cudaMemcpyDeviceToDevice,
@@ -357,11 +365,11 @@ struct DietGpuCompressor {
     dietgpu::StackDeviceMemory stack(
         context.cudaDevice(), stackBase, stackBytes);
 
-    const dim3 grid(frames);
+    const dim3 grid(frameCopyBlocks(frameBytes), frames);
     prepareDecodeFrames<<<grid, kThreads, 0, context.stream()>>>(
         static_cast<const uint8_t*>(input.data()), frameStrideBytes,
         input.frameMetadata(), static_cast<uint8_t*>(output.data()),
-        frameBytes, frameBytes, input.chunks(), active, false);
+        frameBytes, frameBytes, input.chunks(), active);
     if (cudaGetLastError() != cudaSuccess) return ncclUnhandledCudaError;
     const dietgpu::ANSDecodeStatus decodeStatus =
         dietgpu::ansDecodeBatchStrideMasked(

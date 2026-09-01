@@ -19,6 +19,7 @@ enum class InputPattern {
   Mixed,
   Compressible,
   Random,
+  Ratio130,
 };
 
 enum class FrameExpectation {
@@ -94,8 +95,9 @@ int runRoundTrip(const cocclCompressorPlugin* plugin, int probBits,
       continue;
     }
     for (size_t offset = 0; offset < frameBytes; ++offset) {
-      input[frame * frameBytes + offset] =
-          static_cast<unsigned char>(nextRandom(&randomState));
+      const uint32_t value = nextRandom(&randomState);
+      input[frame * frameBytes + offset] = static_cast<unsigned char>(
+          pattern == InputPattern::Ratio130 ? value & 0x3f : value);
     }
   }
 
@@ -291,7 +293,8 @@ int runRoundTrip(const cocclCompressorPlugin* plugin, int probBits,
       cudaEventElapsedTime(&encodeMs, compressBegin, compressEnd);
       cudaEventElapsedTime(&decodeMs, decompressBegin, decompressEnd);
       const char* patternName = pattern == InputPattern::Compressible
-          ? "compressible" : "random";
+          ? "compressible"
+          : (pattern == InputPattern::Ratio130 ? "ratio130" : "random");
       printf("COCCL_DIETGPU_PROBE pattern=%s prob_bits=%d raw_bytes=%zu "
              "frames=%zu payload_bytes=%llu ratio=%.9f encode_us=%.3f "
              "decode_us=%.3f\n",
@@ -326,7 +329,8 @@ int main(int argc, char** argv) {
   if (argc != 2 && !probe) {
     fprintf(stderr,
             "usage: %s /path/to/libdietgpu.so "
-            "[--probe compressible|random FRAME_BYTES FRAMES PROB_BITS]\n",
+            "[--probe compressible|random|ratio130 FRAME_BYTES FRAMES "
+            "PROB_BITS]\n",
             argv[0]);
     return 2;
   }
@@ -353,7 +357,9 @@ int main(int argc, char** argv) {
   int result = 0;
   if (probe) {
     const InputPattern pattern = strcmp(argv[3], "compressible") == 0
-        ? InputPattern::Compressible : InputPattern::Random;
+        ? InputPattern::Compressible
+        : (strcmp(argv[3], "ratio130") == 0
+               ? InputPattern::Ratio130 : InputPattern::Random);
     result = runRoundTrip(
         plugin, atoi(argv[6]), strtoull(argv[4], nullptr, 10),
         strtoull(argv[5], nullptr, 10), pattern, FrameExpectation::Any, true);

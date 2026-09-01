@@ -307,13 +307,34 @@ ncclResult_t profileCompressor(
     local.active = active ? 1u : 0u;
     bool valid = active;
     size_t compressedBytes = 0;
+    if (active) {
+      if (framed) {
+        constexpr size_t kSymbols = 64;
+        constexpr size_t kRowBytes = 256;
+        constexpr size_t kPeriodBytes = kSymbols * kRowBytes;
+        const size_t periods = bytes / kPeriodBytes;
+        for (size_t symbol = 0; symbol < kSymbols; ++symbol) {
+          valid = valid && cudaMemset2DAsync(
+              static_cast<char*>(rawBuffer) + symbol * kRowBytes,
+              kPeriodBytes, (int)symbol, kRowBytes, periods, stream) ==
+              cudaSuccess;
+        }
+        const size_t tailBytes = bytes % kPeriodBytes;
+        if (tailBytes != 0) {
+          valid = valid && cudaMemsetAsync(
+              static_cast<char*>(rawBuffer) + bytes - tailBytes, 0x3f,
+              tailBytes, stream) == cudaSuccess;
+        }
+      } else {
+        valid = cudaMemsetAsync(rawBuffer, 0x3f, bytes, stream) ==
+            cudaSuccess;
+      }
+    }
     for (int i = 0; i < config.warmup && valid; ++i) {
-      valid = cudaMemsetAsync(rawBuffer, 0x3f, bytes, stream) == cudaSuccess &&
-          runCompressorIteration(
-              comm, compressor, rawBuffer, compressedBuffer, bytes,
-              sampleSizes.back(), datatype, stream, nullptr,
-              deviceFrameMetadata,
-              &compressedBytes);
+      valid = runCompressorIteration(
+          comm, compressor, rawBuffer, compressedBuffer, bytes,
+          sampleSizes.back(), datatype, stream, nullptr,
+          deviceFrameMetadata, &compressedBytes);
     }
     if (valid) valid = cudaStreamSynchronize(stream) == cudaSuccess;
 
@@ -321,8 +342,7 @@ ncclResult_t profileCompressor(
     std::vector<double> encodeTimes;
     std::vector<double> decodeTimes;
     for (int i = 0; i < config.iterations && valid; ++i) {
-      valid = cudaMemsetAsync(rawBuffer, 0x3f, bytes, stream) == cudaSuccess &&
-          cudaEventRecord(start, stream) == cudaSuccess &&
+      valid = cudaEventRecord(start, stream) == cudaSuccess &&
           runCompressorIteration(
               comm, compressor, rawBuffer, compressedBuffer, bytes,
               sampleSizes.back(), datatype, stream, encoded,

@@ -139,7 +139,8 @@ struct cocclAutotuneCodecSet {
 };
 
 enum class cocclAutotuneTopologyOperation : uint8_t {
-  P2p,
+  P2pIntra,
+  P2pInter,
   AllGather,
   AllToAll,
   ReduceScatter,

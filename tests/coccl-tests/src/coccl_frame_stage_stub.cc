@@ -1,4 +1,15 @@
 #include "core/pipeline/coccl_frame_exchange.h"
+#include "core/compression/coccl_compressor_runtime.h"
+
+bool cocclFrameMetadataValid(
+    const cocclCompressorFrameMetadata&, size_t) {
+  return false;
+}
+
+bool cocclCompressorSupports(
+    void*, cocclCompressorCapability) {
+  return false;
+}
 
 ncclResult_t cocclBuildAllToAllFrameExchanges(
     const void*, void*, size_t, size_t, int,

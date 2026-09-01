@@ -9,6 +9,14 @@
 
 #include <stdlib.h>
 
+static int SendRecvPeer(int rank, int nranks, int direction) {
+  const char* crossNode = getenv("COCCL_SENDRECV_CROSS_NODE");
+  if (crossNode != nullptr && crossNode[0] == '1') {
+    return (rank + nranks / 2) % nranks;
+  }
+  return (rank + direction + nranks) % nranks;
+}
+
 void SendRecvGetCollByteCount(size_t *sendcount, size_t *recvcount, size_t *paramcount, size_t *sendInplaceOffset, size_t *recvInplaceOffset, size_t count, int nranks) {
   *sendcount = count;
   *recvcount = count;
@@ -28,16 +36,28 @@ testResult_t SendRecvInitData(struct threadArgs* args, ncclDataType_t type, nccl
     CUDACHECK(cudaMemset(args->recvbuffs[i], 0, args->expectedBytes));
     void* data = in_place ? args->recvbuffs[i] : args->sendbuffs[i];
     __nv_bfloat16* hostdata = (__nv_bfloat16*)malloc(sendcount*wordSize(type));
-    for(int ii=0; ii<sendcount; ii++){
-      //  hostdata[ii] = (float) (rank*sendcount + ii);
+    const char* randomInput = getenv("COCCL_SENDRECV_RANDOM_INPUT");
+    if (randomInput != nullptr && randomInput[0] == '1') {
+      uint32_t state = 0x9e3779b9u ^ static_cast<uint32_t>(rank + 1);
+      unsigned char* bytes = reinterpret_cast<unsigned char*>(hostdata);
+      for (size_t byte = 0; byte < sendcount * wordSize(type); ++byte) {
+        state ^= state << 13;
+        state ^= state >> 17;
+        state ^= state << 5;
+        bytes[byte] = static_cast<unsigned char>(state);
+      }
+    } else {
+      for (size_t ii = 0; ii < sendcount; ++ii) {
         hostdata[ii] = (__nv_bfloat16)ii;
-        if(ii % (128) == 128 / 2){
-          hostdata[ii] = (ii / 128 + 1) * 128 * 2;
+        if (ii % 128 == 64) {
+          hostdata[ii] = static_cast<float>((ii / 128 + 1) * 256);
         }
+      }
     }
     CUDACHECK(cudaMemcpy(data, hostdata, sendcount*wordSize(type), cudaMemcpyHostToDevice));
+    free(hostdata);
     // TESTCHECK(InitData(data, sendcount, rank*sendcount, type, ncclSum, rep, 1, 0));
-    int peer = (rank-1+nranks)%nranks;
+    int peer = SendRecvPeer(rank, nranks, -1);
     TESTCHECK(InitData(args->expected[i], recvcount, peer*recvcount, type, ncclSum, rep, 1, 0));
     CUDACHECK(cudaDeviceSynchronize());
   }
@@ -59,8 +79,8 @@ testResult_t SendRecvRunColl(void* sendbuff, void* recvbuff, size_t count, ncclD
   NCCLCHECK(ncclCommCount(comm, &nRanks));
   int rank;
   NCCLCHECK(ncclCommUserRank(comm, &rank));
-  int previous = (rank-1+nRanks) % nRanks;
-  int next = (rank+1) % nRanks;
+  int previous = SendRecvPeer(rank, nRanks, -1);
+  int next = SendRecvPeer(rank, nRanks, 1);
 
   const char* sameStreamBidirectional =
       getenv("COCCL_SENDRECV_SAME_STREAM_BIDIRECTIONAL");
