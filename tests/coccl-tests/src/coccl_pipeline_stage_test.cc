@@ -94,9 +94,13 @@ ncclResult_t cocclLaunchPackSlice(const void*, size_t pitch, void*,
 
 ncclResult_t cocclLaunchUnpackSlice(const void*, void*, size_t pitch,
                                     size_t sliceBytes, size_t chunks,
+                                    cocclPipelineOutputLayout outputLayout,
+                                    int nNodes, int ranksPerNode,
                                     cudaStream_t) {
   ++unpackCalls;
   EXPECT(pitch == 1024 && sliceBytes == 256 && chunks == 4);
+  EXPECT(outputLayout == cocclPipelineOutputContiguous &&
+         nNodes == 1 && ranksPerNode == 4);
   return ncclSuccess;
 }
 
@@ -106,7 +110,8 @@ int main() {
   comm.rank = 2;
   const cocclPipelineStageContext context = {
       64, 256, 1024, ncclFloat32, &comm, nullptr,
-      cocclPipelineInputContiguous, 1, 4, 0x1234};
+      cocclPipelineInputContiguous, cocclPipelineOutputContiguous,
+      1, 4, 0x1234};
   cocclPipelineEdge edge = {
       reinterpret_cast<void*>(0x100000), 1024, 256, ncclFloat32, 4,
       nullptr, nullptr, 0};

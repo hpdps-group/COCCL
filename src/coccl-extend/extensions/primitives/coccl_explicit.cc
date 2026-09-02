@@ -32,7 +32,20 @@ ncclResult_t cocclAllGatherComp(
   const cocclInfo info = collectiveInfo(
       sendbuff, recvbuff, sendcount, datatype, ncclSum, ncclFuncAllGather,
       cocclOperation::AllGather, comm, stream);
-  return cocclEnqueueExplicitCall(&info, cocclAlgorithmNone);
+  return cocclEnqueueExplicitCall(
+      &info, cocclAlgorithmAllGatherOneShot);
+}
+
+NCCL_API(ncclResult_t, cocclAllGatherCompTwoShot, const void*, void*,
+         size_t, ncclDataType_t, ncclComm_t, cudaStream_t);
+ncclResult_t cocclAllGatherCompTwoShot(
+    const void* sendbuff, void* recvbuff, size_t sendcount,
+    ncclDataType_t datatype, ncclComm_t comm, cudaStream_t stream) {
+  const cocclInfo info = collectiveInfo(
+      sendbuff, recvbuff, sendcount, datatype, ncclSum, ncclFuncAllGather,
+      cocclOperation::AllGather, comm, stream);
+  return cocclEnqueueExplicitCall(
+      &info, cocclAlgorithmAllGatherTwoShot);
 }
 
 NCCL_API(ncclResult_t, cocclAllToAllComp, const void*, void*, size_t,

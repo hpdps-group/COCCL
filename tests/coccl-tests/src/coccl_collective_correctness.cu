@@ -21,6 +21,7 @@ int gWorldRank = 0;
 enum class Operation {
   AllToAll,
   AllGather,
+  AllGatherTwoShot,
   ReduceScatterOneShot,
   ReduceScatterTwoShot,
   AllReduceOneShot,
@@ -112,6 +113,7 @@ const char* operationName(Operation operation) {
   switch (operation) {
     case Operation::AllToAll: return "alltoall";
     case Operation::AllGather: return "allgather";
+    case Operation::AllGatherTwoShot: return "allgather";
     case Operation::ReduceScatterOneShot: return "reducescatter";
     case Operation::ReduceScatterTwoShot: return "reducescatter";
     case Operation::AllReduceOneShot: return "allreduce";
@@ -127,6 +129,7 @@ const char* algorithmName(Operation operation, bool subAdd) {
   switch (operation) {
     case Operation::ReduceScatterOneShot:
     case Operation::AllReduceOneShot: return "oneshot";
+    case Operation::AllGatherTwoShot:
     case Operation::ReduceScatterTwoShot:
     case Operation::AllReduceTwoShot: return "twoshot";
     case Operation::AllReduceTripleShot: return "tripleshot";
@@ -155,6 +158,7 @@ size_t inputElements(Operation operation, int ranks,
                      size_t rawChunkElements) {
   switch (operation) {
     case Operation::AllGather:
+    case Operation::AllGatherTwoShot:
     case Operation::SendRecv:
       return rawChunkElements;
     default:
@@ -164,7 +168,9 @@ size_t inputElements(Operation operation, int ranks,
 
 size_t outputElements(Operation operation, int ranks, size_t inputCount) {
   switch (operation) {
-    case Operation::AllGather: return inputCount * ranks;
+    case Operation::AllGather:
+    case Operation::AllGatherTwoShot:
+      return inputCount * ranks;
     case Operation::ReduceScatterOneShot:
     case Operation::ReduceScatterTwoShot: return inputCount / ranks;
     default: return inputCount;
@@ -234,6 +240,7 @@ void runNative(Operation operation, const void* input, void* output,
       return;
     }
     case Operation::AllGather:
+    case Operation::AllGatherTwoShot:
       NCCLCHECK(ncclAllGather(input, output, inputCount, datatype,
                               comm, stream));
       return;
@@ -272,6 +279,11 @@ void runCompressed(Operation operation, const void* input, void* output,
         NCCLCHECK(ncclAlltoAll(input, output, inputCount / ranks,
                               datatype, comm, stream));
         return;
+      case Operation::AllGather:
+      case Operation::AllGatherTwoShot:
+        NCCLCHECK(ncclAllGather(
+            input, output, inputCount, datatype, comm, stream));
+        return;
       case Operation::ReduceScatterOneShot:
       case Operation::ReduceScatterTwoShot:
         NCCLCHECK(ncclReduceScatter(
@@ -297,6 +309,10 @@ void runCompressed(Operation operation, const void* input, void* output,
     case Operation::AllGather:
       NCCLCHECK(cocclAllGatherComp(input, output, inputCount, datatype,
                                    comm, stream));
+      return;
+    case Operation::AllGatherTwoShot:
+      NCCLCHECK(cocclAllGatherCompTwoShot(
+          input, output, inputCount, datatype, comm, stream));
       return;
     case Operation::ReduceScatterOneShot:
       NCCLCHECK(cocclReduceScatterCompOneShot(
@@ -356,7 +372,8 @@ void runCase(Operation operation, bool subAdd, ncclDataType_t datatype,
   size_t inputOffset = 0;
   size_t outputOffset = 0;
   if (options.inPlace) {
-    if (operation == Operation::AllGather) {
+    if (operation == Operation::AllGather ||
+        operation == Operation::AllGatherTwoShot) {
       inputOffset = (size_t)worldRank * inputCount;
     } else if (operation == Operation::ReduceScatterOneShot ||
                operation == Operation::ReduceScatterTwoShot) {
@@ -464,7 +481,9 @@ void runCase(Operation operation, bool subAdd, ncclDataType_t datatype,
         algorithmName(operation, subAdd), options.compressor.c_str(),
         options.path.c_str(), options.datatype.c_str(), options.depth,
         options.inPlace ? 1 : 0,
-        operation == Operation::AllGather || operation == Operation::SendRecv
+        operation == Operation::AllGather ||
+            operation == Operation::AllGatherTwoShot ||
+            operation == Operation::SendRecv
             ? inputCount : inputCount / (size_t)worldSize,
         outputCount, meanRelativeError, meanAbsoluteError, relativeL1Error,
         globalMaxAbsoluteError);
@@ -492,7 +511,8 @@ void runSuite(const Options& options, ncclDataType_t datatype,
                   Operation::AllReduceTwoShot};
     operations.push_back(Operation::SendRecv);
   } else if (options.suite == "hierarchical") {
-    operations = {Operation::ReduceScatterTwoShot,
+    operations = {Operation::AllGatherTwoShot,
+                  Operation::ReduceScatterTwoShot,
                   Operation::AllReduceTripleShot};
   } else if (options.suite == "subadd") {
     operations = {Operation::AllGather};

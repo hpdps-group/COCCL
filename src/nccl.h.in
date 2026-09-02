@@ -741,6 +741,10 @@ ncclResult_t cocclAllGatherComp(const void* sendbuff, void* recvbuff, size_t sen
     ncclDataType_t datatype, ncclComm_t comm, cudaStream_t stream);
 ncclResult_t pcocclAllGatherComp(const void* sendbuff, void* recvbuff, size_t sendcount,
     ncclDataType_t datatype, ncclComm_t comm, cudaStream_t stream);
+ncclResult_t cocclAllGatherCompTwoShot(const void* sendbuff, void* recvbuff, size_t sendcount,
+    ncclDataType_t datatype, ncclComm_t comm, cudaStream_t stream);
+ncclResult_t pcocclAllGatherCompTwoShot(const void* sendbuff, void* recvbuff, size_t sendcount,
+    ncclDataType_t datatype, ncclComm_t comm, cudaStream_t stream);
 ncclResult_t cocclAllToAllComp(const void* sendbuff, void* recvbuff, size_t sendcount,
     ncclDataType_t datatype, ncclComm_t comm, cudaStream_t stream);
 ncclResult_t pcocclAllToAllComp(const void* sendbuff, void* recvbuff, size_t sendcount,

@@ -23,6 +23,7 @@ constexpr double kLayoutBetaUsPerByte = 1.16e-6;
 constexpr double kReductionBetaUsPerByte = 5.0e-7;
 constexpr double kSendRecvMetadataAlphaUs = 6.0;
 constexpr size_t kEfficientElements = size_t{16} << 20;
+constexpr size_t kHierarchicalAllGatherHalfSliceStepBytes = size_t{8} << 20;
 constexpr size_t kFramedTargetSliceBytes = size_t{32} << 20;
 constexpr size_t kFramedSendRecvMinPipelineBytes = size_t{32} << 20;
 constexpr size_t kFramedSendRecvMinSliceBytes = size_t{16} << 20;
@@ -46,6 +47,7 @@ struct cocclAutotuneStageModel {
   StageResource resource;
   std::array<StageCostTerm, kMaxStageTerms> terms = {};
   int termCount = 0;
+  bool requiredAtDepthOne = false;
 };
 
 struct StageGraph {
@@ -63,6 +65,7 @@ struct PipelineTuningKey {
   size_t inputChunks;
   ncclDataType_t datatype;
   int stageCount;
+  cocclPipelineOutputLayout outputLayout;
   std::array<cocclPipelineStageKind, kCocclPipelineExplicitStages>
       kinds = {};
   std::array<ncclComm_t, kCocclPipelineExplicitStages> comms = {};
@@ -70,10 +73,11 @@ struct PipelineTuningKey {
 
   bool operator<(const PipelineTuningKey& other) const {
     return std::tie(comm, recipe, rawChunkCount, inputChunks, datatype,
-                    stageCount, kinds, comms, compressors) <
+                    stageCount, outputLayout, kinds, comms, compressors) <
         std::tie(other.comm, other.recipe, other.rawChunkCount,
                  other.inputChunks, other.datatype, other.stageCount,
-                 other.kinds, other.comms, other.compressors);
+                 other.outputLayout, other.kinds, other.comms,
+                 other.compressors);
   }
 };
 
@@ -315,6 +319,8 @@ StageGraph buildStageGraph(const cocclPipelineSpec* spec) {
   if (!sendRecv) {
     cocclAutotuneStageModel unpack = {
         cocclPipelineStageUnpack, StageResource::Layout};
+    unpack.requiredAtDepthOne =
+        spec->outputLayout != cocclPipelineOutputContiguous;
     addTerm(&unpack, fixedModel(kLayoutAlphaUs, kLayoutBetaUsPerByte),
             wireScale, &graph);
     addStage(unpack, &graph);
@@ -323,10 +329,10 @@ StageGraph buildStageGraph(const cocclPipelineSpec* spec) {
 }
 
 double scoreGraph(const StageGraph& graph, size_t totalBytes,
-                  size_t targetSliceBytes) {
+                  size_t targetSliceBytes, int maxDepth) {
   const int depth = cocclPipelineDepthForSlice(
-      totalBytes, targetSliceBytes, kCocclAutotuneMaxPipelineDepth);
-  const size_t regularBytes = depth == kCocclAutotuneMaxPipelineDepth &&
+      totalBytes, targetSliceBytes, maxDepth);
+  const size_t regularBytes = depth == maxDepth &&
           totalBytes / (size_t)depth > targetSliceBytes
       ? totalBytes / (size_t)depth +
             (totalBytes % (size_t)depth != 0)
@@ -344,8 +350,10 @@ double scoreGraph(const StageGraph& graph, size_t totalBytes,
     double dependency = 0.0;
     for (int index = 0; index < graph.stageCount; ++index) {
       const cocclAutotuneStageModel& stage = graph.stages[index];
-      if (depth == 1 && (stage.kind == cocclPipelineStagePack ||
-                         stage.kind == cocclPipelineStageUnpack)) {
+      if (depth == 1 &&
+          (stage.kind == cocclPipelineStagePack ||
+           (stage.kind == cocclPipelineStageUnpack &&
+            !stage.requiredAtDepthOne))) {
         continue;
       }
       const double duration = stageCost(stage, (double)bytes);
@@ -366,14 +374,24 @@ double scoreGraph(const StageGraph& graph, size_t totalBytes,
   return completion + smContention + memoryContention;
 }
 
+cocclPipelineTuningDecision tuningDecision(
+    const StageGraph& graph, size_t totalBytes, size_t targetSliceBytes,
+    int maxDepth) {
+  return {targetSliceBytes, maxDepth,
+          graph.valid
+              ? scoreGraph(graph, totalBytes, targetSliceBytes, maxDepth)
+              : std::numeric_limits<double>::infinity()};
+}
+
 size_t quantizeUp(size_t bytes, size_t step) {
   return bytes / step * step + (bytes % step != 0 ? step : 0);
 }
 
 void addCandidate(size_t bytes, size_t minimumBytes, size_t maximumBytes,
+                  size_t stepBytes,
                   std::array<size_t, 24>* candidates, int* count) {
   bytes = std::min(maximumBytes, std::max(
-      minimumBytes, quantizeUp(bytes, kCocclAutotuneSliceStepBytes)));
+      minimumBytes, quantizeUp(bytes, stepBytes)));
   for (int i = 0; i < *count; ++i) {
     if ((*candidates)[i] == bytes) return;
   }
@@ -383,7 +401,8 @@ void addCandidate(size_t bytes, size_t minimumBytes, size_t maximumBytes,
 PipelineTuningKey cacheKey(const cocclPipelineSpec* spec) {
   PipelineTuningKey key = {
       spec->ownerComm, spec->name, spec->rawChunkCount,
-      spec->inputChunks, spec->datatype, spec->stageCount};
+      spec->inputChunks, spec->datatype, spec->stageCount,
+      spec->outputLayout};
   for (int stage = 0; stage < spec->stageCount; ++stage) {
     key.kinds[stage] = spec->stages[stage].kind;
     key.comms[stage] = spec->stages[stage].comm;
@@ -402,23 +421,41 @@ cocclPipelineTuningDecision chooseLayout(const cocclPipelineSpec* spec) {
   }
   if (graph.framed && sendRecv) {
     if (totalBytes < kFramedSendRecvMinPipelineBytes) {
-      return {totalBytes, 1};
+      return tuningDecision(graph, totalBytes, totalBytes, 1);
     }
-    return {std::min(
-                kFramedSendRecvTargetSliceBytes,
-                std::max(kFramedSendRecvMinSliceBytes, totalBytes / 4)),
-            kCocclAutotuneMaxPipelineDepth};
+    return tuningDecision(
+        graph, totalBytes,
+        std::min(kFramedSendRecvTargetSliceBytes,
+                 std::max(kFramedSendRecvMinSliceBytes, totalBytes / 4)),
+        kCocclAutotuneMaxPipelineDepth);
   }
 
   if (sendRecv) {
     return totalBytes < kFixedSendRecvMinPipelineBytes
-        ? cocclPipelineTuningDecision{totalBytes, 1}
-        : cocclPipelineTuningDecision{totalBytes / 2, 2};
+        ? tuningDecision(graph, totalBytes, totalBytes, 1)
+        : tuningDecision(graph, totalBytes, totalBytes / 2, 2);
   }
 
   if (!graph.valid ||
       (spec->stageCount < 4 && !graph.framed && !sendRecv)) {
-    return {totalBytes, 1};
+    return tuningDecision(graph, totalBytes, totalBytes, 1);
+  }
+
+  if (graph.framed &&
+      spec->outputLayout == cocclPipelineOutputHierarchicalAllGather) {
+    constexpr size_t kMinFramedHierarchicalBytes = size_t{64} << 20;
+    constexpr size_t kHalfFramedHierarchicalMaxSliceBytes =
+        size_t{256} << 20;
+    if (totalBytes < kMinFramedHierarchicalBytes) {
+      return tuningDecision(graph, totalBytes, totalBytes, 1);
+    }
+    const bool wideDatatype = ncclTypeSize(spec->datatype) >= 4;
+    const size_t targetSliceBytes = wideDatatype
+        ? totalBytes / 2
+        : std::min(totalBytes / 2,
+                   kHalfFramedHierarchicalMaxSliceBytes);
+    return tuningDecision(
+        graph, totalBytes, targetSliceBytes, wideDatatype ? 2 : 4);
   }
 
   if (graph.framed && !sendRecv) {
@@ -430,11 +467,21 @@ cocclPipelineTuningDecision chooseLayout(const cocclPipelineSpec* spec) {
     const int maxDepth = hasAllGather
         ? (totalBytes < (size_t{4} << 30) ? 4 : 16)
         : (totalBytes < (size_t{2} << 30) ? 8 : 16);
-    return {std::min(totalBytes, kFramedTargetSliceBytes), maxDepth};
+    return tuningDecision(
+        graph, totalBytes,
+        std::min(totalBytes, kFramedTargetSliceBytes), maxDepth);
   }
 
-  const size_t layoutFloor = kEfficientElements *
-      (size_t)ncclTypeSize(spec->datatype);
+  const bool hierarchicalAllGather =
+      spec->outputLayout == cocclPipelineOutputHierarchicalAllGather;
+  const size_t sliceStep = hierarchicalAllGather
+      ? (ncclTypeSize(spec->datatype) >= 4
+             ? kCocclAutotuneSliceStepBytes
+             : kHierarchicalAllGatherHalfSliceStepBytes)
+      : kCocclAutotuneSliceStepBytes;
+  const size_t layoutFloor = hierarchicalAllGather
+      ? sliceStep
+      : kEfficientElements * (size_t)ncclTypeSize(spec->datatype);
   size_t efficientBytes = layoutFloor;
   for (int stage = 0; stage < graph.stageCount; ++stage) {
     const double knee = stageEfficientRawBytes(graph.stages[stage]);
@@ -477,27 +524,33 @@ cocclPipelineTuningDecision chooseLayout(const cocclPipelineSpec* spec) {
   const size_t minimumParallelSlices = std::max<size_t>(
       2, ((size_t)spec->stageCount + 2) / 3);
   if (totalBytes / minimumParallelSlices < minimumBytes) {
-    return {totalBytes, 1};
+    return tuningDecision(graph, totalBytes, totalBytes, 1);
   }
   const size_t maximumBytes = totalBytes / minimumParallelSlices;
   addCandidate(efficientBytes / 2, minimumBytes, maximumBytes,
+               sliceStep,
                &candidates, &candidateCount);
   addCandidate(efficientBytes, minimumBytes, maximumBytes,
+               sliceStep,
                &candidates, &candidateCount);
   addCandidate(efficientBytes * 2, minimumBytes, maximumBytes,
+               sliceStep,
                &candidates, &candidateCount);
   addCandidate((size_t)ideal, minimumBytes, maximumBytes,
+               sliceStep,
                &candidates, &candidateCount);
-  addCandidate((size_t)ideal + kCocclAutotuneSliceStepBytes, minimumBytes,
-               maximumBytes, &candidates, &candidateCount);
-  if ((size_t)ideal > kCocclAutotuneSliceStepBytes) {
-    addCandidate((size_t)ideal - kCocclAutotuneSliceStepBytes, minimumBytes,
-                 maximumBytes, &candidates, &candidateCount);
+  addCandidate((size_t)ideal + sliceStep, minimumBytes,
+               maximumBytes, sliceStep,
+               &candidates, &candidateCount);
+  if ((size_t)ideal > sliceStep) {
+    addCandidate((size_t)ideal - sliceStep, minimumBytes,
+                 maximumBytes, sliceStep, &candidates, &candidateCount);
   }
   for (int stage = 0; stage < graph.stageCount; ++stage) {
     const double knee = stageEfficientRawBytes(graph.stages[stage]);
     if (std::isfinite(knee) && knee > 0.0) {
       addCandidate((size_t)knee, minimumBytes, maximumBytes,
+                   sliceStep,
                    &candidates, &candidateCount);
     }
   }
@@ -506,7 +559,8 @@ cocclPipelineTuningDecision chooseLayout(const cocclPipelineSpec* spec) {
   double bestScore = std::numeric_limits<double>::infinity();
   for (int candidate = 0; candidate < candidateCount; ++candidate) {
     scores[candidate] = scoreGraph(
-        graph, totalBytes, candidates[candidate]);
+        graph, totalBytes, candidates[candidate],
+        kCocclAutotuneMaxPipelineDepth);
     bestScore = std::min(bestScore, scores[candidate]);
   }
   size_t selected = 0;
@@ -515,7 +569,8 @@ cocclPipelineTuningDecision chooseLayout(const cocclPipelineSpec* spec) {
       selected = std::max(selected, candidates[candidate]);
     }
   }
-  return {selected, kCocclAutotuneMaxPipelineDepth};
+  return tuningDecision(
+      graph, totalBytes, selected, kCocclAutotuneMaxPipelineDepth);
 }
 
 }  // namespace

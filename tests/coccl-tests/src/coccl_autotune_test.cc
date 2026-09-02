@@ -77,14 +77,29 @@ void testEligibilityAndFallback() {
       cocclAutotuneBuildCandidates(cocclOperation::AllReduce, hierarchical);
   const cocclAutotuneCandidateSet arTail =
       cocclAutotuneBuildCandidates(cocclOperation::AllReduce, tail);
+  const cocclAutotuneCandidateSet agFlat =
+      cocclAutotuneBuildCandidates(cocclOperation::AllGather, flat);
+  const cocclAutotuneCandidateSet agHierarchical =
+      cocclAutotuneBuildCandidates(cocclOperation::AllGather, hierarchical);
 
-  if (rsFlat.count != 1 || rsHierarchical.count != 2 ||
+  if (agFlat.count != 1 || agHierarchical.count != 2 ||
+      rsFlat.count != 1 || rsHierarchical.count != 2 ||
       arFlat.count != 2 || arHierarchical.count != 3 ||
       arTail.count != 0) {
     fail("candidate eligibility count mismatch");
   }
   rows.push_back({"allreduce_tail_rejects_oneshot", "", "none", 0, 0,
                   "PASS"});
+
+  expectDecision("allgather_flat_heuristic", agFlat,
+                 cocclAlgorithmNone, false,
+                 cocclAlgorithmAllGatherOneShot, false, false);
+  expectDecision("allgather_hierarchical_heuristic", agHierarchical,
+                 cocclAlgorithmNone, false,
+                 cocclAlgorithmAllGatherOneShot, false, false);
+  expectDecision("forced_allgather_fallback", agFlat,
+                 cocclAlgorithmAllGatherTwoShot, true,
+                 cocclAlgorithmAllGatherOneShot, false, true);
 
   expectDecision("reducescatter_flat_heuristic", rsFlat,
                  cocclAlgorithmNone, false,
@@ -132,6 +147,19 @@ void testModelSelection() {
   expectDecision("partial_model_whole_fallback", candidates,
                  cocclAlgorithmNone, true,
                  cocclAlgorithmAllReduceTwoShot, false, false);
+
+  cocclAutotuneCandidateSet allGather =
+      cocclAutotuneBuildCandidates(
+          cocclOperation::AllGather, hierarchical);
+  setScore(&allGather, cocclAlgorithmAllGatherOneShot, 20.0);
+  setScore(&allGather, cocclAlgorithmAllGatherTwoShot, 10.0);
+  expectDecision("allgather_minimum_finite_cost", allGather,
+                 cocclAlgorithmNone, true,
+                 cocclAlgorithmAllGatherTwoShot, true, false);
+  setScore(&allGather, cocclAlgorithmAllGatherOneShot, 10.0);
+  expectDecision("allgather_stable_tie", allGather,
+                 cocclAlgorithmNone, true,
+                 cocclAlgorithmAllGatherOneShot, true, false);
 }
 
 void testCostModel() {
@@ -153,7 +181,8 @@ void testCostModel() {
 
   const cocclSelectionPerformanceModel performance = {
       {1.0, 0.001, true}, {2.0, 0.002, true},
-      {5.0, 0.005, true}, {7.0, 0.007, true}};
+      {5.0, 0.005, true}, {7.0, 0.007, true},
+      {4.0, 0.004, true}, {6.0, 0.006, true}};
   const cocclCodecModel codec = {
       {3.0, 0.003, true}, 2.0, true};
   const cocclAutotuneCodecSet codecs = {
@@ -165,6 +194,17 @@ void testCostModel() {
     if (!std::isfinite(cost) || cost <= 0.0) {
       fail("valid model returned invalid cost");
     }
+  }
+
+  const double allGatherOne = cocclAutotuneEvaluateCost(
+      cocclAutotuneCostKind::AllGatherOneShot, performance,
+      codecs, 1024.0, 4, 2);
+  const double allGatherTwo = cocclAutotuneEvaluateCost(
+      cocclAutotuneCostKind::AllGatherTwoShot, performance,
+      codecs, 1024.0, 4, 2);
+  if (!std::isfinite(allGatherOne) || !std::isfinite(allGatherTwo) ||
+      allGatherOne == allGatherTwo) {
+    fail("allgather algorithm cost model mismatch");
   }
 
   const double oneShot = cocclAutotuneEvaluateCost(

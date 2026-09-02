@@ -8,6 +8,8 @@
 
 enum cocclAlgorithmKind {
   cocclAlgorithmNone = 0,
+  cocclAlgorithmAllGatherOneShot,
+  cocclAlgorithmAllGatherTwoShot,
   cocclAlgorithmReduceScatterOneShot,
   cocclAlgorithmReduceScatterTwoShot,
   cocclAlgorithmAllReduceOneShot,

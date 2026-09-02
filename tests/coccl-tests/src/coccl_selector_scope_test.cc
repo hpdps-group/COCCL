@@ -2,10 +2,13 @@
 
 #include "core/compression/coccl_compressor_runtime.h"
 #include "core/config/coccl_config.h"
+#include "core/pipeline/coccl_pipeline.h"
 #include "core/runtime/coccl_comm.h"
+#include "core/tuning/coccl_autotune_pipeline.h"
 #include "comm.h"
 #include "debug.h"
 
+#include <chrono>
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
@@ -32,6 +35,8 @@ cocclCodecModel intraModel = {{1.0, 1e-6, true}, 8.0, true};
 cocclCodecModel interModel = {{3.0, 3e-6, true}, 4.0, true};
 ncclDataType_t snapshotDatatype = ncclNumTypes;
 bool framedCompressor;
+double nativeAllGatherCost = 0.5;
+double hierarchicalAllGatherCost = 1.0;
 
 void setScope(cocclPreparedCall* prepared, cocclCompressionScope scope,
               void* compressor, bool datatypeSupported = true) {
@@ -61,6 +66,14 @@ const cocclCodecModel& modelFor(void* compressor) {
 void checkSelection(cocclPreparedCall* prepared,
                     cocclAlgorithmKind expected, bool expectedModel) {
   EXPECT(cocclSelectAlgorithm(prepared) == ncclSuccess);
+  if (prepared->algorithm != expected) {
+    std::fprintf(stderr,
+                 "selection mismatch operation=%d count=%zu expected=%d actual=%d one=%g two=%g triple=%g\n",
+                 (int)prepared->info.operation, prepared->info.count,
+                 (int)expected, (int)prepared->algorithm,
+                 prepared->oneShotUs, prepared->twoShotUs,
+                 prepared->tripleShotUs);
+  }
   EXPECT(prepared->algorithm == expected);
   EXPECT(prepared->usedModel == expectedModel);
 }
@@ -111,6 +124,15 @@ ncclResult_t cocclCommGetZeroCtaComm(ncclComm_t comm, ncclComm_t* child) {
   return ncclSuccess;
 }
 
+cocclPipelineTuningDecision cocclAutotunePipelineLayout(
+    const cocclPipelineSpec* spec) {
+  const double cost = spec->stageCount == 1
+      ? nativeAllGatherCost
+      : (spec->outputLayout == cocclPipelineOutputHierarchicalAllGather
+             ? hierarchicalAllGatherCost : 2.0);
+  return {spec->rawChunkCount, 1, cost};
+}
+
 int main() {
   ncclComm comm = {};
   comm.rank = 0;
@@ -124,6 +146,38 @@ int main() {
   config.autotune.enabled = true;
 
   cocclPreparedCall prepared =
+      makePrepared(&comm, cocclOperation::AllGather);
+  prepared.info.count = (size_t{64} << 20) / sizeof(float);
+  setScope(&prepared, cocclCompressionScope::Default, kDefault);
+  setScope(&prepared, cocclCompressionScope::Inter, kInter);
+  checkSelection(&prepared, cocclAlgorithmAllGatherTwoShot, true);
+
+  prepared = makePrepared(&comm, cocclOperation::AllGather);
+  prepared.info.count = (size_t{64} << 20) / sizeof(float);
+  setScope(&prepared, cocclCompressionScope::Inter, kInter);
+  checkSelection(&prepared, cocclAlgorithmAllGatherOneShot, true);
+
+  nativeAllGatherCost = 1.0;
+  hierarchicalAllGatherCost = 0.97;
+  prepared = makePrepared(&comm, cocclOperation::AllGather);
+  prepared.info.count = (size_t{64} << 20) / sizeof(float);
+  setScope(&prepared, cocclCompressionScope::Inter, kInter);
+  checkSelection(&prepared, cocclAlgorithmAllGatherOneShot, true);
+
+  hierarchicalAllGatherCost = 0.9;
+  prepared = makePrepared(&comm, cocclOperation::AllGather);
+  prepared.info.count = (size_t{64} << 20) / sizeof(float);
+  setScope(&prepared, cocclCompressionScope::Inter, kInter);
+  checkSelection(&prepared, cocclAlgorithmAllGatherTwoShot, true);
+  nativeAllGatherCost = 0.5;
+  hierarchicalAllGatherCost = 1.0;
+
+  prepared = makePrepared(&comm, cocclOperation::AllGather);
+  setScope(&prepared, cocclCompressionScope::Default, kDefault);
+  setScope(&prepared, cocclCompressionScope::Inter, kInter);
+  checkSelection(&prepared, cocclAlgorithmAllGatherOneShot, false);
+
+  prepared =
       makePrepared(&comm, cocclOperation::ReduceScatter);
   setScope(&prepared, cocclCompressionScope::Inter, kInter);
   checkSelection(&prepared, cocclAlgorithmReduceScatterTwoShot, true);
@@ -196,6 +250,25 @@ int main() {
   setScope(&prepared, cocclCompressionScope::Inter, kInter);
   checkSelection(&prepared, cocclAlgorithmReduceScatterTwoShot, true);
   EXPECT(snapshotDatatype == ncclBfloat16);
+
+  prepared = makePrepared(&comm, cocclOperation::AllGather);
+  prepared.info.count = (size_t{64} << 20) / sizeof(float);
+  setScope(&prepared, cocclCompressionScope::Default, kDefault);
+  setScope(&prepared, cocclCompressionScope::Inter, kInter);
+  constexpr int kIterations = 1000000;
+  size_t checksum = 0;
+  const auto begin = std::chrono::steady_clock::now();
+  for (int iteration = 0; iteration < kIterations; ++iteration) {
+    EXPECT(cocclSelectAlgorithm(&prepared) == ncclSuccess);
+    checksum += (size_t)prepared.algorithm;
+  }
+  const double nsPerCall =
+      std::chrono::duration<double, std::nano>(
+          std::chrono::steady_clock::now() - begin).count() /
+      kIterations;
+  std::printf("allgather_algorithm_query_ns_per_call=%.2f checksum=%zu\n",
+              nsPerCall, checksum);
+  EXPECT(nsPerCall < 1000.0);
 
   std::printf("coccl selector scopes: PASS\n");
   return 0;

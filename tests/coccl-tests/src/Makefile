@@ -95,7 +95,7 @@ DST_DIR := $(BUILDDIR)
 SRC_FILES := $(wildcard *.cu)
 OBJ_FILES := $(SRC_FILES:%.cu=${DST_DIR}/%.o)
 BIN_FILES_LIST := all_reduce all_gather broadcast reduce_scatter reduce alltoall scatter gather sendrecv hypercube \
-alltoall_comp alltoall_p2p all_gather_comp all_reduce_comp_twoshot \
+alltoall_comp alltoall_p2p all_gather_comp all_gather_comp_twoshot all_reduce_comp_twoshot \
 reduce_scatter_comp_oneshot reduce_scatter_comp_twoshot \
 all_reduce_comp_tripleshot sendrecv_comp all_reduce_comp_oneshot
 BIN_FILES := $(BIN_FILES_LIST:%=${DST_DIR}/%_perf)

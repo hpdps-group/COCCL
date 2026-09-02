@@ -75,8 +75,9 @@ bool totalBytes(const cocclInfo& info,
   return true;
 }
 
-bool tunableReduction(cocclOperation operation) {
-  return operation == cocclOperation::ReduceScatter ||
+bool tunableCollective(cocclOperation operation) {
+  return operation == cocclOperation::AllGather ||
+      operation == cocclOperation::ReduceScatter ||
       operation == cocclOperation::AllReduce;
 }
 
@@ -224,7 +225,7 @@ ncclResult_t cocclEnqueueCheck(const cocclInfo* info, bool* isEnqueued) {
     return routeNativeGroupedSendRecv(*info, isEnqueued);
   }
   ensureAutotuneModels(info->comm);
-  if (tunableReduction(info->operation)) {
+  if (tunableCollective(info->operation)) {
     if (ncclGroupDepth == 0 &&
         cocclSelectAlgorithm(&prepared) != ncclSuccess) {
       return routeNativeGroupedSendRecv(*info, isEnqueued);
@@ -256,9 +257,9 @@ ncclResult_t cocclEnqueueExplicitCall(
   ensureAutotuneModels(info->comm);
   prepared.algorithm = algorithm;
   const bool deferSelection = ncclGroupDepth > 0 &&
-      algorithm == cocclAlgorithmNone && tunableReduction(info->operation);
+      algorithm == cocclAlgorithmNone && tunableCollective(info->operation);
   if (!deferSelection && algorithm == cocclAlgorithmNone &&
-      tunableReduction(info->operation)) {
+      tunableCollective(info->operation)) {
     NCCLCHECK(cocclSelectAlgorithm(&prepared));
   }
   if (!deferSelection && !cocclPreparedAlgorithmHasCompression(
@@ -328,10 +329,14 @@ ncclResult_t cocclExecutePreparedCall(const cocclPreparedCall* prepared) {
 
   cocclPreparedCall selected;
   if (prepared->algorithm == cocclAlgorithmNone &&
-      tunableReduction(prepared->info.operation)) {
+      tunableCollective(prepared->info.operation)) {
     selected = *prepared;
     NCCLCHECK(cocclSelectAlgorithm(&selected));
     prepared = &selected;
+  }
+  if (!cocclPreparedAlgorithmHasCompression(
+          prepared, prepared->algorithm)) {
+    return cocclReplayNativeCall(prepared->info);
   }
 
   const cocclInfo& info = prepared->info;

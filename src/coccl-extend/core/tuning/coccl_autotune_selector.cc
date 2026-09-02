@@ -1,9 +1,11 @@
 #include "coccl_autotune_internal.h"
 
 #include "core/config/coccl_config.h"
+#include "core/pipeline/coccl_pipeline.h"
 #include "core/runtime/coccl_comm.h"
 #include "comm.h"
 #include "core/compression/compress.h"
+#include "core/tuning/coccl_autotune_pipeline.h"
 #include "debug.h"
 
 #include <limits>
@@ -19,6 +21,16 @@ bool uniformNodeRanks(ncclComm_t comm) {
 
 cocclAlgorithmKind configuredAlgorithm(cocclOperation operation) {
   const cocclAutotuneConfig& config = cocclGetConfig().autotune;
+  if (operation == cocclOperation::AllGather) {
+    switch (config.allGatherAlgorithm) {
+      case cocclAllGatherAlgorithmPolicy::Auto:
+        return cocclAlgorithmNone;
+      case cocclAllGatherAlgorithmPolicy::OneShot:
+        return cocclAlgorithmAllGatherOneShot;
+      case cocclAllGatherAlgorithmPolicy::TwoShot:
+        return cocclAlgorithmAllGatherTwoShot;
+    }
+  }
   if (operation == cocclOperation::ReduceScatter) {
     switch (config.reduceScatterAlgorithm) {
       case cocclReduceScatterAlgorithmPolicy::Auto:
@@ -61,7 +73,9 @@ void setCandidateScore(cocclPreparedCall* prepared,
 }
 
 void warnForcedFallback(cocclOperation operation) {
-  if (operation == cocclOperation::ReduceScatter) {
+  if (operation == cocclOperation::AllGather) {
+    WARN("COCCL forced AllGather twoshot is unavailable for this topology; using oneshot");
+  } else if (operation == cocclOperation::ReduceScatter) {
     WARN("COCCL forced ReduceScatter twoshot is unavailable for this topology; using oneshot");
   } else {
     WARN("COCCL forced AllReduce tripleshot is unavailable; using twoshot");
@@ -100,6 +114,63 @@ bool usesFramedCompressor(const cocclPreparedCall& prepared) {
   return false;
 }
 
+double allGatherPipelineCost(
+    const cocclPreparedCall& prepared, cocclAlgorithmKind algorithm,
+    const cocclHierarchicalComms& hierarchy, ncclComm_t gatherComm) {
+  const cocclInfo& info = prepared.info;
+  if (algorithm == cocclAlgorithmAllGatherTwoShot &&
+      messageBytes(prepared) <
+          4.0 * (double)kCocclAutotuneSliceStepBytes) {
+    return std::numeric_limits<double>::infinity();
+  }
+  if (algorithm == cocclAlgorithmAllGatherOneShot) {
+    const cocclCompressionScope scope = info.comm->nNodes == 1
+        ? cocclCompressionScope::Intra
+        : cocclCompressionScope::Default;
+    void* const compressor = prepared.compressors.get(scope);
+    if (compressor == nullptr) {
+      const cocclPipelineStage stages[] = {
+          cocclPipelineAllGather(gatherComm),
+      };
+      const cocclPipelineSpec spec = {
+          "allgather-native", info.sendbuff, info.recvbuff, info.count, 1,
+          info.datatype, info.comm, info.stream, stages,
+          (int)(sizeof(stages) / sizeof(stages[0])),
+          cocclPipelineInPlaceInputRankChunk,
+          cocclPipelineInputContiguous, info.profilerTag};
+      return cocclAutotunePipelineLayout(&spec).predictedTimeUs;
+    }
+    const cocclPipelineStage stages[] = {
+        cocclPipelineCompress(compressor),
+        cocclPipelineAllGather(gatherComm),
+        cocclPipelineDecompress(),
+    };
+    const cocclPipelineSpec spec = {
+        "allgather", info.sendbuff, info.recvbuff, info.count, 1,
+        info.datatype, info.comm, info.stream, stages,
+        (int)(sizeof(stages) / sizeof(stages[0])),
+        cocclPipelineInPlaceInputRankChunk,
+        cocclPipelineInputContiguous, info.profilerTag};
+    return cocclAutotunePipelineLayout(&spec).predictedTimeUs;
+  }
+
+  const cocclPipelineStage stages[] = {
+      cocclPipelineCompress(
+          prepared.compressors.get(cocclCompressionScope::Inter)),
+      cocclPipelineAllGather(hierarchy.interComm),
+      cocclPipelineAllGather(hierarchy.intraComm),
+      cocclPipelineDecompress(),
+  };
+  const cocclPipelineSpec spec = {
+      "allgather-twoshot", info.sendbuff, info.recvbuff, info.count, 1,
+      info.datatype, info.comm, info.stream, stages,
+      (int)(sizeof(stages) / sizeof(stages[0])),
+      cocclPipelineInPlaceInputRankChunk,
+      cocclPipelineInputContiguous, info.profilerTag,
+      cocclPipelineOutputHierarchicalAllGather};
+  return cocclAutotunePipelineLayout(&spec).predictedTimeUs;
+}
+
 ncclResult_t selectCandidate(cocclPreparedCall* prepared) {
   const cocclInfo& info = prepared->info;
   ncclComm_t comm = info.comm;
@@ -111,8 +182,14 @@ ncclResult_t selectCandidate(cocclPreparedCall* prepared) {
       cocclAutotuneBuildCandidates(info.operation, eligibility);
   cocclAutotuneCandidateSet usable;
   for (size_t i = 0; i < candidates.count; ++i) {
-    if (cocclPreparedAlgorithmSupported(
-            prepared, candidates.candidates[i].spec->algorithm)) {
+    const cocclAlgorithmKind algorithm =
+        candidates.candidates[i].spec->algorithm;
+    const bool nativeAllGather =
+        info.operation == cocclOperation::AllGather &&
+        algorithm == cocclAlgorithmAllGatherOneShot &&
+        !cocclPreparedAlgorithmHasCompression(prepared, algorithm);
+    if (nativeAllGather ||
+        cocclPreparedAlgorithmSupported(prepared, algorithm)) {
       usable.candidates[usable.count++] = candidates.candidates[i];
     }
   }
@@ -133,44 +210,72 @@ ncclResult_t selectCandidate(cocclPreparedCall* prepared) {
     if (comm->nNodes > 1 && !usesFramedCompressor(*prepared)) {
       NCCLCHECK(cocclCommGetZeroCtaComm(comm, &gatherComm));
     }
-    cocclCodecModel defaultCodecModel;
-    cocclCodecModel intraCodecModel;
-    cocclCodecModel interCodecModel;
-    const cocclSelectionPerformanceModel performance =
-        cocclAutotuneSnapshotPerformanceModel(
-            comm, hierarchy.intraComm, hierarchy.interComm, gatherComm);
-    cocclAutotuneSnapshotCodecModels(
+    if (info.operation == cocclOperation::AllGather) {
+      for (size_t i = 0; i < candidates.count; ++i) {
+        cocclAutotuneCandidate* candidate = &candidates.candidates[i];
+        setCandidateScore(
+            prepared, candidate,
+            allGatherPipelineCost(
+                *prepared, candidate->spec->algorithm, hierarchy,
+                gatherComm));
+      }
+      if (comm->nNodes > 1 &&
+          prepared->compressors.get(cocclCompressionScope::Default) ==
+              nullptr) {
+        cocclAutotuneCandidate* oneShot = cocclAutotuneFindCandidate(
+            &candidates, cocclAlgorithmAllGatherOneShot);
+        cocclAutotuneCandidate* twoShot = cocclAutotuneFindCandidate(
+            &candidates, cocclAlgorithmAllGatherTwoShot);
+        constexpr double kMinimumPredictedSpeedup = 1.05;
+        if (oneShot != nullptr && twoShot != nullptr &&
+            twoShot->scoreUs * kMinimumPredictedSpeedup >
+                oneShot->scoreUs) {
+          setCandidateScore(
+              prepared, twoShot, oneShot->scoreUs);
+        }
+      }
+    } else {
+      cocclCodecModel defaultCodecModel;
+      cocclCodecModel intraCodecModel;
+      cocclCodecModel interCodecModel;
+      const cocclSelectionPerformanceModel performance =
+          cocclAutotuneSnapshotPerformanceModel(
+              comm, hierarchy.intraComm, hierarchy.interComm, gatherComm);
+      cocclAutotuneSnapshotCodecModels(
             prepared->compressors.get(cocclCompressionScope::Default),
             prepared->compressors.get(cocclCompressionScope::Intra),
             prepared->compressors.get(cocclCompressionScope::Inter),
             info.datatype,
             &defaultCodecModel, &intraCodecModel, &interCodecModel);
-    const cocclAutotuneCodecSet codecs = {
-        {prepared->compressors.get(cocclCompressionScope::Default) !=
-             nullptr,
-         &defaultCodecModel},
-        {prepared->compressors.get(cocclCompressionScope::Intra) != nullptr,
-         &intraCodecModel},
-        {prepared->compressors.get(cocclCompressionScope::Inter) != nullptr,
-         &interCodecModel},
-        hasFusedDrc(
-            prepared->compressors.get(cocclCompressionScope::Intra),
-            prepared->compressors.get(cocclCompressionScope::Inter)),
-        hasFusedDrc(
-            prepared->compressors.get(cocclCompressionScope::Inter),
-            prepared->compressors.get(cocclCompressionScope::Default)),
-        hasFusedDr(
-            prepared->compressors.get(cocclCompressionScope::Intra)),
-    };
-    const double bytes = messageBytes(*prepared);
-    for (size_t i = 0; i < candidates.count; ++i) {
-      cocclAutotuneCandidate* candidate = &candidates.candidates[i];
-      setCandidateScore(
-          prepared, candidate,
-          cocclAutotuneEvaluateCost(
-              candidate->spec->costKind, performance,
-              codecs, bytes,
-              comm->localRanks, comm->nNodes));
+      const cocclAutotuneCodecSet codecs = {
+          {prepared->compressors.get(cocclCompressionScope::Default) !=
+               nullptr,
+           &defaultCodecModel},
+          {prepared->compressors.get(cocclCompressionScope::Intra) !=
+               nullptr,
+           &intraCodecModel},
+          {prepared->compressors.get(cocclCompressionScope::Inter) !=
+               nullptr,
+           &interCodecModel},
+          hasFusedDrc(
+              prepared->compressors.get(cocclCompressionScope::Intra),
+              prepared->compressors.get(cocclCompressionScope::Inter)),
+          hasFusedDrc(
+              prepared->compressors.get(cocclCompressionScope::Inter),
+              prepared->compressors.get(cocclCompressionScope::Default)),
+          hasFusedDr(
+              prepared->compressors.get(cocclCompressionScope::Intra)),
+      };
+      const double bytes = messageBytes(*prepared);
+      for (size_t i = 0; i < candidates.count; ++i) {
+        cocclAutotuneCandidate* candidate = &candidates.candidates[i];
+        setCandidateScore(
+            prepared, candidate,
+            cocclAutotuneEvaluateCost(
+                candidate->spec->costKind, performance,
+                codecs, bytes,
+                comm->localRanks, comm->nNodes));
+      }
     }
   }
 

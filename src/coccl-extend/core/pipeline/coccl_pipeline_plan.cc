@@ -336,7 +336,8 @@ ncclResult_t buildLogicalPlan(
     plan->stageOutputCapacityBytes[stage] = output.bytes;
     const bool finalStage = stage + 1 == context->spec->stageCount;
     if (finalStage) {
-      if (context->depth > 1 && output.logicalChunks > 1) {
+      if (context->spec->outputLayout != cocclPipelineOutputContiguous ||
+          (context->depth > 1 && output.logicalChunks > 1)) {
         NCCLCHECK(addTemp(plan, cocclPipelineTempOutputStaging,
                           output, &plan->outputStagingTemp));
         plan->stageOutputTemp[stage] = plan->outputStagingTemp;
@@ -596,10 +597,13 @@ static ncclResult_t preparePipeline(const cocclPipelineSpec* spec,
           )
       ? cocclPipelineInputHierarchicalSwizzle
       : cocclPipelineInputContiguous;
+  context->stageContext.outputLayout = spec->outputLayout;
   context->stageContext.nNodes = 1;
   context->stageContext.ranksPerNode = 1;
   if (context->stageContext.inputLayout ==
-      cocclPipelineInputHierarchicalSwizzle) {
+          cocclPipelineInputHierarchicalSwizzle ||
+      context->stageContext.outputLayout ==
+          cocclPipelineOutputHierarchicalAllGather) {
     context->stageContext.ranksPerNode = spec->ownerComm->localRanks;
     context->stageContext.nNodes =
         spec->ownerComm->nRanks / spec->ownerComm->localRanks;

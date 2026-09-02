@@ -534,7 +534,7 @@ bool parseAutotune(const toml::table& root, cocclConfig* config,
   if (!validateKeys(*autotune,
                     {"enabled", "profile_min_bytes", "profile_max_bytes",
                      "warmup", "iterations", "reduce_scatter_algorithm",
-                     "all_reduce_algorithm"},
+                     "all_reduce_algorithm", "all_gather_algorithm"},
                     "autotune", error) ||
       !readBool(*autotune, "enabled", &config->autotune.enabled, "autotune",
                 error) ||
@@ -554,14 +554,22 @@ bool parseAutotune(const toml::table& root, cocclConfig* config,
                 "autotune profile sizes require 0 < profile_min_bytes <= profile_max_bytes");
   }
 
+  std::string ag = "auto";
   std::string rs = "auto";
   std::string ar = "auto";
-  if (!readString(*autotune, "reduce_scatter_algorithm", &rs, false,
+  if (!readString(*autotune, "all_gather_algorithm", &ag, false,
+                  "autotune", error) ||
+      !readString(*autotune, "reduce_scatter_algorithm", &rs, false,
                   "autotune", error) ||
       !readString(*autotune, "all_reduce_algorithm", &ar, false, "autotune",
                   error)) {
     return false;
   }
+  if (ag == "auto") config->autotune.allGatherAlgorithm = cocclAllGatherAlgorithmPolicy::Auto;
+  else if (ag == "oneshot") config->autotune.allGatherAlgorithm = cocclAllGatherAlgorithmPolicy::OneShot;
+  else if (ag == "twoshot") config->autotune.allGatherAlgorithm = cocclAllGatherAlgorithmPolicy::TwoShot;
+  else return fail(error, "autotune.all_gather_algorithm must be auto, oneshot, or twoshot");
+
   if (rs == "auto") config->autotune.reduceScatterAlgorithm = cocclReduceScatterAlgorithmPolicy::Auto;
   else if (rs == "oneshot") config->autotune.reduceScatterAlgorithm = cocclReduceScatterAlgorithmPolicy::OneShot;
   else if (rs == "twoshot") config->autotune.reduceScatterAlgorithm = cocclReduceScatterAlgorithmPolicy::TwoShot;

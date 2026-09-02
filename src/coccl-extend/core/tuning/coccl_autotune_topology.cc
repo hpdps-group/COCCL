@@ -204,9 +204,16 @@ cocclSelectionPerformanceModel buildTopologyModel(
   model.interP2p =
       fitTopologyModel(key.inter, TopologyOperation::P2pInter);
   model.allGather =
-      fitTopologyModel(key.gather, TopologyOperation::AllGather);
+      cocclAutotuneSnapshotTopologyStageModel(
+          key.gather, cocclAutotuneTopologyOperation::AllGather);
   model.allToAll =
       fitTopologyModel(key.owner, TopologyOperation::AllToAll);
+  model.allGatherIntra =
+      cocclAutotuneSnapshotTopologyStageModel(
+          key.intra, cocclAutotuneTopologyOperation::AllGather);
+  model.allGatherInter =
+      cocclAutotuneSnapshotTopologyStageModel(
+          key.inter, cocclAutotuneTopologyOperation::AllGather);
   return model;
 }
 

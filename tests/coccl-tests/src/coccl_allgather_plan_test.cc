@@ -96,6 +96,57 @@ void checkDepth(ncclComm_t comm, int depth) {
   }
 }
 
+void checkTwoShot(ncclComm_t owner, int depth) {
+  ncclComm inter = {};
+  inter.nRanks = owner->nNodes;
+  ncclComm intra = {};
+  intra.nRanks = owner->localRanks;
+  const cocclPipelineStage stages[] = {
+      cocclPipelineCompress(reinterpret_cast<void*>(0x1)),
+      cocclPipelineAllGather(&inter),
+      cocclPipelineAllGather(&intra),
+      cocclPipelineDecompress()};
+  constexpr size_t gatheredBytes = 32 * 1024 * 1024;
+  const size_t rawChunkCount =
+      gatheredBytes / (size_t)owner->nRanks / sizeof(float);
+  cocclPipelineSpec spec = {
+      "allgather-twoshot",
+      reinterpret_cast<const void*>(0x100000000ULL),
+      reinterpret_cast<void*>(0x400000000ULL),
+      rawChunkCount, 1, ncclFloat32, owner, nullptr, stages, 4,
+      cocclPipelineInPlaceInputRankChunk,
+      cocclPipelineInputContiguous, 0,
+      cocclPipelineOutputHierarchicalAllGather};
+  cocclPipelineContext context = {};
+  EXPECT(cocclPreparePipeline(&spec, depth, &context) == ncclSuccess);
+  EXPECT(context.depth == depth);
+  EXPECT(context.plan.finalChunks == (size_t)owner->nRanks);
+  EXPECT(context.plan.inputStagingTemp == -1);
+  EXPECT(context.plan.outputStagingTemp >= 0);
+  EXPECT(context.stageContext.outputLayout ==
+         cocclPipelineOutputHierarchicalAllGather);
+  EXPECT(context.stageContext.nNodes == owner->nNodes);
+  EXPECT(context.stageContext.ranksPerNode == owner->localRanks);
+
+  const size_t sendSliceBytes = gatheredBytes /
+      (size_t)owner->nRanks / (size_t)depth;
+  EXPECT(context.plan.stageOutputCapacityBytes[0] == sendSliceBytes);
+  EXPECT(context.plan.stageOutputCapacityBytes[1] ==
+         sendSliceBytes * (size_t)owner->nNodes);
+  EXPECT(context.plan.stageOutputCapacityBytes[2] ==
+         gatheredBytes / (size_t)depth);
+  EXPECT(context.plan.stageOutputCapacityBytes[3] ==
+         gatheredBytes / (size_t)depth);
+  EXPECT(context.plan.temps[context.plan.outputStagingTemp].role ==
+         cocclPipelineTempOutputStaging);
+
+  const size_t rankBytes = rawChunkCount * sizeof(float);
+  spec.input = static_cast<char*>(spec.output) +
+      (size_t)owner->rank * rankBytes;
+  EXPECT(cocclPreparePipeline(&spec, depth, &context) == ncclSuccess);
+  EXPECT(context.depth == depth);
+}
+
 void dumpPlans(ncclComm_t comm) {
   const cocclPipelineStage stages[] = {
       cocclPipelineCompress(reinterpret_cast<void*>(0x1)), cocclPipelineAllGather(comm),
@@ -168,6 +219,16 @@ int main(int argc, char** argv) {
   cocclPipelineContext context = {};
   EXPECT(cocclPreparePipeline(&inPlace, 8, &context) == ncclSuccess);
   EXPECT(context.depth == 8);
+
+  ncclComm hierarchical = {};
+  hierarchical.nRanks = 8;
+  hierarchical.rank = 5;
+  hierarchical.localRanks = 4;
+  hierarchical.nNodes = 2;
+  checkTwoShot(&hierarchical, 1);
+  checkTwoShot(&hierarchical, 2);
+  checkTwoShot(&hierarchical, 4);
+  checkTwoShot(&hierarchical, 8);
   std::printf("coccl allgather plan: PASS\n");
   return 0;
 }

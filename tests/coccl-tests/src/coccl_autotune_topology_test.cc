@@ -94,17 +94,21 @@ int main() {
       cocclAutotuneSnapshotPerformanceModel(
           &owner, &intra, &inter, &gather);
   if (!model.intraP2p.valid || !model.interP2p.valid ||
-      !model.allGather.valid || !model.allToAll.valid) {
+      !model.allGather.valid || !model.allToAll.valid ||
+      !model.allGatherIntra.valid || !model.allGatherInter.valid) {
     std::fprintf(stderr, "topology model is incomplete\n");
     return 1;
   }
-  if (tuningCalls.size() != 3) {
-    std::fprintf(stderr, "expected three AllGather tuning queries, got %zu\n",
+  if (tuningCalls.size() != 9) {
+    std::fprintf(stderr, "expected nine AllGather tuning queries, got %zu\n",
                  tuningCalls.size());
     return 1;
   }
-  for (const TuningCall& call : tuningCalls) {
-    if (call.comm != &gather || call.function != ncclFuncAllGather ||
+  for (size_t index = 0; index < tuningCalls.size(); ++index) {
+    const TuningCall& call = tuningCalls[index];
+    ncclComm_t expectedComm = index < 3
+        ? &gather : (index < 6 ? &intra : &inter);
+    if (call.comm != expectedComm || call.function != ncclFuncAllGather ||
         (call.mask & NCCL_TUNING_MASK_SYM_KERNELS) == 0) {
       std::fprintf(stderr, "AllGather did not use its stage communicator\n");
       return 1;
@@ -146,7 +150,7 @@ int main() {
 
   (void)cocclAutotuneSnapshotPerformanceModel(
       &owner, &intra, &inter, &gather);
-  if (tuningCalls.size() != 3) {
+  if (tuningCalls.size() != 9) {
     std::fprintf(stderr, "cached topology model was rebuilt\n");
     return 1;
   }
@@ -156,7 +160,7 @@ int main() {
   const cocclSelectionPerformanceModel changed =
       cocclAutotuneSnapshotPerformanceModel(
           &owner, &intra, &inter, &secondGather);
-  if (tuningCalls.size() != 6 ||
+  if (tuningCalls.size() != 12 ||
       !(changed.allGather.sampleTimeUs[0] > model.allGather.sampleTimeUs[0])) {
     std::fprintf(stderr, "changed NCCL tuning state was not reflected\n");
     return 1;
@@ -165,7 +169,7 @@ int main() {
   cocclAutotuneTopologyCommDestroy(&owner);
   (void)cocclAutotuneSnapshotPerformanceModel(
       &owner, &intra, &inter, &gather);
-  if (tuningCalls.size() != 9) {
+  if (tuningCalls.size() != 12) {
     std::fprintf(stderr, "destroy did not clear owner topology cache\n");
     return 1;
   }

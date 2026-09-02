@@ -58,6 +58,7 @@ struct cocclPipelineStageContext {
   ncclComm_t ownerComm;
   cocclPipelineFrameResources* frameResources;
   cocclPipelineInputLayout inputLayout;
+  cocclPipelineOutputLayout outputLayout;
   int nNodes;
   int ranksPerNode;
   uint64_t profilerTag;

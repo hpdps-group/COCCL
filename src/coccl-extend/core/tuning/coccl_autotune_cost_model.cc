@@ -6,6 +6,9 @@
 
 namespace {
 
+constexpr double kLayoutAlphaUs = 4.0;
+constexpr double kLayoutBetaUsPerByte = 1.16e-6;
+
 double codecTime(const cocclAutotunePhaseCodec& codec,
                  double messageBytes) {
   if (!codec.compressed) return 0.0;
@@ -98,6 +101,44 @@ double globalPccaCost(const cocclSelectionPerformanceModel& model,
     hasBranch = true;
   }
   return codecUs + (hasBranch ? communicationUs : 0.0);
+}
+
+double allGatherOneShotCost(
+    const cocclSelectionPerformanceModel& model,
+    const cocclAutotunePhaseCodec& codec, double messageBytes,
+    int ranks) {
+  const double encodeUs = encodeTime(codec, messageBytes);
+  const double decodeUs = decodeTime(
+      codec, messageBytes * (double)ranks);
+  const double communicationUs = cocclAutotunePredict(
+      model.allGather, messageBytes / compressionRatio(codec));
+  if (!std::isfinite(encodeUs) || !std::isfinite(decodeUs) ||
+      !std::isfinite(communicationUs)) {
+    return std::numeric_limits<double>::infinity();
+  }
+  return encodeUs + communicationUs + decodeUs;
+}
+
+double allGatherTwoShotCost(
+    const cocclSelectionPerformanceModel& model,
+    const cocclAutotunePhaseCodec& codec, double messageBytes,
+    int localRanks, int nodes) {
+  const int ranks = localRanks * nodes;
+  const double encodedBytes = messageBytes / compressionRatio(codec);
+  const double encodeUs = encodeTime(codec, messageBytes);
+  const double interUs = cocclAutotunePredict(
+      model.allGatherInter, encodedBytes);
+  const double intraUs = cocclAutotunePredict(
+      model.allGatherIntra, encodedBytes * (double)nodes);
+  const double decodeUs = decodeTime(
+      codec, messageBytes * (double)ranks);
+  const double transposeUs = kLayoutAlphaUs + kLayoutBetaUsPerByte *
+      messageBytes * (double)ranks;
+  if (!std::isfinite(encodeUs) || !std::isfinite(interUs) ||
+      !std::isfinite(intraUs) || !std::isfinite(decodeUs)) {
+    return std::numeric_limits<double>::infinity();
+  }
+  return encodeUs + interUs + intraUs + decodeUs + transposeUs;
 }
 
 double reduceScatterTwoShotCost(
@@ -224,6 +265,10 @@ double crossoverCost(cocclAutotuneCostKind costKind,
                      const cocclSelectionPerformanceModel& model,
                      const cocclAutotuneCodecSet& codecs,
                      double messageBytes, int localRanks, int nodes) {
+  if (costKind == cocclAutotuneCostKind::AllGatherOneShot ||
+      costKind == cocclAutotuneCostKind::AllGatherTwoShot) {
+    return std::numeric_limits<double>::infinity();
+  }
   if (nodes <= 1) {
     if (costKind == cocclAutotuneCostKind::AllReduceOneShot) {
       return flatAllReduceOneShotCost(
@@ -354,7 +399,13 @@ double cocclAutotuneEvaluateCost(
 
   const cocclAutotunePhaseCodec& flat =
       nodes == 1 ? codecs.intra : codecs.defaultScope;
+  const int ranks = localRanks * nodes;
   switch (costKind) {
+    case cocclAutotuneCostKind::AllGatherOneShot:
+      return allGatherOneShotCost(model, flat, messageBytes, ranks);
+    case cocclAutotuneCostKind::AllGatherTwoShot:
+      return allGatherTwoShotCost(
+          model, codecs.inter, messageBytes, localRanks, nodes);
     case cocclAutotuneCostKind::ReduceScatterOneShot:
       return globalPccaCost(model, flat, messageBytes, localRanks, nodes);
     case cocclAutotuneCostKind::ReduceScatterTwoShot:
