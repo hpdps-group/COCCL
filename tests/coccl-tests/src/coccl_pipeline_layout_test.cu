@@ -37,6 +37,8 @@ struct LayoutCase {
   cocclPipelineInputLayout inputLayout;
   int nNodes;
   int ranksPerNode;
+  cocclPipelineOutputLayout outputLayout =
+      cocclPipelineOutputContiguous;
 };
 
 unsigned char value(size_t row, size_t column) {
@@ -109,7 +111,8 @@ bool runCase(const LayoutCase& test) {
                         test.nNodes, test.ranksPerNode, stream));
   NCCL_CHECK(cocclLaunchUnpackSlice(devicePackedData, deviceUnpackedData,
                                     pitch, test.sliceBytes, test.chunks,
-                                    stream));
+                                    test.outputLayout, test.nNodes,
+                                    test.ranksPerNode, stream));
   CUDA_CHECK(cudaStreamSynchronize(stream));
   CUDA_CHECK(cudaMemcpy(packed.data(), devicePacked, packedAllocation,
                         cudaMemcpyDeviceToHost));
@@ -128,10 +131,15 @@ bool runCase(const LayoutCase& test) {
               (size_t)test.nNodes +
               sourceRow / (size_t)test.ranksPerNode
         : sourceRow;
+    const size_t unpackedRow = test.outputLayout ==
+            cocclPipelineOutputHierarchicalAllGather
+        ? (packedRow % (size_t)test.nNodes) *
+              (size_t)test.ranksPerNode + packedRow / (size_t)test.nNodes
+        : packedRow;
     for (size_t column = 0; column < test.sliceBytes; ++column) {
       const unsigned char expected = value(sourceRow, column);
       if (packedData[packedRow * test.sliceBytes + column] != expected ||
-          unpackedData[packedRow * pitch + column] != expected) {
+          unpackedData[unpackedRow * pitch + column] != expected) {
         passed = false;
         break;
       }
@@ -163,6 +171,7 @@ float measure(bool pack, cocclPipelineInputLayout inputLayout,
               const unsigned char* source,
               unsigned char* destination, size_t chunkBytes,
               size_t sliceBytes, size_t chunks, int depth,
+              cocclPipelineOutputLayout outputLayout,
               cudaStream_t stream) {
   constexpr int warmup = 20;
   constexpr int iterations = 30;
@@ -180,7 +189,7 @@ float measure(bool pack, cocclPipelineInputLayout inputLayout,
       } else {
         NCCL_CHECK(cocclLaunchUnpackSlice(
             source, destination + (size_t)slice * sliceBytes, chunkBytes,
-            sliceBytes, chunks, stream));
+            sliceBytes, chunks, outputLayout, 2, 4, stream));
       }
     }
   };
@@ -213,12 +222,18 @@ void benchmark(size_t bytes, int depth, const char* mode) {
   CUDA_CHECK(cudaMemsetAsync(raw, 0x5a, bytes, stream));
   const bool swizzle = std::strcmp(mode, "swizzle") == 0;
   const bool unpack = std::strcmp(mode, "plain-unpack") == 0;
+  const bool hierarchicalUnpack =
+      std::strcmp(mode, "hierarchical-unpack") == 0;
   const float timeUs = measure(
-      !unpack,
+      !(unpack || hierarchicalUnpack),
       swizzle ? cocclPipelineInputHierarchicalSwizzle
               : cocclPipelineInputContiguous,
-      unpack ? packed : raw, unpack ? output : packed, chunkBytes,
-      sliceBytes, chunks, depth, stream);
+      (unpack || hierarchicalUnpack) ? packed : raw,
+      (unpack || hierarchicalUnpack) ? output : packed, chunkBytes,
+      sliceBytes, chunks, depth,
+      hierarchicalUnpack ? cocclPipelineOutputHierarchicalAllGather
+                         : cocclPipelineOutputContiguous,
+      stream);
   std::printf("bytes,chunks,depth,mode,time_us\n");
   std::printf("%zu,%zu,%d,%s,%.6f\n", bytes, chunks, depth, mode,
               timeUs);
@@ -248,6 +263,10 @@ int main(int argc, char** argv) {
       {8, 8, 56, 8, 0, cocclPipelineInputHierarchicalSwizzle, 2, 4},
       {4, 8, 60, 12, 0, cocclPipelineInputHierarchicalSwizzle, 4, 2},
       {3, 8, 61, 9, 1, cocclPipelineInputHierarchicalSwizzle, 4, 2},
+      {16, 8, 48, 0, 0, cocclPipelineInputHierarchicalSwizzle, 2, 4,
+       cocclPipelineOutputHierarchicalAllGather},
+      {3, 8, 61, 9, 1, cocclPipelineInputHierarchicalSwizzle, 4, 2,
+       cocclPipelineOutputHierarchicalAllGather},
   };
   for (const LayoutCase& test : cases) {
     if (!runCase(test)) return 1;

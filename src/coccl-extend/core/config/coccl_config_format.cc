@@ -15,6 +15,16 @@ const char* dataParallelStrategyName(cocclDataParallelStrategy strategy) {
   return "sdp";
 }
 
+const char* allGatherAlgorithmName(
+    cocclAllGatherAlgorithmPolicy algorithm) {
+  switch (algorithm) {
+    case cocclAllGatherAlgorithmPolicy::OneShot: return "oneshot";
+    case cocclAllGatherAlgorithmPolicy::TwoShot: return "twoshot";
+    case cocclAllGatherAlgorithmPolicy::Auto: return "auto";
+  }
+  return "unknown";
+}
+
 const char* reduceScatterAlgorithmName(
     cocclReduceScatterAlgorithmPolicy algorithm) {
   switch (algorithm) {
@@ -150,6 +160,9 @@ std::vector<std::string> cocclFormatEffectiveConfig(
                   std::to_string(config.autotune.warmup));
   lines.push_back("autotune.iterations = " +
                   std::to_string(config.autotune.iterations));
+  lines.push_back("autotune.all_gather_algorithm = " +
+                  quote(allGatherAlgorithmName(
+                      config.autotune.allGatherAlgorithm)));
   lines.push_back("autotune.reduce_scatter_algorithm = " +
                   quote(reduceScatterAlgorithmName(
                       config.autotune.reduceScatterAlgorithm)));

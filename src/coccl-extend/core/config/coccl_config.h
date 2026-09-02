@@ -22,6 +22,12 @@ enum class cocclDataParallelStrategy {
   Fsdp,
 };
 
+enum class cocclAllGatherAlgorithmPolicy {
+  Auto,
+  OneShot,
+  TwoShot,
+};
+
 enum class cocclReduceScatterAlgorithmPolicy {
   Auto,
   OneShot,
@@ -108,6 +114,8 @@ struct cocclAutotuneConfig {
   size_t profileMaxBytes = 8ULL * 1024 * 1024 * 1024;
   int warmup = 3;
   int iterations = 10;
+  cocclAllGatherAlgorithmPolicy allGatherAlgorithm =
+      cocclAllGatherAlgorithmPolicy::Auto;
   cocclReduceScatterAlgorithmPolicy reduceScatterAlgorithm =
       cocclReduceScatterAlgorithmPolicy::Auto;
   cocclAllReduceAlgorithmPolicy allReduceAlgorithm =

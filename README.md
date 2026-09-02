@@ -178,7 +178,8 @@ build/bin/coccl-config-check path/to/config.toml
 - `compressor_plugins.compressors`: plugin names used by this file.
 - `compressor_plugins.library_path`: directory containing `lib<name>.so`.
   Relative paths are resolved from the TOML file.
-- `pipeline.depth`: overlap slices, from 1 to 16.
+- `pipeline.depth`: an integer from 1 to 16, or `"auto"`. Auto mode chooses a
+  power-of-two depth up to 16 from the pipeline graph and message size.
 
 The global threshold can be overridden by
 `normal.<operation>.threshold_bytes`,
@@ -192,7 +193,8 @@ bypass the size threshold but still require a matching policy.
 The generated `nccl.h` exposes these explicit interfaces for testing, direct
 compressed-path invocation, or manual algorithm selection:
 
-- `cocclAllGatherComp` and `cocclAllToAllComp`;
+- `cocclAllGatherComp`, `cocclAllGatherCompTwoShot`, and
+  `cocclAllToAllComp`;
 - `cocclReduceScatterCompOneShot` and `cocclReduceScatterCompTwoShot`;
 - `cocclAllReduceCompOneShot`, `cocclAllReduceCompTwoShot`, and
   `cocclAllReduceCompTripleShot`;
@@ -311,6 +313,7 @@ quantType = "Symmetric"
 
 [autotune]
 enabled = true
+all_gather_algorithm = "auto"
 reduce_scatter_algorithm = "auto"
 all_reduce_algorithm = "auto"
 ```
@@ -320,13 +323,17 @@ The runnable Qwen3 example uses NVIDIA Megatron-LM and is under
 
 ### Autotuning
 
-Autotuning selects ReduceScatter and AllReduce algorithms:
+Autotuning selects AllGather, ReduceScatter, and AllReduce algorithms and the
+pipeline slice size:
 
 - `autotune.enabled`: enable profiling and model-based selection; default
   `true`.
 - `profile_min_bytes`, `profile_max_bytes`: profiling range; defaults 256 KiB
   to 8 GiB and is capped by free GPU memory.
 - `warmup`, `iterations`: samples per profile point; defaults 3 and 10.
+- `all_gather_algorithm`: `auto`, `oneshot`, or `twoshot`. OneShot uses one
+  flat AllGather. TwoShot gathers across nodes first and then within each
+  node; it requires a uniform multi-node topology.
 - `reduce_scatter_algorithm`: `auto`, `oneshot`, or `twoshot`.
 - `all_reduce_algorithm`: `auto`, `oneshot`, `twoshot`, or `tripleshot`.
 

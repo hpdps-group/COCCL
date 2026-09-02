@@ -40,6 +40,11 @@ enum cocclPipelineInputLayout {
   cocclPipelineInputHierarchicalSwizzle = 1,
 };
 
+enum cocclPipelineOutputLayout {
+  cocclPipelineOutputContiguous = 0,
+  cocclPipelineOutputHierarchicalAllGather = 1,
+};
+
 struct cocclPipelineStage {
   cocclPipelineStageKind kind;
   ncclComm_t comm;
@@ -111,6 +116,8 @@ struct cocclPipelineSpec {
   int stageCount;
   cocclPipelineInPlaceLayout inPlaceLayout;
   cocclPipelineInputLayout inputLayout;
+  cocclPipelineOutputLayout outputLayout =
+      cocclPipelineOutputContiguous;
 };
 
 ncclResult_t cocclRunPipeline(const cocclPipelineSpec* spec);

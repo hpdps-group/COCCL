@@ -18,6 +18,8 @@ ncclResult_t cocclLaunchPackSlice(const void* source,
 ncclResult_t cocclLaunchUnpackSlice(const void* source, void* destination,
                                     size_t destinationPitchBytes,
                                     size_t sliceBytes, size_t chunkCount,
+                                    cocclPipelineOutputLayout outputLayout,
+                                    int nNodes, int ranksPerNode,
                                     cudaStream_t stream);
 
 #endif

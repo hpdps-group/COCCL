@@ -69,6 +69,7 @@ __global__ void countMismatchKernel(
 enum class Operation {
   AllToAll,
   AllGather,
+  AllGatherTwoShot,
   ReduceScatterOneShot,
   ReduceScatterTwoShot,
   AllReduceOneShot,
@@ -163,6 +164,7 @@ const char* operationName(Operation operation) {
   switch (operation) {
     case Operation::AllToAll: return "alltoall";
     case Operation::AllGather: return "allgather";
+    case Operation::AllGatherTwoShot: return "allgather-twoshot";
     case Operation::ReduceScatterOneShot: return "reducescatter-oneshot";
     case Operation::ReduceScatterTwoShot: return "reducescatter-twoshot";
     case Operation::AllReduceOneShot: return "allreduce-oneshot";
@@ -177,6 +179,7 @@ const char* operationName(Operation operation) {
 Operation parseOperation(const std::string& value) {
   if (value == "alltoall") return Operation::AllToAll;
   if (value == "allgather") return Operation::AllGather;
+  if (value == "allgather-twoshot") return Operation::AllGatherTwoShot;
   if (value == "reducescatter" || value == "reducescatter-oneshot") {
     return Operation::ReduceScatterOneShot;
   }
@@ -197,7 +200,10 @@ Operation parseOperation(const std::string& value) {
 }
 
 size_t outputElements(Operation operation, size_t elements, int ranks) {
-  if (operation == Operation::AllGather) return elements * ranks;
+  if (operation == Operation::AllGather ||
+      operation == Operation::AllGatherTwoShot) {
+    return elements * ranks;
+  }
   if (operation == Operation::ReduceScatterOneShot ||
       operation == Operation::ReduceScatterTwoShot) {
     return elements / ranks;
@@ -266,6 +272,7 @@ void runPublic(Operation operation, const void* input, void* output,
                              comm, stream));
       return;
     case Operation::AllGather:
+    case Operation::AllGatherTwoShot:
       NCCLCHECK(ncclAllGather(input, output, elements, datatype,
                               comm, stream));
       return;
@@ -305,6 +312,10 @@ void runCompressed(Operation operation, const void* input, void* output,
     case Operation::AllGather:
       NCCLCHECK(cocclAllGatherComp(input, output, elements, datatype,
                                    comm, stream));
+      return;
+    case Operation::AllGatherTwoShot:
+      NCCLCHECK(cocclAllGatherCompTwoShot(
+          input, output, elements, datatype, comm, stream));
       return;
     case Operation::ReduceScatterOneShot:
       NCCLCHECK(cocclReduceScatterCompOneShot(
@@ -451,6 +462,7 @@ void runCorrectness(const Options& options, ncclDataType_t datatype,
     operations = {
         Operation::AllReduceOneShot,
         Operation::AllToAll, Operation::AllGather,
+        Operation::AllGatherTwoShot,
         Operation::ReduceScatterOneShot, Operation::ReduceScatterTwoShot,
         Operation::AllReduceTwoShot,
         Operation::AllReduceTripleShot, Operation::SendRecv,

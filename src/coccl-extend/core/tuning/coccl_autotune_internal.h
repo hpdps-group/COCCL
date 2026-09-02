@@ -23,9 +23,13 @@ struct cocclSelectionPerformanceModel {
   // by bytes sent per rank; AllToAll by total bytes sent per rank.
   cocclLinearModel allGather;
   cocclLinearModel allToAll;
+  cocclLinearModel allGatherIntra;
+  cocclLinearModel allGatherInter;
 };
 
 enum class cocclAutotuneCostKind : uint8_t {
+  AllGatherOneShot,
+  AllGatherTwoShot,
   ReduceScatterOneShot,
   ReduceScatterTwoShot,
   AllReduceOneShot,
@@ -58,8 +62,24 @@ struct cocclAutotuneCandidateSpec {
 
 // Table order is the stable tie break. OneShot deliberately precedes the
 // other variants.
-inline constexpr std::array<cocclAutotuneCandidateSpec, 5>
+inline constexpr std::array<cocclAutotuneCandidateSpec, 7>
     kCocclAutotuneCandidateSpecs = {{
+        {cocclOperation::AllGather,
+         cocclAlgorithmAllGatherOneShot,
+         cocclAutotuneRequiresNone,
+         cocclAlgorithmAllGatherOneShot,
+         0,
+         cocclAutotuneCostKind::AllGatherOneShot,
+         cocclAutotuneScoreSlot::OneShot,
+         "oneshot"},
+        {cocclOperation::AllGather,
+         cocclAlgorithmAllGatherTwoShot,
+         cocclAutotuneRequiresHierarchical,
+         cocclAlgorithmAllGatherOneShot,
+         1,
+         cocclAutotuneCostKind::AllGatherTwoShot,
+         cocclAutotuneScoreSlot::TwoShot,
+         "twoshot"},
         {cocclOperation::ReduceScatter,
          cocclAlgorithmReduceScatterOneShot,
          cocclAutotuneRequiresNone,

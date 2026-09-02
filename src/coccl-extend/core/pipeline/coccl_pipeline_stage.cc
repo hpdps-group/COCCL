@@ -290,7 +290,9 @@ ncclResult_t runUnpack(const cocclPipelineStageContext* context,
                        cudaStream_t stream) {
   NCCLCHECK(cocclLaunchUnpackSlice(
       edge->ptr, output->ptr, context->rawChunkBytes,
-      context->rawSliceBytes, edge->logicalChunks, stream));
+      context->rawSliceBytes, edge->logicalChunks,
+      context->outputLayout, context->nNodes,
+      context->ranksPerNode, stream));
   edge->ptr = output->ptr;
   return ncclSuccess;
 }

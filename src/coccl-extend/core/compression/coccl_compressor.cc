@@ -295,7 +295,8 @@ ncclResult_t initializeRuntime(const ncclComm_t comm,
 
   for (size_t role = 0; role < kTrainingRoleCount; ++role) {
     for (cocclOperation operation : {
-             cocclOperation::ReduceScatter, cocclOperation::AllReduce}) {
+             cocclOperation::AllGather, cocclOperation::ReduceScatter,
+             cocclOperation::AllReduce}) {
       CompressorPolicy* previous = nullptr;
       for (cocclCompressionScope scope : {
                cocclCompressionScope::Default,

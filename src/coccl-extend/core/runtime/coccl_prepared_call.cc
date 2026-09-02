@@ -21,6 +21,10 @@ void algorithmScopes(const cocclPreparedCall& prepared,
   *useDefault = false;
   *useIntra = false;
   *useInter = false;
+  if (algorithm == cocclAlgorithmAllGatherTwoShot) {
+    *useInter = true;
+    return;
+  }
   if (algorithm == cocclAlgorithmReduceScatterTwoShot) {
     *useIntra = true;
     *useInter = true;

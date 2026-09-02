@@ -360,6 +360,16 @@ ncclResult_t runSerial(const cocclPipelineContext& context,
         &stageContext, context.spec->stages + stage, &edge,
         &output, context.spec->stream));
   }
+  if (context.plan.outputStagingTemp >= 0) {
+    const cocclPipelineStage unpack = cocclPipelineUnpack();
+    const cocclPipelineStageOutput output = {
+        static_cast<char*>(context.spec->output) +
+            context.slices[0].byteOffset,
+        edge.bytes, nullptr, 0};
+    NCCLCHECK(cocclExecutePipelineStage(
+        &stageContext, &unpack, &edge, &output,
+        context.spec->stream));
+  }
   return ncclSuccess;
 }
 

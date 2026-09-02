@@ -14,6 +14,7 @@ constexpr int kCocclAutotuneMaxPipelineDepth = 16;
 struct cocclPipelineTuningDecision {
   size_t targetSliceBytes;
   int maxDepth;
+  double predictedTimeUs;
 };
 
 inline int cocclPipelineDepthForSlice(size_t totalBytes,

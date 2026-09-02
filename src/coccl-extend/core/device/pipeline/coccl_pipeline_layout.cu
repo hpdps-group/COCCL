@@ -85,17 +85,22 @@ __global__ __launch_bounds__(kLayoutThreads) void packSliceKernel(
   }
 }
 
-template <typename CopyType>
+template <typename CopyType, bool HierarchicalAllGather>
 __global__ __launch_bounds__(kLayoutThreads) void unpackSliceKernel(
     const unsigned char* __restrict__ source,
     unsigned char* __restrict__ destination, size_t destinationPitchBytes,
-    size_t sliceBytes, size_t chunkCount) {
+    size_t sliceBytes, size_t chunkCount, int nNodes, int ranksPerNode) {
   const size_t elementsPerChunk = sliceBytes / sizeof(CopyType);
-  for (size_t chunk = blockIdx.y; chunk < chunkCount; chunk += gridDim.y) {
+  for (size_t sourceChunk = blockIdx.y; sourceChunk < chunkCount;
+       sourceChunk += gridDim.y) {
+    const size_t destinationChunk = HierarchicalAllGather
+        ? (sourceChunk % (size_t)nNodes) * (size_t)ranksPerNode +
+              sourceChunk / (size_t)nNodes
+        : sourceChunk;
     const CopyType* __restrict__ sourceRow = reinterpret_cast<const CopyType*>(
-        source + chunk * sliceBytes);
+        source + sourceChunk * sliceBytes);
     CopyType* __restrict__ destinationRow = reinterpret_cast<CopyType*>(
-        destination + chunk * destinationPitchBytes);
+        destination + destinationChunk * destinationPitchBytes);
     copyLayoutRow(sourceRow, destinationRow, elementsPerChunk);
   }
 }
@@ -169,46 +174,50 @@ ncclResult_t dispatchPack(const void* source, size_t sourcePitchBytes,
   }
 }
 
-template <typename CopyType>
+template <typename CopyType, bool HierarchicalAllGather>
 ncclResult_t launchUnpackTyped(const void* source, void* destination,
                                size_t destinationPitchBytes,
                                size_t sliceBytes, size_t chunkCount,
+                               int nNodes, int ranksPerNode,
                                cudaStream_t stream) {
-  unpackSliceKernel<CopyType><<<layoutGrid<CopyType>(sliceBytes, chunkCount),
-                                kLayoutThreads, 0, stream>>>(
+  unpackSliceKernel<CopyType, HierarchicalAllGather>
+      <<<layoutGrid<CopyType>(sliceBytes, chunkCount),
+         kLayoutThreads, 0, stream>>>(
       static_cast<const unsigned char*>(source),
       static_cast<unsigned char*>(destination), destinationPitchBytes,
-      sliceBytes, chunkCount);
+      sliceBytes, chunkCount, nNodes, ranksPerNode);
   return cudaGetLastError() == cudaSuccess ? ncclSuccess
                                            : ncclUnhandledCudaError;
 }
 
+template <bool HierarchicalAllGather>
 ncclResult_t dispatchUnpack(const void* source, void* destination,
                             size_t destinationPitchBytes,
                             size_t sliceBytes, size_t chunkCount,
+                            int nNodes, int ranksPerNode,
                             cudaStream_t stream) {
   switch (layoutVectorBytes(source, sliceBytes, destination,
                             destinationPitchBytes, sliceBytes)) {
     case 16:
-      return launchUnpackTyped<uint4>(
+      return launchUnpackTyped<uint4, HierarchicalAllGather>(
           source, destination, destinationPitchBytes, sliceBytes,
-          chunkCount, stream);
+          chunkCount, nNodes, ranksPerNode, stream);
     case 8:
-      return launchUnpackTyped<unsigned long long>(
+      return launchUnpackTyped<unsigned long long, HierarchicalAllGather>(
           source, destination, destinationPitchBytes, sliceBytes,
-          chunkCount, stream);
+          chunkCount, nNodes, ranksPerNode, stream);
     case 4:
-      return launchUnpackTyped<unsigned int>(
+      return launchUnpackTyped<unsigned int, HierarchicalAllGather>(
           source, destination, destinationPitchBytes, sliceBytes,
-          chunkCount, stream);
+          chunkCount, nNodes, ranksPerNode, stream);
     case 2:
-      return launchUnpackTyped<unsigned short>(
+      return launchUnpackTyped<unsigned short, HierarchicalAllGather>(
           source, destination, destinationPitchBytes, sliceBytes,
-          chunkCount, stream);
+          chunkCount, nNodes, ranksPerNode, stream);
     default:
-      return launchUnpackTyped<unsigned char>(
+      return launchUnpackTyped<unsigned char, HierarchicalAllGather>(
           source, destination, destinationPitchBytes, sliceBytes,
-          chunkCount, stream);
+          chunkCount, nNodes, ranksPerNode, stream);
   }
 }
 
@@ -258,6 +267,8 @@ ncclResult_t cocclLaunchPackSlice(const void* source,
 ncclResult_t cocclLaunchUnpackSlice(const void* source, void* destination,
                                     size_t destinationPitchBytes,
                                     size_t sliceBytes, size_t chunkCount,
+                                    cocclPipelineOutputLayout outputLayout,
+                                    int nNodes, int ranksPerNode,
                                     cudaStream_t stream) {
   if (source == nullptr || destination == nullptr || sliceBytes == 0 ||
       chunkCount == 0 || destinationPitchBytes < sliceBytes) {
@@ -265,7 +276,7 @@ ncclResult_t cocclLaunchUnpackSlice(const void* source, void* destination,
   }
   const size_t vectorBytes = layoutVectorBytes(
       source, sliceBytes, destination, destinationPitchBytes, sliceBytes);
-  if (vectorBytes < 16 &&
+  if (outputLayout == cocclPipelineOutputContiguous && vectorBytes < 16 &&
       (vectorBytes > 2 ||
        sliceBytes * chunkCount < kLayoutKernelCrossoverBytes)) {
     return cudaMemcpy2DAsync(
@@ -274,6 +285,11 @@ ncclResult_t cocclLaunchUnpackSlice(const void* source, void* destination,
             cudaSuccess
         ? ncclSuccess : ncclUnhandledCudaError;
   }
-  return dispatchUnpack(source, destination, destinationPitchBytes,
-                        sliceBytes, chunkCount, stream);
+  return outputLayout == cocclPipelineOutputHierarchicalAllGather
+      ? dispatchUnpack<true>(
+            source, destination, destinationPitchBytes, sliceBytes,
+            chunkCount, nNodes, ranksPerNode, stream)
+      : dispatchUnpack<false>(
+            source, destination, destinationPitchBytes, sliceBytes,
+            chunkCount, nNodes, ranksPerNode, stream);
 }

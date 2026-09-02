@@ -105,7 +105,8 @@ ncclResult_t cocclLaunchPackSlice(
 }
 
 ncclResult_t cocclLaunchUnpackSlice(
-    const void*, void*, size_t, size_t, size_t, cudaStream_t) {
+    const void*, void*, size_t, size_t, size_t,
+    cocclPipelineOutputLayout, int, int, cudaStream_t) {
   return ncclInternalError;
 }
 
@@ -138,7 +139,8 @@ int main() {
   intra.nRanks = 4;
   const cocclPipelineStageContext context = {
       16, 64, 256, ncclFloat32, &owner, nullptr,
-      cocclPipelineInputContiguous, 2, 4};
+      cocclPipelineInputContiguous, cocclPipelineOutputContiguous,
+      2, 4};
 
   cocclPipelineEdge encoded = {
       reinterpret_cast<void*>(0x100000), 64, 64, ncclInt8, 8,

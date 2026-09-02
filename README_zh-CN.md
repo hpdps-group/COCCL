@@ -140,7 +140,8 @@ build/bin/coccl-config-check path/to/config.toml
 - `runtime.compression_threshold_bytes`：自动启用压缩的最小逻辑消息大小，默认为 8 MiB。
 - `compressor_plugins.compressors`：当前配置文件使用的插件名称。
 - `compressor_plugins.library_path`：包含 `lib<name>.so` 的目录。相对路径以 TOML 文件所在目录为基准解析。
-- `pipeline.depth`：流水线重叠的 slice 数量，取值范围为 1 到 16。
+- `pipeline.depth`：可设为 1 到 16 的整数或 `"auto"`。Auto 模式根据
+  pipeline graph 和消息大小选择不超过 16 的 2 的幂次 depth。
 
 可以使用 `normal.<operation>.threshold_bytes`、`training.{dp,tp}.<operation>.threshold_bytes` 或 `training.pp.sendrecv.{forward,backward}.threshold_bytes` 覆盖全局阈值。
 
@@ -148,7 +149,8 @@ build/bin/coccl-config-check path/to/config.toml
 
 生成的 `nccl.h` 提供以下显式接口，用于测试、直接调用压缩路径或手动选择算法：
 
-- `cocclAllGatherComp` 和 `cocclAllToAllComp`；
+- `cocclAllGatherComp`、`cocclAllGatherCompTwoShot` 和
+  `cocclAllToAllComp`；
 - `cocclReduceScatterCompOneShot` 和 `cocclReduceScatterCompTwoShot`；
 - `cocclAllReduceCompOneShot`、`cocclAllReduceCompTwoShot` 和
   `cocclAllReduceCompTripleShot`；
@@ -253,6 +255,7 @@ quantType = "Symmetric"
 
 [autotune]
 enabled = true
+all_gather_algorithm = "auto"
 reduce_scatter_algorithm = "auto"
 all_reduce_algorithm = "auto"
 ```
@@ -261,11 +264,15 @@ all_reduce_algorithm = "auto"
 
 ### 自动调优
 
-自动调优用于选择 ReduceScatter 和 AllReduce 算法：
+自动调优用于选择 AllGather、ReduceScatter 和 AllReduce 算法以及
+pipeline slice 大小：
 
 - `autotune.enabled`：启用性能采样和基于模型的算法选择，默认为 `true`。
 - `profile_min_bytes`、`profile_max_bytes`：性能采样范围，默认从 256 KiB 到 8 GiB，并受可用 GPU 显存限制。
 - `warmup`、`iterations`：每个采样点的预热与迭代次数，默认分别为 3 和 10。
+- `all_gather_algorithm`：`auto`、`oneshot` 或 `twoshot`。OneShot 使用一次
+  平坦 AllGather；TwoShot 先进行节点间 AllGather，再进行节点内 AllGather，
+  要求多节点拓扑中每个节点的 Rank 数相同。
 - `reduce_scatter_algorithm`：`auto`、`oneshot` 或 `twoshot`。
 - `all_reduce_algorithm`：`auto`、`oneshot`、`twoshot` 或 `tripleshot`。
 

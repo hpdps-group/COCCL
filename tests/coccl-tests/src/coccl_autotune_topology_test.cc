@@ -121,14 +121,23 @@ int main() {
       cocclAutotuneSnapshotPerformanceModel(
           &owner, &intra, &inter, &gather);
   if (!model.intraP2p.valid || !model.interP2p.valid ||
-      !model.allGather.valid || !model.allToAll.valid) {
+      !model.allGather.valid || !model.allToAll.valid ||
+      !model.allGatherIntra.valid || !model.allGatherInter.valid) {
     fail("topology model is incomplete");
   }
+  int gatherCalls = 0;
+  int intraCalls = 0;
+  int interCalls = 0;
   for (size_t index = callsBeforeModel; index < tuningCalls.size(); ++index) {
-    if (tuningCalls[index].comm != &gather ||
-        tuningCalls[index].function != ncclFuncAllGather) {
+    if (tuningCalls[index].function != ncclFuncAllGather) {
       fail("model queried the wrong stage communicator");
     }
+    gatherCalls += tuningCalls[index].comm == &gather;
+    intraCalls += tuningCalls[index].comm == &intra;
+    interCalls += tuningCalls[index].comm == &inter;
+  }
+  if (gatherCalls == 0 || intraCalls == 0 || interCalls == 0) {
+    fail("model did not query every AllGather stage communicator");
   }
 
   const size_t cachedCalls = tuningCalls.size();
@@ -149,18 +158,19 @@ int main() {
       cocclAutotuneSnapshotTopologyStageModel(
           &gather, cocclAutotuneTopologyOperation::AllGather);
   if (!allGatherStage.valid ||
-      std::fabs(allGatherStage.alphaUs - model.allGather.alphaUs - 35.0) >
+      std::fabs(allGatherStage.alphaUs - model.allGather.alphaUs) >
           1.0e-6 || allGatherStage.sampleCount == 0 ||
       std::fabs(allGatherStage.sampleTimeUs[0] -
-                    model.allGather.sampleTimeUs[0] - 35.0) > 1.0e-6) {
+                    model.allGather.sampleTimeUs[0]) > 1.0e-6) {
     fail("2.27 pipeline AllGather dispatch cost was not applied");
   }
 
+  const size_t callsBeforeDestroy = tuningCalls.size();
   cocclAutotuneTopologyCommDestroy(&owner);
   (void)cocclAutotuneSnapshotPerformanceModel(
       &owner, &intra, &inter, &gather);
-  if (tuningCalls.size() == cachedCalls) {
-    fail("communicator destroy did not clear the topology cache");
+  if (tuningCalls.size() != callsBeforeDestroy) {
+    fail("cached stage models were rebuilt after owner destroy");
   }
 
   std::printf("COCCL NCCL 2.27 topology adapter tests: PASS\n");
