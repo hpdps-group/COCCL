@@ -1,3 +1,5 @@
+#include <cuda_bf16.h>
+#include <cuda_fp16.h>
 #include <cuda_runtime.h>
 #include <mpi.h>
 #include <nccl.h>
@@ -27,6 +29,20 @@ __global__ void fillRatio130Kernel(unsigned char* data, size_t bytes,
     data[index] = static_cast<unsigned char>(value & 0x3f);
   }
 }
+__global__ void fillFp32Ratio130Kernel(float* data, size_t elements,
+                                       uint32_t seed) {
+  for (size_t index = blockIdx.x * blockDim.x + threadIdx.x;
+       index < elements; index += (size_t)blockDim.x * gridDim.x) {
+    uint32_t state = static_cast<uint32_t>(index) ^
+        static_cast<uint32_t>(index >> 32) ^ seed;
+    state ^= state >> 16;
+    state *= 0x7feb352du;
+    state ^= state >> 15;
+    const uint32_t bits = 0x3f800000u | (state & 0x007fffffu);
+    data[index] = __uint_as_float(bits);
+  }
+}
+
 
 __global__ void countMismatchKernel(
     const unsigned char* expected, const unsigned char* actual,
@@ -227,18 +243,19 @@ std::vector<T> makeRandomInput(int rank, size_t elements) {
 }
 
 template <typename T>
-std::vector<T> makeRatio130Input(int rank, size_t elements) {
-  std::vector<T> values(elements);
-  uint32_t state = 0x85ebca6bu ^ static_cast<uint32_t>(rank + 1);
-  auto* bytes = reinterpret_cast<unsigned char*>(values.data());
-  for (size_t index = 0; index < elements * sizeof(T); ++index) {
-    state ^= state << 13;
-    state ^= state >> 17;
-    state ^= state << 5;
-    bytes[index] = static_cast<unsigned char>(state & 0x3f);
-  }
-  return values;
+void fillRatio130Device(T* input, size_t elements, int rank) {
+  const size_t bytes = elements * sizeof(T);
+  fillRatio130Kernel<<<byteKernelBlocks(bytes), 256>>>(
+      reinterpret_cast<unsigned char*>(input), bytes,
+      0x85ebca6bu ^ static_cast<uint32_t>(rank + 1));
 }
+
+template <>
+void fillRatio130Device<float>(float* input, size_t elements, int rank) {
+  fillFp32Ratio130Kernel<<<byteKernelBlocks(elements * sizeof(float)), 256>>>(
+      input, elements, 0x85ebca6bu ^ static_cast<uint32_t>(rank + 1));
+}
+
 
 void runPublic(Operation operation, const void* input, void* output,
                size_t elements, ncclDataType_t datatype, ncclComm_t comm,
@@ -366,9 +383,7 @@ void runCorrectnessCase(Operation operation, ncclDataType_t datatype,
   CUDACHECK(cudaMalloc(&nativeOutput, outputBytes));
   CUDACHECK(cudaMalloc(&compressedOutput, outputBytes));
   if (options.pattern == "ratio130") {
-    fillRatio130Kernel<<<byteKernelBlocks(inputBytes), 256>>>(
-        reinterpret_cast<unsigned char*>(input), inputBytes,
-        0x85ebca6bu ^ static_cast<uint32_t>(rank + 1));
+    fillRatio130Device(input, inputElements, rank);
     CUDACHECK(cudaGetLastError());
   } else {
     const std::vector<T> hostInput = options.pattern == "mixed"
@@ -519,9 +534,8 @@ void runPerformance(const Options& options, ncclDataType_t datatype,
     CUDACHECK(cudaMemcpy(input, hostInput.data(), inputBytes,
                          cudaMemcpyHostToDevice));
   } else if (options.pattern == "ratio130") {
-    const std::vector<T> hostInput = makeRatio130Input<T>(rank, elements);
-    CUDACHECK(cudaMemcpy(input, hostInput.data(), inputBytes,
-                         cudaMemcpyHostToDevice));
+    fillRatio130Device(input, elements, rank);
+    CUDACHECK(cudaGetLastError());
   } else {
     fail("pattern", "unknown input pattern", __FILE__, __LINE__);
   }
@@ -636,6 +650,16 @@ int main(int argc, char** argv) {
   } else if (options.datatype == "int64") {
     dispatch<int64_t>(options, ncclInt64, nativeComm, compressedComm,
                       nativeStream, compressedStream, rank, ranks);
+  } else if (options.datatype == "fp16") {
+    dispatch<__half>(options, ncclFloat16, nativeComm, compressedComm,
+                     nativeStream, compressedStream, rank, ranks);
+  } else if (options.datatype == "bf16") {
+    dispatch<__nv_bfloat16>(options, ncclBfloat16, nativeComm,
+                            compressedComm, nativeStream, compressedStream,
+                            rank, ranks);
+  } else if (options.datatype == "fp32") {
+    dispatch<float>(options, ncclFloat32, nativeComm, compressedComm,
+                    nativeStream, compressedStream, rank, ranks);
   } else {
     fail("datatype", "unknown datatype", __FILE__, __LINE__);
   }

@@ -4,6 +4,7 @@
 #include "dietgpu/ans/GpuANSCodec.h"
 #include "dietgpu/ans/GpuANSEncode.cuh"
 #include "dietgpu/ans/GpuANSUtils.cuh"
+#include "dietgpu/float/GpuFloatCodec.h"
 #include "dietgpu/utils/StackDeviceMemory.h"
 
 #include <cuda_runtime.h>
@@ -40,8 +41,9 @@ bool addBytes(size_t bytes, size_t* total) {
   return coccl::checkedAdd(*total, bytes, total);
 }
 
-bool encodeStackBytes(uint32_t frames, uint32_t frameBytes,
-                      size_t* stackBytes) {
+bool ansEncodeStackBytes(uint32_t frames, uint32_t frameBytes,
+                         bool precomputedHistogram,
+                         size_t* stackBytes) {
   if (frames == 0 || frameBytes == 0 || stackBytes == nullptr) return false;
   const uint32_t blocks =
       dietgpu::divUp(frameBytes, dietgpu::kDefaultBlockSize);
@@ -56,8 +58,6 @@ bool encodeStackBytes(uint32_t frames, uint32_t frameBytes,
   size_t compressedPrefix = 0;
   if (!alignedProduct((size_t)frames * dietgpu::kNumSymbols,
                       sizeof(uint4), &table) ||
-      !alignedProduct((size_t)frames * dietgpu::kNumSymbols,
-                      sizeof(uint32_t), &histogram) ||
       !alignedProduct(frames, sizeof(uint32_t), &checksum)) {
     return false;
   }
@@ -70,8 +70,14 @@ bool encodeStackBytes(uint32_t frames, uint32_t frameBytes,
     return false;
   }
 
-  size_t histogramPhase = 0;
-  if (!coccl::checkedAdd(table, histogram, &histogramPhase)) return false;
+  size_t histogramPhase = table;
+  if (!precomputedHistogram) {
+    if (!alignedProduct((size_t)frames * dietgpu::kNumSymbols,
+                        sizeof(uint32_t), &histogram) ||
+        !addBytes(histogram, &histogramPhase)) {
+      return false;
+    }
+  }
   size_t encodePhase = table;
   if (!addBytes(checksum, &encodePhase) ||
       !addBytes(compressedBlocks, &encodePhase) ||
@@ -91,6 +97,60 @@ bool encodeStackBytes(uint32_t frames, uint32_t frameBytes,
   *stackBytes = histogramPhase > encodePhase
       ? histogramPhase : encodePhase;
   return *stackBytes >= kScratchAlignment;
+}
+
+bool floatTypeFor(ncclDataType_t datatype, dietgpu::FloatType* floatType,
+                  uint32_t* wordBytes) {
+  switch (datatype) {
+    case ncclFloat16:
+      *floatType = dietgpu::FloatType::kFloat16;
+      *wordBytes = 2;
+      return true;
+    case ncclBfloat16:
+      *floatType = dietgpu::FloatType::kBFloat16;
+      *wordBytes = 2;
+      return true;
+    case ncclFloat32:
+      *floatType = dietgpu::FloatType::kFloat32;
+      *wordBytes = 4;
+      return true;
+    default:
+      return false;
+  }
+}
+
+bool floatEncodeStackBytes(uint32_t frames, uint32_t frameElements,
+                           size_t* stackBytes) {
+  const uint32_t symbolStride =
+      dietgpu::roundUp(frameElements, (uint32_t)sizeof(uint4));
+  size_t checksum = 0;
+  size_t symbols = 0;
+  size_t histogram = 0;
+  size_t ans = 0;
+  if (!alignedProduct(frames, sizeof(uint32_t), &checksum) ||
+      !alignedProduct(frames, symbolStride, &symbols) ||
+      !alignedProduct((size_t)frames * dietgpu::kNumSymbols,
+                      sizeof(uint32_t), &histogram) ||
+      !ansEncodeStackBytes(frames, frameElements, true, &ans)) {
+    return false;
+  }
+  *stackBytes = checksum;
+  return addBytes(symbols, stackBytes) &&
+      addBytes(histogram, stackBytes) && addBytes(ans, stackBytes);
+}
+
+bool decodeStackBytes(uint32_t frames, int probBits, size_t* stackBytes);
+
+bool floatDecodeStackBytes(uint32_t frames, uint32_t frameElements,
+                           int probBits, bool alignedOutput,
+                           size_t* stackBytes) {
+  if (!decodeStackBytes(frames, probBits, stackBytes)) return false;
+  if (alignedOutput) return true;
+  const uint32_t symbolStride =
+      dietgpu::roundUp(frameElements, (uint32_t)sizeof(uint4));
+  size_t symbols = 0;
+  return alignedProduct(frames, symbolStride, &symbols) &&
+      addBytes(symbols, stackBytes);
 }
 
 bool decodeStackBytes(uint32_t frames, int probBits, size_t* stackBytes) {
@@ -121,15 +181,21 @@ uint32_t ansCandidateStride(size_t frameBytes) {
   return bytes <= INT32_MAX ? (uint32_t)bytes : 0;
 }
 
+uint32_t floatCandidateStride(dietgpu::FloatType floatType,
+                              size_t frameElements, size_t frameBytes) {
+  if (frameElements == 0 || frameElements > UINT32_MAX ||
+      frameBytes > INT32_MAX) return 0;
+  const uint64_t bytes = dietgpu::getMaxFloatCompressedSize(
+      floatType, (uint32_t)frameElements);
+  const uint64_t aligned =
+      (bytes + sizeof(uint4) - 1) / sizeof(uint4) * sizeof(uint4);
+  return aligned <= UINT32_MAX ? (uint32_t)aligned : 0;
+}
+
 bool encodedFramesAligned(const coccl::Output& output) {
   constexpr size_t alignment = alignof(dietgpu::ANSCoalescedHeader);
   return (uintptr_t)output.data() % alignment == 0 &&
       output.frameStrideBytes() % alignment == 0;
-}
-
-unsigned int rawFrameGrid(size_t frames) {
-  return (unsigned int)(frames < kMaxBatchFrames
-      ? frames : (size_t)kMaxBatchFrames);
 }
 
 unsigned int frameCopyBlocks(size_t frameBytes) {
@@ -243,7 +309,17 @@ struct DietGpuCompressor {
       return ncclInvalidArgument;
     }
     const size_t frameBytes = input.bytes() / input.chunks();
-    const uint32_t candidateStride = ansCandidateStride(frameBytes);
+    dietgpu::FloatType floatType = dietgpu::FloatType::kUndefined;
+    uint32_t wordBytes = 0;
+    const bool floatCodec =
+        floatTypeFor(input.datatype(), &floatType, &wordBytes);
+    if (floatCodec && frameBytes % wordBytes != 0) {
+      return ncclInvalidArgument;
+    }
+    const size_t frameElements = floatCodec ? frameBytes / wordBytes : 0;
+    const uint32_t candidateStride = floatCodec
+        ? floatCandidateStride(floatType, frameElements, frameBytes)
+        : ansCandidateStride(frameBytes);
     size_t outputBytes = 0;
     if (output.frameStrideBytes() < frameBytes ||
         !coccl::checkedMultiply(output.frameStrideBytes(), input.chunks(),
@@ -280,7 +356,11 @@ struct DietGpuCompressor {
             (size_t)candidateStride, (size_t)frames, &candidateBytes) ||
         !alignedBytes(candidateBytes, &candidateRegion) ||
         !alignedProduct(frames, sizeof(uint32_t), &sizeRegion) ||
-        !encodeStackBytes(frames, rawFrameBytes, &stackBytes) ||
+        !(floatCodec
+              ? floatEncodeStackBytes(
+                    frames, (uint32_t)frameElements, &stackBytes)
+              : ansEncodeStackBytes(frames, rawFrameBytes, false,
+                                    &stackBytes)) ||
         !coccl::checkedAdd(candidateRegion, sizeRegion, &scratchBytes) ||
         !coccl::checkedAdd(scratchBytes, stackBytes, &scratchBytes)) {
       return ncclInvalidArgument;
@@ -297,10 +377,23 @@ struct DietGpuCompressor {
     dietgpu::StackDeviceMemory stack(
         context.cudaDevice(), stackBase, stackBytes);
     const DietGpuConfig& config = context.config<DietGpuConfig>();
-    dietgpu::ansEncodeBatchStride(
-        stack, dietgpu::ANSCodecConfig(config.probBits, false), frames,
-        input.data(), rawFrameBytes, rawFrameBytes, nullptr, candidate,
-        candidateStride, sizes, context.stream());
+    const dietgpu::ANSCodecConfig ansConfig(config.probBits, false);
+    if (floatCodec) {
+      const bool alignedInput =
+          (uintptr_t)input.data() % sizeof(uint4) == 0 &&
+          frameBytes % sizeof(uint4) == 0;
+      dietgpu::floatCompressBatchStride(
+          stack,
+          dietgpu::FloatCompressConfig(
+              floatType, ansConfig, alignedInput, false),
+          frames, input.data(), (uint32_t)frameElements, rawFrameBytes,
+          candidate, candidateStride, sizes, context.stream());
+    } else {
+      dietgpu::ansEncodeBatchStride(
+          stack, ansConfig, frames, input.data(), rawFrameBytes,
+          rawFrameBytes, nullptr, candidate, candidateStride, sizes,
+          context.stream());
+    }
     const dim3 finalizeGrid(
         frameCopyBlocks(frameBytes), (unsigned int)input.chunks());
     finalizeFrames<<<finalizeGrid, kThreads, 0, context.stream()>>>(
@@ -336,9 +429,19 @@ struct DietGpuCompressor {
     if (frameBytes == 0 || frameBytes > frameStrideBytes) {
       return ncclInvalidArgument;
     }
+    dietgpu::FloatType floatType = dietgpu::FloatType::kUndefined;
+    uint32_t wordBytes = 0;
+    const bool floatCodec =
+        floatTypeFor(output.datatype(), &floatType, &wordBytes);
+    if (floatCodec && frameBytes % wordBytes != 0) {
+      return ncclInvalidArgument;
+    }
+    const size_t frameElements = floatCodec ? frameBytes / wordBytes : 0;
+    const uint32_t candidateStride = floatCodec
+        ? floatCandidateStride(floatType, frameElements, frameBytes)
+        : ansCandidateStride(frameBytes);
     constexpr int kThreads = 256;
-    if (input.chunks() > kMaxBatchFrames ||
-        ansCandidateStride(frameBytes) == 0) {
+    if (input.chunks() > kMaxBatchFrames || candidateStride == 0) {
       if (cudaMemcpy2DAsync(
               output.data(), frameBytes, input.data(), frameStrideBytes,
               frameBytes, input.chunks(), cudaMemcpyDeviceToDevice,
@@ -352,8 +455,15 @@ struct DietGpuCompressor {
     size_t stackBytes = 0;
     size_t scratchBytes = 0;
     const DietGpuConfig& config = context.config<DietGpuConfig>();
+    const bool alignedOutput =
+        (uintptr_t)output.data() % sizeof(uint4) == 0 &&
+        frameBytes % sizeof(uint4) == 0;
     if (!alignedProduct(frames, sizeof(uint8_t), &activeRegion) ||
-        !decodeStackBytes(frames, config.probBits, &stackBytes) ||
+        !(floatCodec
+              ? floatDecodeStackBytes(
+                    frames, (uint32_t)frameElements, config.probBits,
+                    alignedOutput, &stackBytes)
+              : decodeStackBytes(frames, config.probBits, &stackBytes)) ||
         !coccl::checkedAdd(activeRegion, stackBytes, &scratchBytes)) {
       return ncclInvalidArgument;
     }
@@ -371,16 +481,31 @@ struct DietGpuCompressor {
         input.frameMetadata(), static_cast<uint8_t*>(output.data()),
         frameBytes, frameBytes, input.chunks(), active);
     if (cudaGetLastError() != cudaSuccess) return ncclUnhandledCudaError;
-    const dietgpu::ANSDecodeStatus decodeStatus =
-        dietgpu::ansDecodeBatchStrideMasked(
-            stack, dietgpu::ANSCodecConfig(config.probBits, false), frames,
-            input.data(), (uint32_t)frameStrideBytes, active, output.data(),
-            (uint32_t)frameBytes, (uint32_t)frameBytes, nullptr, nullptr,
-            context.stream());
-    if (decodeStatus.error != dietgpu::ANSDecodeError::None ||
-        cudaGetLastError() != cudaSuccess) {
-      return ncclUnhandledCudaError;
+    const dietgpu::ANSCodecConfig ansConfig(config.probBits, false);
+    if (floatCodec) {
+      const dietgpu::FloatDecompressStatus decodeStatus =
+          dietgpu::floatDecompressBatchStrideMasked(
+              stack,
+              dietgpu::FloatDecompressConfig(
+                  floatType, ansConfig, alignedOutput, false),
+              frames, input.data(), (uint32_t)frameStrideBytes, active,
+              output.data(), (uint32_t)frameBytes,
+              (uint32_t)frameElements, nullptr, nullptr, context.stream());
+      if (decodeStatus.error != dietgpu::FloatDecompressError::None) {
+        return ncclUnhandledCudaError;
+      }
+    } else {
+      const dietgpu::ANSDecodeStatus decodeStatus =
+          dietgpu::ansDecodeBatchStrideMasked(
+              stack, ansConfig, frames, input.data(),
+              (uint32_t)frameStrideBytes, active, output.data(),
+              (uint32_t)frameBytes, (uint32_t)frameBytes, nullptr, nullptr,
+              context.stream());
+      if (decodeStatus.error != dietgpu::ANSDecodeError::None) {
+        return ncclUnhandledCudaError;
+      }
     }
+    if (cudaGetLastError() != cudaSuccess) return ncclUnhandledCudaError;
     return output.commitPlanned();
   }
 };

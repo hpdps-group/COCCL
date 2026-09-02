@@ -21,6 +21,9 @@ add_library(dietgpu SHARED
   vendor/dietgpu/dietgpu/ans/GpuANSDecode.cu
   vendor/dietgpu/dietgpu/ans/GpuANSEncode.cu
   vendor/dietgpu/dietgpu/ans/GpuANSInfo.cu
+  vendor/dietgpu/dietgpu/float/GpuFloatCompress.cu
+  vendor/dietgpu/dietgpu/float/GpuFloatDecompress.cu
+  vendor/dietgpu/dietgpu/float/GpuFloatInfo.cu
   vendor/dietgpu/dietgpu/utils/DeviceUtils.cpp
   vendor/dietgpu/dietgpu/utils/StackDeviceMemory.cpp)
 

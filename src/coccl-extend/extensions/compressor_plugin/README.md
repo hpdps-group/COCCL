@@ -209,8 +209,9 @@ fused reductions and persistent state.
   `groupSize = 32|64|128|256|512`, `targetRange`, `lambda`, and optional
   `fp8MaxValue`.
 - **ZFP:** `rate = 1..64` bits per value.
-- **dietGPU:** `probBits = 9|10|11`. It is framed, bytewise lossless, and
-  supports floating-point data plus Int8, Int32, and Int64.
+- **dietGPU:** `probBits = 9|10|11`. It uses dietGPU's floating-point codec
+  for FP16, BF16, and FP32, and bytewise ANS for Int8, Int32, and Int64.
+  Both paths are framed and lossless.
 
 Unknown parameters are rejected. The examples in
 [`../configs`](../configs) are the authoritative policy configurations.
