@@ -111,6 +111,15 @@ const cocclPipelineRmaWindow* findRmaWindow(
   return nullptr;
 }
 
+size_t framePayloadBytes(
+    const cocclCompressorFrameMetadata* metadata, size_t count) {
+  size_t bytes = 0;
+  for (size_t i = 0; i < count; ++i) {
+    bytes += (size_t)metadata[i].payloadBytes;
+  }
+  return bytes;
+}
+
 ncclResult_t readFrameMetadata(
     const cocclPipelineStageContext* context,
     const cocclPipelineEdge* edge,
@@ -517,6 +526,14 @@ ncclResult_t cocclCommitPipelineFrameExchange(
       context, edge, output, outputFrames, stream));
   NCCLCHECK(ensureFrameExchangeCapacity(
       context->frameResources, outputFrames));
+  if (stage->kind == cocclPipelineStageAllToAll) {
+    INFO(COCCL_PIPELINE,
+         "COCCL framed AllToAll compression raw_bytes=%zu payload_bytes=%zu frames=%zu",
+         context->rawSliceBytes * edge->logicalChunks,
+         framePayloadBytes(context->frameResources->sendMetadata,
+                           edge->logicalChunks),
+         edge->logicalChunks);
+  }
 
   size_t exchangeCount = 0;
   if (stage->kind == cocclPipelineStageAllToAll) {

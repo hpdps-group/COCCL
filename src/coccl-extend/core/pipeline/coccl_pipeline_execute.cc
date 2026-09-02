@@ -8,6 +8,7 @@
 #include "core/tuning/coccl_autotune_pipeline.h"
 #include "comm.h"
 #include "core/compression/compress.h"
+#include "debug.h"
 #include "rma/rma.h"
 
 #include <stdlib.h>
@@ -898,6 +899,11 @@ ncclResult_t runPipelineBatchWave(
         context.spec->stages[state.communicationStage];
     if (!cocclFrameMetadataValid(hostMetadata[i], frame.slotBytes)) {
       return ncclInvalidUsage;
+    }
+    if (stage.direction == cocclPipelineSend) {
+      INFO(COCCL_PIPELINE,
+           "COCCL framed SendRecv compression raw_bytes=%zu payload_bytes=%zu",
+           context.slices[slice].bytes, (size_t)hostMetadata[i].payloadBytes);
     }
     payloadExchanges[i] = {
         stage.peer,
