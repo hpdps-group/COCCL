@@ -95,13 +95,13 @@ bool sendRecvForward(const cocclInfo& info) {
       : info.comm->rank > info.peer;
 }
 
-cocclPolicyKey preparedPolicy(const cocclPreparedCall& prepared) {
-  if (prepared.info.operation == cocclOperation::SendRecv &&
-      prepared.trainingRole == cocclTrainingRolePipelineParallel) {
+cocclPolicyKey preparedPolicy(const cocclInfo& info, cocclTrainingRole role) {
+  if (info.operation == cocclOperation::SendRecv &&
+      role == cocclTrainingRolePipelineParallel) {
     return cocclDirectionalPolicy(cocclOperation::SendRecv,
-                                  sendRecvForward(prepared.info));
+                                  sendRecvForward(info));
   }
-  return cocclDefaultPolicy(prepared.info.operation);
+  return cocclDefaultPolicy(info.operation);
 }
 
 const char* compressionScopeName(cocclCompressionScope scope) {
@@ -123,55 +123,47 @@ const char* policyVariantName(cocclPolicyVariant variant) {
   return "unknown";
 }
 
-ncclResult_t resolvePreparedCompressors(cocclPreparedCall* prepared) {
-  prepared->policy = preparedPolicy(*prepared);
-  prepared->compressors = {};
-  for (cocclCompressionScope scope : {
-           cocclCompressionScope::Default,
-           cocclCompressionScope::Intra,
-           cocclCompressionScope::Inter}) {
-    cocclResolvedCompressorPolicy resolved = {};
-    if (cocclResolveCompressorPolicy(
-            prepared->trainingRole,
-            cocclPolicyForScope(prepared->policy, scope),
-            &resolved) != ncclSuccess) {
-      continue;
-    }
-    const size_t index = static_cast<size_t>(scope);
-    prepared->compressors.handles[index] = resolved.compressor;
-    prepared->compressors.datatypeSupported[index] =
-        compressorDatatypeSupported(
-            prepared->info.datatype, resolved.compressor);
-    prepared->compressors.thresholdBytes = resolved.thresholdBytes;
-    INFO(COCCL_RUNTIME,
-         "COCCL route comm=%p hash=%llu role=%s operation=%s policy=%s "
-         "scope=%s compressor=%s",
-         prepared->info.comm,
-         (unsigned long long)prepared->info.comm->commHash,
-         cocclTrainingRoleName(prepared->trainingRole),
-         prepared->descriptor->name,
-         policyVariantName(prepared->policy.variant),
-         compressionScopeName(scope),
-         cocclCompressorDescriptor(resolved.compressor)->name);
-  }
-  return prepared->compressors.anyEnabled()
-      ? ncclSuccess : ncclInvalidUsage;
-}
-
 ncclResult_t prepareCall(const cocclInfo& info,
                          const cocclOperationDescriptor* descriptor,
-                         cocclPreparedCall* prepared) {
+                         cocclPreparedCall* prepared,
+                         size_t* thresholdBytes) {
   prepared->info = info;
-  prepared->descriptor = descriptor;
+  cocclTrainingRole role = cocclTrainingRoleUnknown;
   if (cocclTrainingAssistEnabled()) {
     cocclTrainingClassification classification;
     if (!cocclTrainingAssistQuery(info.comm, &classification) ||
         classification.role == cocclTrainingRoleUnknown) {
       return ncclInvalidUsage;
     }
-    prepared->trainingRole = classification.role;
+    role = classification.role;
   }
-  return resolvePreparedCompressors(prepared);
+
+  const cocclPolicyKey policy = preparedPolicy(info, role);
+  for (cocclCompressionScope scope : {
+           cocclCompressionScope::Default,
+           cocclCompressionScope::Intra,
+           cocclCompressionScope::Inter}) {
+    cocclResolvedCompressorPolicy resolved = {};
+    if (cocclResolveCompressorPolicy(
+            role, cocclPolicyForScope(policy, scope),
+            &resolved) != ncclSuccess) {
+      continue;
+    }
+    const size_t index = static_cast<size_t>(scope);
+    prepared->compressors.handles[index] = resolved.compressor;
+    prepared->compressors.datatypeSupported[index] =
+        compressorDatatypeSupported(info.datatype, resolved.compressor);
+    *thresholdBytes = resolved.thresholdBytes;
+    INFO(COCCL_RUNTIME,
+         "COCCL route comm=%p hash=%llu role=%s operation=%s policy=%s "
+         "scope=%s compressor=%s",
+         info.comm, (unsigned long long)info.comm->commHash,
+         cocclTrainingRoleName(role), descriptor->name,
+         policyVariantName(policy.variant), compressionScopeName(scope),
+         cocclCompressorDescriptor(resolved.compressor)->name);
+  }
+  return prepared->compressors.anyEnabled()
+      ? ncclSuccess : ncclInvalidUsage;
 }
 
 bool callSupported(const cocclInfo& info,
@@ -219,10 +211,11 @@ ncclResult_t cocclEnqueueCheck(const cocclInfo* info, bool* isEnqueued) {
   }
 
   cocclPreparedCall prepared;
-  if (prepareCall(*info, descriptor, &prepared) != ncclSuccess) {
+  size_t thresholdBytes = 0;
+  if (prepareCall(*info, descriptor, &prepared, &thresholdBytes) != ncclSuccess) {
     return routeNativeGroupedSendRecv(*info, isEnqueued);
   }
-  if (bytes <= prepared.compressors.thresholdBytes) {
+  if (bytes <= thresholdBytes) {
     return routeNativeGroupedSendRecv(*info, isEnqueued);
   }
   ensureAutotuneModels(info->comm);
@@ -254,7 +247,8 @@ ncclResult_t cocclEnqueueExplicitCall(
   }
 
   cocclPreparedCall prepared;
-  NCCLCHECK(prepareCall(*info, descriptor, &prepared));
+  size_t thresholdBytes = 0;
+  NCCLCHECK(prepareCall(*info, descriptor, &prepared, &thresholdBytes));
   ensureAutotuneModels(info->comm);
   prepared.algorithm = algorithm;
   const bool deferSelection = ncclGroupDepth > 0 &&
@@ -318,8 +312,7 @@ ncclResult_t cocclReplayNativeCall(const cocclInfo& info) {
 }
 
 ncclResult_t cocclExecutePreparedCall(const cocclPreparedCall* prepared) {
-  if (prepared == nullptr || prepared->descriptor == nullptr ||
-      !prepared->compressors.anyEnabled()) {
+  if (prepared == nullptr || !prepared->compressors.anyEnabled()) {
     return ncclInvalidArgument;
   }
 

@@ -4,7 +4,6 @@
 #include <array>
 
 #include "runtime/coccl_runtime.h"
-#include "core/training/coccl_training_assist.h"
 
 enum cocclAlgorithmKind {
   cocclAlgorithmNone = 0,
@@ -22,15 +21,9 @@ struct cocclPreparedCompressorSet {
       handles = {};
   std::array<bool, static_cast<size_t>(cocclCompressionScope::Count)>
       datatypeSupported = {};
-  size_t thresholdBytes = 0;
 
   void* get(cocclCompressionScope scope) const {
     return handles[static_cast<size_t>(scope)];
-  }
-
-  bool supports(cocclCompressionScope scope) const {
-    const size_t index = static_cast<size_t>(scope);
-    return handles[index] != nullptr && datatypeSupported[index];
   }
 
   bool anyEnabled() const {
@@ -44,15 +37,8 @@ struct cocclPreparedCompressorSet {
 // Fully resolved immutable call retained by grouped replay.
 struct cocclPreparedCall {
   cocclInfo info;
-  const cocclOperationDescriptor* descriptor = nullptr;
-  cocclTrainingRole trainingRole = cocclTrainingRoleUnknown;
-  cocclPolicyKey policy;
   cocclAlgorithmKind algorithm = cocclAlgorithmNone;
   cocclPreparedCompressorSet compressors;
-  double oneShotUs = 0.0;
-  double twoShotUs = 0.0;
-  double tripleShotUs = 0.0;
-  bool usedModel = false;
 };
 
 ncclResult_t cocclEnqueuePreparedCall(const cocclPreparedCall* prepared);

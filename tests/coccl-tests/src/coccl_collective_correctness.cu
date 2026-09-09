@@ -3,6 +3,7 @@
 #include <cuda_runtime.h>
 #include <mpi.h>
 #include <nccl.h>
+#include "runtime/coccl_runtime.h"
 
 #include <algorithm>
 #include <cmath>
@@ -230,39 +231,47 @@ void runNative(Operation operation, const void* input, void* output,
                ncclDataType_t datatype, ncclComm_t comm,
                cudaStream_t stream, int rank, int ranks,
                size_t inputCount) {
+  // A second communicator alone does not bypass process-wide COCCL routing.
+  cocclInfo info;
+  info.sendbuff = input;
+  info.recvbuff = output;
+  info.count = inputCount;
+  info.datatype = datatype;
+  info.op = ncclSum;
+  info.comm = comm;
+  info.stream = stream;
   switch (operation) {
     case Operation::AllToAll:
-      NCCLCHECK(ncclAllToAll(input, output, inputCount / ranks,
-                             datatype, comm, stream));
-      return;
+      info.operation = cocclOperation::AllToAll;
+      info.count /= ranks;
+      break;
     case Operation::AllGather:
     case Operation::AllGatherTwoShot:
-      NCCLCHECK(ncclAllGather(input, output, inputCount, datatype,
-                              comm, stream));
-      return;
+      info.operation = cocclOperation::AllGather;
+      break;
     case Operation::ReduceScatterOneShot:
     case Operation::ReduceScatterTwoShot:
-      NCCLCHECK(ncclReduceScatter(input, output, inputCount / ranks,
-                                  datatype, ncclSum, comm, stream));
-      return;
+      info.operation = cocclOperation::ReduceScatter;
+      info.count /= ranks;
+      break;
     case Operation::AllReduceOneShot:
     case Operation::AllReduceTwoShot:
     case Operation::AllReduceTripleShot:
-      NCCLCHECK(ncclAllReduce(input, output, inputCount, datatype,
-                              ncclSum, comm, stream));
-      return;
-    case Operation::SendRecv: {
-      const int previous = (rank + ranks - 1) % ranks;
-      const int next = (rank + 1) % ranks;
+      info.operation = cocclOperation::AllReduce;
+      break;
+    case Operation::SendRecv:
+      info.operation = cocclOperation::SendRecv;
       NCCLCHECK(ncclGroupStart());
-      NCCLCHECK(ncclRecv(output, inputCount, datatype, previous, comm,
-                         stream));
-      NCCLCHECK(ncclSend(input, inputCount, datatype, next, comm,
-                         stream));
+      info.func = ncclFuncRecv;
+      info.peer = (rank + ranks - 1) % ranks;
+      NCCLCHECK(cocclReplayNativeCall(info));
+      info.func = ncclFuncSend;
+      info.peer = (rank + 1) % ranks;
+      NCCLCHECK(cocclReplayNativeCall(info));
       NCCLCHECK(ncclGroupEnd());
       return;
-    }
   }
+  NCCLCHECK(cocclReplayNativeCall(info));
 }
 
 void runCompressed(Operation operation, const void* input, void* output,

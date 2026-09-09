@@ -37,6 +37,8 @@ int ppForwardCompressor;
 int ppBackwardCompressor;
 int executionCount = 0;
 cocclPreparedCall lastExecution;
+cocclTrainingRole lastResolvedRole = cocclTrainingRoleUnknown;
+cocclPolicyKey lastResolvedPolicy;
 
 const cocclCompressorPlugin sdp4bitDescriptor = {
     COCCL_COMPRESSOR_ABI_VERSION,
@@ -104,6 +106,8 @@ ncclResult_t cocclAutotuneEnsureGlobalModels(ncclComm_t) {
 ncclResult_t cocclResolveCompressorPolicy(
     cocclTrainingRole role, cocclPolicyKey key,
     cocclResolvedCompressorPolicy* resolved) {
+  lastResolvedRole = role;
+  lastResolvedPolicy = key;
   void* compressor = compressorFor(role, key);
   if (compressor == nullptr) return ncclInvalidUsage;
   resolved->compressor = compressor;
@@ -754,8 +758,8 @@ static int expectRouted(const cocclInfo& info, cocclTrainingRole role,
   bool isEnqueued = false;
   if (cocclEnqueueCheck(&info, &isEnqueued) != ncclSuccess || !isEnqueued ||
       executionCount != previousExecutions + 1 ||
-      lastExecution.trainingRole != role ||
-      lastExecution.policy.variant != variant ||
+      lastResolvedRole != role ||
+      lastResolvedPolicy.variant != variant ||
       lastExecution.compressors.get(
           info.operation == cocclOperation::SendRecv
               ? cocclCompressionScope::Inter
@@ -925,7 +929,7 @@ static int testRoleSpecificCompressorSelection() {
   if (cocclEnqueueExplicitCall(
           &dpAllGather, cocclAlgorithmNone) != ncclSuccess ||
       executionCount != previousExecutions + 1 ||
-      lastExecution.trainingRole != cocclTrainingRoleDataParallel) {
+      lastResolvedRole != cocclTrainingRoleDataParallel) {
     fprintf(stderr, "explicit COCCL call did not bypass the threshold\n");
     return 1;
   }
@@ -1299,9 +1303,7 @@ static int testOperationDescriptors() {
     const cocclOperationDescriptor* descriptor =
         cocclGetOperationDescriptor(operation);
     if (descriptor == nullptr || descriptor->operation != operation ||
-        descriptor->name == nullptr ||
-        !cocclOperationSupportsPolicy(
-            descriptor, cocclPolicyVariant::Default)) {
+        descriptor->name == nullptr) {
       fprintf(stderr, "operation %d has an incomplete descriptor\n", value);
       return 1;
     }
@@ -1310,21 +1312,12 @@ static int testOperationDescriptors() {
       cocclGetOperationDescriptor(cocclOperation::AllReduce);
   const cocclOperationDescriptor* reduceScatter =
       cocclGetOperationDescriptor(cocclOperation::ReduceScatter);
-  const cocclOperationDescriptor* sendRecv =
-      cocclGetOperationDescriptor(cocclOperation::SendRecv);
   if (cocclGetOperationDescriptor(cocclOperation::Count) != nullptr ||
       !cocclOperationHasTrait(allReduce, cocclOperationTraitReduction) ||
       !cocclOperationHasTrait(
           allReduce, cocclOperationTraitCountDivisibleByRanks) ||
       !cocclOperationHasTrait(
-          reduceScatter, cocclOperationTraitReduction) ||
-      !cocclOperationHasTrait(
-          reduceScatter, cocclOperationTraitHierarchicalPolicy) ||
-      !cocclOperationHasTrait(sendRecv, cocclOperationTraitGrouped) ||
-      !cocclOperationSupportsPolicy(
-          sendRecv, cocclPolicyVariant::Forward) ||
-      cocclOperationSupportsPolicy(
-          allReduce, cocclPolicyVariant::Forward)) {
+          reduceScatter, cocclOperationTraitReduction)) {
     fprintf(stderr, "operation descriptor semantics are inconsistent\n");
     return 1;
   }

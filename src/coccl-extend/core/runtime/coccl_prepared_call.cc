@@ -15,75 +15,48 @@ cocclCompressionScope flatScope(const cocclInfo& info) {
       : cocclCompressionScope::Default;
 }
 
-void algorithmScopes(const cocclPreparedCall& prepared,
-                     cocclAlgorithmKind algorithm,
-                     bool* useDefault, bool* useIntra, bool* useInter) {
-  *useDefault = false;
-  *useIntra = false;
-  *useInter = false;
-  if (algorithm == cocclAlgorithmAllGatherTwoShot) {
-    *useInter = true;
-    return;
+unsigned algorithmScopes(const cocclPreparedCall& prepared,
+                         cocclAlgorithmKind algorithm) {
+  constexpr unsigned useDefault =
+      1u << static_cast<unsigned>(cocclCompressionScope::Default);
+  constexpr unsigned useIntra =
+      1u << static_cast<unsigned>(cocclCompressionScope::Intra);
+  constexpr unsigned useInter =
+      1u << static_cast<unsigned>(cocclCompressionScope::Inter);
+  switch (algorithm) {
+    case cocclAlgorithmAllGatherTwoShot:
+      return useInter;
+    case cocclAlgorithmReduceScatterTwoShot:
+      return useIntra | useInter;
+    case cocclAlgorithmAllReduceTripleShot:
+      return useDefault | useIntra | useInter;
+    default:
+      return 1u << static_cast<unsigned>(flatScope(prepared.info));
   }
-  if (algorithm == cocclAlgorithmReduceScatterTwoShot) {
-    *useIntra = true;
-    *useInter = true;
-    return;
-  }
-  if (algorithm == cocclAlgorithmAllReduceTripleShot) {
-    *useDefault = true;
-    *useIntra = true;
-    *useInter = true;
-    return;
-  }
-  switch (flatScope(prepared.info)) {
-    case cocclCompressionScope::Default: *useDefault = true; break;
-    case cocclCompressionScope::Intra: *useIntra = true; break;
-    case cocclCompressionScope::Inter: *useInter = true; break;
-    case cocclCompressionScope::Count: break;
-  }
-}
-
-bool hasCompression(const cocclPreparedCall& prepared, bool useDefault,
-                    bool useIntra, bool useInter) {
-  return (useDefault && prepared.compressors.get(
-                            cocclCompressionScope::Default) != nullptr) ||
-      (useIntra && prepared.compressors.get(
-                       cocclCompressionScope::Intra) != nullptr) ||
-      (useInter && prepared.compressors.get(
-                       cocclCompressionScope::Inter) != nullptr);
 }
 
 }  // namespace
 
 bool cocclPreparedAlgorithmHasCompression(
     const cocclPreparedCall* prepared, cocclAlgorithmKind algorithm) {
-  bool useDefault = false;
-  bool useIntra = false;
-  bool useInter = false;
-  algorithmScopes(
-      *prepared, algorithm, &useDefault, &useIntra, &useInter);
-  return hasCompression(*prepared, useDefault, useIntra, useInter);
+  const unsigned scopes = algorithmScopes(*prepared, algorithm);
+  for (size_t i = 0; i < prepared->compressors.handles.size(); ++i) {
+    if ((scopes & (1u << i)) && prepared->compressors.handles[i] != nullptr) {
+      return true;
+    }
+  }
+  return false;
 }
 
 bool cocclPreparedAlgorithmSupported(
     const cocclPreparedCall* prepared, cocclAlgorithmKind algorithm) {
-  bool useDefault = false;
-  bool useIntra = false;
-  bool useInter = false;
-  algorithmScopes(
-      *prepared, algorithm, &useDefault, &useIntra, &useInter);
-  if (!hasCompression(*prepared, useDefault, useIntra, useInter)) {
-    return false;
+  const unsigned scopes = algorithmScopes(*prepared, algorithm);
+  bool enabled = false;
+  for (size_t i = 0; i < prepared->compressors.handles.size(); ++i) {
+    if ((scopes & (1u << i)) && prepared->compressors.handles[i] != nullptr) {
+      if (!prepared->compressors.datatypeSupported[i]) return false;
+      enabled = true;
+    }
   }
-  return (!useDefault ||
-          prepared->compressors.get(cocclCompressionScope::Default) ==
-              nullptr ||
-          prepared->compressors.supports(cocclCompressionScope::Default)) &&
-      (!useIntra ||
-       prepared->compressors.get(cocclCompressionScope::Intra) == nullptr ||
-       prepared->compressors.supports(cocclCompressionScope::Intra)) &&
-      (!useInter ||
-       prepared->compressors.get(cocclCompressionScope::Inter) == nullptr ||
-       prepared->compressors.supports(cocclCompressionScope::Inter));
+  return enabled;
 }

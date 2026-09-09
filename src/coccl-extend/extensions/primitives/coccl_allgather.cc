@@ -23,17 +23,10 @@ ncclResult_t executeOneShot(const cocclPreparedCall* prepared) {
   const cocclCompressionScope scope = info.comm->nNodes == 1
       ? cocclCompressionScope::Intra
       : cocclCompressionScope::Default;
-  const cocclPipelineStage stages[] = {
-      cocclPipelineCompress(prepared->compressors.get(scope)),
-      cocclPipelineAllGather(info.comm),
-      cocclPipelineDecompress(),
-  };
-  const cocclPipelineSpec spec = {
-      "allgather", info.sendbuff, info.recvbuff, info.count, 1,
-      info.datatype, info.comm, info.stream, stages,
-      (int)(sizeof(stages) / sizeof(stages[0])),
-      cocclPipelineInPlaceInputRankChunk,
-      cocclPipelineInputContiguous};
+  cocclPipelineStage stages[4];
+  const cocclPipelineSpec spec = cocclBuildAllGatherSpec(
+      info, cocclAlgorithmAllGatherOneShot, prepared->compressors.get(scope),
+      info.comm, nullptr, stages);
   return cocclRunPipeline(&spec);
 }
 
@@ -45,23 +38,35 @@ ncclResult_t executeTwoShot(const cocclPreparedCall* prepared) {
   NCCLCHECK(cocclCommGetHierarchicalComms(info.comm, &hierarchy));
   void* const compressor = prepared->compressors.get(
       cocclCompressionScope::Inter);
-  const cocclPipelineStage stages[] = {
-      cocclPipelineCompress(compressor),
-      cocclPipelineAllGather(hierarchy.interComm),
-      cocclPipelineAllGather(hierarchy.intraComm),
-      cocclPipelineDecompress(),
-  };
-  const cocclPipelineSpec spec = {
-      "allgather-twoshot", info.sendbuff, info.recvbuff, info.count, 1,
-      info.datatype, info.comm, info.stream, stages,
-      (int)(sizeof(stages) / sizeof(stages[0])),
-      cocclPipelineInPlaceInputRankChunk,
-      cocclPipelineInputContiguous,
-      cocclPipelineOutputHierarchicalAllGather};
+  cocclPipelineStage stages[4];
+  const cocclPipelineSpec spec = cocclBuildAllGatherSpec(
+      info, cocclAlgorithmAllGatherTwoShot, compressor,
+      hierarchy.interComm, hierarchy.intraComm, stages);
   return cocclRunPipeline(&spec);
 }
 
 }  // namespace
+
+cocclPipelineSpec cocclBuildAllGatherSpec(
+    const cocclInfo& info, cocclAlgorithmKind algorithm, void* compressor,
+    ncclComm_t gatherComm, ncclComm_t intraComm,
+    cocclPipelineStage* stages) {
+  const bool twoShot = algorithm == cocclAlgorithmAllGatherTwoShot;
+  const bool encoded = twoShot || compressor != nullptr;
+  int stageCount = 0;
+  if (encoded) stages[stageCount++] = cocclPipelineCompress(compressor);
+  stages[stageCount++] = cocclPipelineAllGather(gatherComm);
+  if (twoShot) stages[stageCount++] = cocclPipelineAllGather(intraComm);
+  if (encoded) stages[stageCount++] = cocclPipelineDecompress();
+  return {
+      twoShot ? "allgather-twoshot" : encoded ? "allgather" : "allgather-native",
+      info.sendbuff, info.recvbuff, info.count, 1,
+      info.datatype, info.comm, info.stream, stages, stageCount,
+      cocclPipelineInPlaceInputRankChunk,
+      cocclPipelineInputContiguous,
+      twoShot ? cocclPipelineOutputHierarchicalAllGather
+              : cocclPipelineOutputContiguous};
+}
 
 ncclResult_t cocclExecuteAllGather(const cocclPreparedCall* prepared) {
   switch (prepared->algorithm) {
