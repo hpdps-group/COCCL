@@ -201,11 +201,9 @@ struct TraceBuilder {
   void add(uint64_t communicatorId, ncclFunc_t operation, size_t bytes,
            int peer = -1) {
     cocclTrainingTraceEvent event;
-    event.sequence = events.size() + 1;
     event.communicatorId = communicatorId;
     event.operation = operation;
     event.logicalBytes = bytes;
-    event.datatype = ncclFloat32;
     event.peer = peer;
     event.timestampNs = timestampNs;
     timestampNs += 10;
@@ -849,15 +847,15 @@ static int testRoleSpecificCompressorSelection() {
   ppSend.peer = 1;
 
   auto observeIteration = [&]() {
-    cocclTrainingAssistObserve(&dpAllGather, 0);
+    cocclTrainingAssistObserve(&dpAllGather);
     for (int tensorOp = 0; tensorOp < 6; ++tensorOp) {
-      cocclTrainingAssistObserve(&tpAllReduce, 0);
+      cocclTrainingAssistObserve(&tpAllReduce);
     }
     for (int microbatch = 0; microbatch < 4; ++microbatch) {
-      cocclTrainingAssistObserve(&ppRecv, 1);
-      cocclTrainingAssistObserve(&ppSend, 1);
+      cocclTrainingAssistObserve(&ppRecv);
+      cocclTrainingAssistObserve(&ppSend);
     }
-    cocclTrainingAssistObserve(&dpReduceScatter, 0);
+    cocclTrainingAssistObserve(&dpReduceScatter);
     usleep(1000);
   };
 
@@ -971,7 +969,7 @@ static int testRuntimeObservationMinimumBytes() {
       kCocclTrainingMinimumObservedBytes / sizeof(float) - 1,
       buffer, buffer);
   for (int call = 0; call < 256; ++call) {
-    cocclTrainingAssistObserve(&belowMinimum, 0);
+    cocclTrainingAssistObserve(&belowMinimum);
   }
   cocclTrainingClassification classification;
   if (cocclTrainingAssistQuery(&comm, &classification)) {
@@ -988,8 +986,8 @@ static int testRuntimeObservationMinimumBytes() {
       &comm, cocclOperation::AllGather, ncclFuncAllGather, atMinimumCount,
       buffer, buffer);
   for (int iteration = 0; iteration < 20; ++iteration) {
-    cocclTrainingAssistObserve(&atMinimumReduceScatter, 0);
-    cocclTrainingAssistObserve(&atMinimumAllGather, 0);
+    cocclTrainingAssistObserve(&atMinimumReduceScatter);
+    cocclTrainingAssistObserve(&atMinimumAllGather);
     usleep(1000);
   }
   if (!cocclTrainingAssistQuery(&comm, &classification) ||
@@ -1077,8 +1075,8 @@ static int testObservationIndependentOfCompressionThreshold(bool overlap) {
 
   cocclTrainingAssistRegister(&tp);
   for (int iteration = 0; iteration < 20; ++iteration) {
-    cocclTrainingAssistObserve(&tpReduceScatter, 0);
-    cocclTrainingAssistObserve(&tpAllGather, 0);
+    cocclTrainingAssistObserve(&tpReduceScatter);
+    cocclTrainingAssistObserve(&tpAllGather);
     usleep(1000);
   }
   int result = expectCommittedRole(
@@ -1089,18 +1087,18 @@ static int testObservationIndependentOfCompressionThreshold(bool overlap) {
   cocclTrainingAssistRegister(&dp);
   cocclTrainingAssistRegister(&lateDp);
   cocclTrainingAssistRegister(&pp);
-  cocclTrainingAssistObserve(&ppSend, 1);
+  cocclTrainingAssistObserve(&ppSend);
   for (int iteration = 0; iteration < 20; ++iteration) {
-    cocclTrainingAssistObserve(&dpAllGather, 0);
+    cocclTrainingAssistObserve(&dpAllGather);
     if (overlap) {
       cocclInfo firstBucket = dpReduceScatter;
       firstBucket.count /= 4;
-      cocclTrainingAssistObserve(&firstBucket, 0);
+      cocclTrainingAssistObserve(&firstBucket);
       cocclInfo secondBucket = dpReduceScatter;
       secondBucket.count -= firstBucket.count;
-      cocclTrainingAssistObserve(&secondBucket, 0);
+      cocclTrainingAssistObserve(&secondBucket);
     } else {
-      cocclTrainingAssistObserve(&dpReduceScatter, 0);
+      cocclTrainingAssistObserve(&dpReduceScatter);
     }
     usleep(1000);
   }
@@ -1120,8 +1118,8 @@ static int testObservationIndependentOfCompressionThreshold(bool overlap) {
   lateAllGather.comm = &lateDp;
   lateReduceScatter.comm = &lateDp;
   for (int iteration = 0; iteration < 20; ++iteration) {
-    cocclTrainingAssistObserve(&lateAllGather, 0);
-    cocclTrainingAssistObserve(&lateReduceScatter, 0);
+    cocclTrainingAssistObserve(&lateAllGather);
+    cocclTrainingAssistObserve(&lateReduceScatter);
     usleep(1000);
   }
   result |= expectCommittedRole(
@@ -1179,7 +1177,7 @@ static int testImmediateConfiguredSizeClassification() {
   ppCall.peer = 1;
 
   cocclTrainingAssistRegister(&dp);
-  cocclTrainingAssistObserve(&dpCall, 0);
+  cocclTrainingAssistObserve(&dpCall);
   int result = expectCommittedRole(
       &dp, cocclTrainingRoleDataParallel, "immediate DP size");
 
@@ -1190,7 +1188,7 @@ static int testImmediateConfiguredSizeClassification() {
   clock_gettime(CLOCK_MONOTONIC, &begin);
   for (int call = 0; call < kSteadyCalls; ++call) {
     cocclTrainingClassification classification;
-    cocclTrainingAssistObserve(&dpCall, 0);
+    cocclTrainingAssistObserve(&dpCall);
     if (cocclTrainingAssistQuery(&dp, &classification)) {
       roleSum += classification.role;
     }
@@ -1204,13 +1202,13 @@ static int testImmediateConfiguredSizeClassification() {
   cocclTrainingAssistUnregister(&dp);
 
   cocclTrainingAssistRegister(&tp);
-  cocclTrainingAssistObserve(&tpCall, 0);
+  cocclTrainingAssistObserve(&tpCall);
   result |= expectCommittedRole(
       &tp, cocclTrainingRoleTensorParallel, "immediate TP size");
   cocclTrainingAssistUnregister(&tp);
 
   cocclTrainingAssistRegister(&pp);
-  cocclTrainingAssistObserve(&ppCall, 0);
+  cocclTrainingAssistObserve(&ppCall);
   result |= expectCommittedRole(
       &pp, cocclTrainingRolePipelineParallel, "immediate PP size");
   cocclTrainingAssistUnregister(&pp);

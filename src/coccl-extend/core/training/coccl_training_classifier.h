@@ -3,10 +3,44 @@
 
 #include "core/training/coccl_training_assist.h"
 
+#include <algorithm>
+#include <cmath>
 #include <stddef.h>
 #include <stdint.h>
 #include <vector>
 struct cocclTrainingConfig;
+
+inline bool cocclTrainingIsCollective(ncclFunc_t operation) {
+  return operation == ncclFuncAllGather ||
+         operation == ncclFuncReduceScatter ||
+         operation == ncclFuncAllReduce;
+}
+
+inline bool cocclTrainingIsP2p(ncclFunc_t operation) {
+  return operation == ncclFuncSend || operation == ncclFuncRecv;
+}
+
+inline bool cocclTrainingIsObservedOperation(ncclFunc_t operation) {
+  return cocclTrainingIsCollective(operation) || cocclTrainingIsP2p(operation);
+}
+
+template <typename T>
+inline T cocclTrainingMedian(std::vector<T> values) {
+  if (values.empty()) return T{};
+  size_t middle = values.size() / 2;
+  std::nth_element(values.begin(), values.begin() + middle, values.end());
+  T result = values[middle];
+  if ((values.size() & 1) == 0) {
+    std::nth_element(values.begin(), values.begin() + middle - 1, values.end());
+    result = (T)((values[middle - 1] + result) / 2);
+  }
+  return result;
+}
+
+inline bool cocclTrainingRatioNear(double value, double target) {
+  return target > 0.0 && std::fabs(value - target) / target <= 0.20;
+}
+
 
 // Trace types deliberately contain no runtime-owned pointers. This keeps the
 // classifier deterministic and directly testable with synthetic schedules.
@@ -20,14 +54,11 @@ struct cocclTrainingTraceComm {
 };
 
 struct cocclTrainingTraceEvent {
-  uint64_t sequence = 0;
   uint64_t communicatorId = 0;
   ncclFunc_t operation = ncclFuncAllReduce;
   size_t logicalBytes = 0;
-  ncclDataType_t datatype = ncclFloat32;
   int peer = -1;
   uint64_t timestampNs = 0;
-  int groupDepth = 0;
 };
 
 struct cocclTrainingIterationRange {

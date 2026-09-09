@@ -197,7 +197,7 @@ ncclResult_t cocclEnqueueCheck(const cocclInfo* info, bool* isEnqueued) {
   if (callerGuardActive) return ncclSuccess;
   if (info->comm == nullptr) return ncclSuccess;
 
-  cocclTrainingAssistObserve(info, ncclGroupDepth);
+  cocclTrainingAssistObserve(info);
 
   const cocclOperationDescriptor* descriptor =
       cocclGetOperationDescriptor(info->operation);
