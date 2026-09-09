@@ -29,10 +29,7 @@ enum cocclOperationTrait : uint32_t {
   cocclOperationTraitNone = 0,
   cocclOperationTraitScaleBytesByRanks = 1u << 0,
   cocclOperationTraitReduction = 1u << 1,
-  cocclOperationTraitGrouped = 1u << 2,
   cocclOperationTraitCountDivisibleByRanks = 1u << 3,
-  cocclOperationTraitHierarchicalPolicy = 1u << 4,
-  cocclOperationTraitDirectionalPolicy = 1u << 5,
 };
 
 struct cocclPolicyKey {
@@ -83,8 +80,8 @@ constexpr cocclPolicyKey cocclPolicyForScope(
 }
 
 // One descriptor is the authoritative runtime contract for each operation.
-// Configuration bindings carry only a policy key; routing, shape checks,
-// and grouping use these descriptors. Execution dispatch remains in the
+// Configuration bindings carry only a policy key; routing and shape checks
+// use these descriptors. Execution dispatch remains in the
 // runtime translation unit so metadata-only users do not link CUDA primitives.
 struct cocclOperationDescriptor {
   cocclOperation operation;
@@ -98,7 +95,5 @@ inline bool cocclOperationHasTrait(
     const cocclOperationDescriptor* descriptor, cocclOperationTrait trait) {
   return descriptor != nullptr && (descriptor->traits & (uint32_t)trait) != 0;
 }
-bool cocclOperationSupportsPolicy(const cocclOperationDescriptor* descriptor,
-                                  cocclPolicyVariant variant);
 
 #endif

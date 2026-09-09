@@ -4,11 +4,14 @@
 #include "core/config/coccl_config.h"
 #include "core/pipeline/coccl_pipeline.h"
 #include "core/runtime/coccl_comm.h"
+#include "core/runtime/coccl_primitive_dispatch.h"
 #include "core/tuning/coccl_autotune_pipeline.h"
 #include "comm.h"
 #include "debug.h"
 
 #include <chrono>
+#include <cstdarg>
+#include <cstring>
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
@@ -35,6 +38,9 @@ cocclCodecModel intraModel = {{1.0, 1e-6, true}, 8.0, true};
 cocclCodecModel interModel = {{3.0, 3e-6, true}, 4.0, true};
 ncclDataType_t snapshotDatatype = ncclNumTypes;
 bool framedCompressor;
+double lastScores[3];
+bool lastUsedModel;
+bool captureSelectionLog = true;
 double nativeAllGatherCost = 0.5;
 double hierarchicalAllGatherCost = 1.0;
 
@@ -71,18 +77,35 @@ void checkSelection(cocclPreparedCall* prepared,
                  "selection mismatch operation=%d count=%zu expected=%d actual=%d one=%g two=%g triple=%g\n",
                  (int)prepared->info.operation, prepared->info.count,
                  (int)expected, (int)prepared->algorithm,
-                 prepared->oneShotUs, prepared->twoShotUs,
-                 prepared->tripleShotUs);
+                 lastScores[0], lastScores[1],
+                 lastScores[2]);
   }
   EXPECT(prepared->algorithm == expected);
-  EXPECT(prepared->usedModel == expectedModel);
+  EXPECT(lastUsedModel == expectedModel);
 }
 
 }  // namespace
 
 thread_local int ncclDebugNoWarn = 0;
-void ncclDebugLog(ncclDebugLogLevel, unsigned long, const char*, int,
-                  const char*, ...) {}
+int ncclDebugLevel = NCCL_LOG_INFO;
+uint64_t ncclDebugMask = COCCL_TUNING;
+void ncclDebugLogInternal(
+    ncclDebugLogLevel, unsigned long, const char*, const char*, int,
+    const char* format, ...) {
+  if (!captureSelectionLog ||
+      std::strncmp(format, "COCCL select ", 13) != 0) return;
+  char message[512];
+  va_list args;
+  va_start(args, format);
+  std::vsnprintf(message, sizeof(message), format, args);
+  va_end(args);
+  int usedModel = 0;
+  EXPECT(std::sscanf(std::strstr(message, "one="),
+                    "one=%lf two=%lf triple=%lf model=%d",
+                    &lastScores[0], &lastScores[1], &lastScores[2],
+                    &usedModel) == 4);
+  lastUsedModel = usedModel != 0;
+}
 
 const cocclCompressorPlugin* cocclCompressorDescriptor(void* compressor) {
   return reinterpret_cast<const cocclCompressorPlugin*>(compressor);
@@ -143,6 +166,32 @@ int main() {
   nodeRanks[0].localRanks = 4;
   nodeRanks[1].localRanks = 4;
   comm.nodeRanks = nodeRanks;
+  // The selector and primitive share this recipe but supply their own comms.
+  cocclPreparedCall recipe = makePrepared(&comm, cocclOperation::AllGather);
+  ncclComm first = {}, second = {};
+  cocclPipelineStage stages[4];
+  cocclPipelineSpec spec = cocclBuildAllGatherSpec(
+      recipe.info, cocclAlgorithmAllGatherOneShot, nullptr,
+      &first, &second, stages);
+  EXPECT(spec.stageCount == 1 && stages[0].kind == cocclPipelineStageAllGather);
+  EXPECT(stages[0].comm == &first);
+  EXPECT(std::strcmp(spec.name, "allgather-native") == 0);
+  spec = cocclBuildAllGatherSpec(
+      recipe.info, cocclAlgorithmAllGatherOneShot, kDefault,
+      &first, &second, stages);
+  EXPECT(spec.stageCount == 3 && stages[0].compressor == kDefault);
+  EXPECT(stages[1].kind == cocclPipelineStageAllGather && stages[1].comm == &first);
+  EXPECT(stages[2].kind == cocclPipelineStageDecompress);
+  EXPECT(spec.rawChunkCount == recipe.info.count && spec.inputChunks == 1);
+  EXPECT(spec.outputLayout == cocclPipelineOutputContiguous);
+  spec = cocclBuildAllGatherSpec(
+      recipe.info, cocclAlgorithmAllGatherTwoShot, kInter,
+      &first, &second, stages);
+  EXPECT(spec.stageCount == 4 && stages[0].compressor == kInter);
+  EXPECT(stages[1].comm == &first && stages[2].comm == &second);
+  EXPECT(stages[2].kind == cocclPipelineStageAllGather);
+  EXPECT(stages[3].kind == cocclPipelineStageDecompress);
+  EXPECT(spec.outputLayout == cocclPipelineOutputHierarchicalAllGather);
   config.autotune.enabled = true;
 
   cocclPreparedCall prepared =
@@ -181,9 +230,9 @@ int main() {
       makePrepared(&comm, cocclOperation::ReduceScatter);
   setScope(&prepared, cocclCompressionScope::Inter, kInter);
   checkSelection(&prepared, cocclAlgorithmReduceScatterTwoShot, true);
-  EXPECT(std::isinf(prepared.oneShotUs));
+  EXPECT(std::isinf(lastScores[0]));
   EXPECT(snapshotDatatype == ncclFloat32);
-  EXPECT(std::isfinite(prepared.twoShotUs));
+  EXPECT(std::isfinite(lastScores[1]));
 
   prepared = makePrepared(&comm, cocclOperation::ReduceScatter);
   setScope(&prepared, cocclCompressionScope::Intra, kIntra);
@@ -255,6 +304,8 @@ int main() {
   prepared.info.count = (size_t{64} << 20) / sizeof(float);
   setScope(&prepared, cocclCompressionScope::Default, kDefault);
   setScope(&prepared, cocclCompressionScope::Inter, kInter);
+  captureSelectionLog = false;
+  ncclDebugLevel = NCCL_LOG_NONE;
   constexpr int kIterations = 1000000;
   size_t checksum = 0;
   const auto begin = std::chrono::steady_clock::now();

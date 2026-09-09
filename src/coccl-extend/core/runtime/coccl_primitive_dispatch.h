@@ -2,10 +2,17 @@
 #define COCCL_PRIMITIVE_DISPATCH_H_
 
 #include "nccl.h"
+#include "core/runtime/coccl_prepared_call.h"
 
 #include <stddef.h>
 
-struct cocclPreparedCall;
+struct cocclPipelineSpec;
+struct cocclPipelineStage;
+
+cocclPipelineSpec cocclBuildAllGatherSpec(
+    const cocclInfo& info, cocclAlgorithmKind algorithm, void* compressor,
+    ncclComm_t gatherComm, ncclComm_t intraComm,
+    cocclPipelineStage* stages);
 
 ncclResult_t cocclExecuteAllGather(const cocclPreparedCall* prepared);
 ncclResult_t cocclExecuteAllToAll(const cocclPreparedCall* prepared);

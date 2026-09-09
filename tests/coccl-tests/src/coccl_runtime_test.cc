@@ -31,19 +31,16 @@ std::vector<cocclPreparedCall> grouped;
 
 constexpr cocclOperationDescriptor descriptors[] = {
     {cocclOperation::AllGather, "AllGather",
-     cocclOperationTraitScaleBytesByRanks | cocclOperationTraitGrouped},
+     cocclOperationTraitScaleBytesByRanks},
     {cocclOperation::ReduceScatter, "ReduceScatter",
-     cocclOperationTraitScaleBytesByRanks | cocclOperationTraitReduction |
-         cocclOperationTraitGrouped |
-         cocclOperationTraitHierarchicalPolicy},
+     cocclOperationTraitScaleBytesByRanks | cocclOperationTraitReduction},
     {cocclOperation::AllReduce, "AllReduce",
-     cocclOperationTraitReduction | cocclOperationTraitGrouped |
-         cocclOperationTraitCountDivisibleByRanks |
-         cocclOperationTraitHierarchicalPolicy},
+     cocclOperationTraitReduction |
+         cocclOperationTraitCountDivisibleByRanks},
     {cocclOperation::AllToAll, "AllToAll",
-     cocclOperationTraitScaleBytesByRanks | cocclOperationTraitGrouped},
+     cocclOperationTraitScaleBytesByRanks},
     {cocclOperation::SendRecv, "SendRecv",
-     cocclOperationTraitDirectionalPolicy | cocclOperationTraitGrouped},
+     cocclOperationTraitNone},
 };
 
 void fail(const char* expression, int line) {
@@ -171,11 +168,6 @@ const cocclOperationDescriptor* cocclGetOperationDescriptor(
   const size_t index = static_cast<size_t>(operation);
   return index < static_cast<size_t>(cocclOperation::Count)
       ? &descriptors[index] : nullptr;
-}
-
-bool cocclOperationSupportsPolicy(const cocclOperationDescriptor*,
-                                  cocclPolicyVariant) {
-  return true;
 }
 
 const cocclConfig& cocclGetConfig() {

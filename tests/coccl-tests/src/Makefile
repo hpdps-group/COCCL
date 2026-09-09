@@ -365,10 +365,13 @@ $(REDUCESCATTER_RECIPE_TEST): coccl_reducescatter_recipe_test.cc \
 	@mkdir -p $(DST_DIR)
 	$(CXX) $(TEST_CXXFLAGS) $(COCCL_INC) -I$(COCCL_SRC) -o $@ $^
 
-$(COLLECTIVE_CORRECTNESS_TEST): coccl_collective_correctness.cu
+$(COLLECTIVE_CORRECTNESS_TEST): coccl_collective_correctness.cu \
+		$(NCCL_HOME)/lib/libnccl_static.a
 	@printf "Linking  %-35s > %s\n" $< $@
 	@mkdir -p $(DST_DIR)
-	$(NVCC) -o $@ $(NVCUFLAGS) $< $(NVLDFLAGS)
+	$(NVCC) -o $@ $(filter-out -std=c++11,$(NVCUFLAGS)) -std=c++17 \
+		$(COCCL_INC) $< $(NCCL_HOME)/lib/libnccl_static.a \
+		$(filter-out -lnccl -l$(CUDARTLIB),$(NVLDFLAGS)) -lcudart_static -ldl -lpthread
 
 $(COLL_CONFIG_TEST): coccl_coll_config_test.cu
 	@printf "Linking  %-35s > %s\n" $< $@
@@ -432,6 +435,7 @@ $(CODEC_FLOW_TEST): coccl_codec_flow_test.cc \
 		-L$(CUDA_LIB) -lcudart
 
 $(SELECTOR_SCOPE_TEST): coccl_selector_scope_test.cc \
+		$(COCCL_EXTENSIONS)/primitives/coccl_allgather.cc \
 		$(COCCL_CORE)/tuning/coccl_autotune_selector.cc \
 		$(COCCL_CORE)/tuning/coccl_autotune_cost_model.cc \
 		$(COCCL_CORE)/runtime/coccl_prepared_call.cc

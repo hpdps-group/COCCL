@@ -6,21 +6,16 @@ namespace {
 
 constexpr cocclOperationDescriptor kOperationDescriptors[] = {
     {cocclOperation::AllGather, "AllGather",
-     cocclOperationTraitScaleBytesByRanks | cocclOperationTraitGrouped},
+     cocclOperationTraitScaleBytesByRanks},
     {cocclOperation::ReduceScatter, "ReduceScatter",
-     cocclOperationTraitScaleBytesByRanks | cocclOperationTraitReduction |
-         cocclOperationTraitGrouped |
-         cocclOperationTraitHierarchicalPolicy},
+     cocclOperationTraitScaleBytesByRanks | cocclOperationTraitReduction},
     // Every compressed AllReduce flow partitions the user buffer by rank.
     // Native NCCL remains the fallback for a partial final partition.
     {cocclOperation::AllReduce, "AllReduce",
-     cocclOperationTraitReduction | cocclOperationTraitGrouped |
-         cocclOperationTraitCountDivisibleByRanks |
-         cocclOperationTraitHierarchicalPolicy},
+     cocclOperationTraitReduction | cocclOperationTraitCountDivisibleByRanks},
     {cocclOperation::AllToAll, "AllToAll",
-     cocclOperationTraitScaleBytesByRanks | cocclOperationTraitGrouped},
-    {cocclOperation::SendRecv, "SendRecv",
-     cocclOperationTraitDirectionalPolicy | cocclOperationTraitGrouped},
+     cocclOperationTraitScaleBytesByRanks},
+    {cocclOperation::SendRecv, "SendRecv", cocclOperationTraitNone},
 };
 
 static_assert(sizeof(kOperationDescriptors) /
@@ -36,19 +31,4 @@ const cocclOperationDescriptor* cocclGetOperationDescriptor(
   return index < static_cast<size_t>(cocclOperation::Count)
       ? &kOperationDescriptors[index]
       : nullptr;
-}
-
-bool cocclOperationSupportsPolicy(const cocclOperationDescriptor* descriptor,
-                                  cocclPolicyVariant variant) {
-  if (descriptor == nullptr) return false;
-  switch (variant) {
-    case cocclPolicyVariant::Default:
-      return true;
-    case cocclPolicyVariant::Forward:
-    case cocclPolicyVariant::Backward:
-      return cocclOperationHasTrait(
-          descriptor, cocclOperationTraitDirectionalPolicy);
-    default:
-      return false;
-  }
 }

@@ -44,7 +44,6 @@ cocclPreparedCall makeCall(ncclComm_t comm, cocclAlgorithmKind algorithm,
   prepared.info.operation = cocclOperation::AllReduce;
   prepared.info.comm = comm;
   prepared.algorithm = algorithm;
-  prepared.policy = cocclDefaultPolicy(cocclOperation::AllReduce);
   prepared.compressors.handles = {
       reinterpret_cast<void*>(0x1),
       reinterpret_cast<void*>(0x1),
