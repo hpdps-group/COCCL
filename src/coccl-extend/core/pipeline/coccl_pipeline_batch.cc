@@ -72,7 +72,7 @@ ncclResult_t exchangeBatchPlans(
         sizeof((*plans)[i]), stage.comm, specs[i].stream};
   }
   NCCLCHECKGOTO(cocclCommitFrameExchange(
-      exchanges.data(), exchanges.size(), nullptr, nullptr), result,
+      exchanges.data(), exchanges.size()), result,
       cleanup);
   for (size_t i = 0; i < count; ++i) {
     const cocclPipelineStage& stage =
@@ -115,29 +115,6 @@ struct cocclPipelineBatchFrame {
   size_t slotBytes;
 };
 
-void applyReceivedFrame(
-    const cocclPipelineStage& stage,
-    const cocclCompressorFrameMetadata& metadata,
-    cocclPipelineEdge* edge, const cocclPipelineStageOutput& output) {
-  edge->ptr = output.ptr;
-  edge->compressor = stage.compressor;
-  if (cocclCompressorSupports(
-          stage.compressor, cocclCompressorCapabilityFramed)) {
-    edge->bytes = output.capacityBytes;
-    edge->totalElements = output.capacityBytes;
-    edge->datatype = ncclInt8;
-    edge->frameMetadata = output.frameMetadata;
-    edge->frameStrideBytes = output.frameStrideBytes;
-  } else {
-    edge->bytes = (size_t)metadata.payloadBytes;
-    edge->totalElements = edge->bytes;
-    edge->datatype = metadata.encoding == cocclCompressorFrameRaw
-        ? COCCL_COMPRESSOR_RAW_PASSTHROUGH : ncclInt8;
-    edge->frameMetadata = nullptr;
-    edge->frameStrideBytes = 0;
-  }
-}
-
 ncclResult_t runPipelineBatchWave(
     std::vector<cocclPipelineBatchState>* states, int slice) {
   std::vector<cocclPipelineBatchFrame> frames;
@@ -177,7 +154,7 @@ ncclResult_t runPipelineBatchWave(
   }
 
   NCCLCHECK(cocclCommitFrameExchange(
-      metadataExchanges.data(), metadataExchanges.size(), nullptr, nullptr));
+      metadataExchanges.data(), metadataExchanges.size()));
   std::vector<cocclCompressorFrameMetadata> hostMetadata(frames.size());
   for (size_t i = 0; i < frames.size(); ++i) {
     cocclPipelineBatchFrame& frame = frames[i];
@@ -226,7 +203,7 @@ ncclResult_t runPipelineBatchWave(
         state.execution.resources->streams[frame.phase]};
   }
   NCCLCHECK(cocclCommitFrameExchange(
-      payloadExchanges.data(), payloadExchanges.size(), nullptr, nullptr));
+      payloadExchanges.data(), payloadExchanges.size()));
   for (size_t i = 0; i < frames.size(); ++i) {
     cocclPipelineBatchFrame& frame = frames[i];
     cocclPipelineBatchState& state = *frame.state;
@@ -234,8 +211,9 @@ ncclResult_t runPipelineBatchWave(
     const cocclPipelineStage& stage =
         context.spec->stages[state.communicationStage];
     if (stage.direction == cocclPipelineRecv) {
-      applyReceivedFrame(stage, hostMetadata[i], &state.slices[slice].edge,
-                         state.slices[slice].output);
+      cocclPipelineApplyReceivedFrame(
+          stage, hostMetadata[i], &state.slices[slice].edge,
+          state.slices[slice].output);
     }
     NCCLCHECK(recordPhase(
         state.execution.resources, frame.phase, slice));

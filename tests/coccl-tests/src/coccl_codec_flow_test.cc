@@ -18,6 +18,7 @@ void fail(const char* expression, int line) {
 
 void* const kIntra = reinterpret_cast<void*>(0x11);
 void* const kInter = reinterpret_cast<void*>(0x22);
+void* const kFramed = reinterpret_cast<void*>(0x33);
 int drcCalls;
 int drCalls;
 int reduceScatterCalls;
@@ -79,8 +80,8 @@ ncclResult_t ncclDecompress(
   return ncclInternalError;
 }
 
-bool cocclCompressorSupports(void*, cocclCompressorCapability) {
-  return false;
+bool cocclCompressorSupports(void* compressor, cocclCompressorCapability capability) {
+  return compressor == kFramed && capability == cocclCompressorCapabilityFramed;
 }
 
 bool cocclFrameMetadataValid(
@@ -111,7 +112,7 @@ ncclResult_t cocclLaunchUnpackSlice(
 }
 
 ncclResult_t cocclBuildAllToAllFrameExchanges(
-    const void*, void*, size_t, size_t, int,
+    const void*, void*, size_t, size_t, ncclComm_t, cudaStream_t,
     const cocclCompressorFrameMetadata*,
     const cocclCompressorFrameMetadata*, cocclFrameExchange*, size_t,
     size_t*) {
@@ -119,7 +120,7 @@ ncclResult_t cocclBuildAllToAllFrameExchanges(
 }
 
 ncclResult_t cocclBuildAllGatherFrameExchanges(
-    const void*, void*, size_t, size_t, int,
+    const void*, void*, size_t, size_t, ncclComm_t, cudaStream_t,
     const cocclCompressorFrameMetadata*,
     const cocclCompressorFrameMetadata*, cocclFrameExchange*, size_t,
     size_t*) {
@@ -127,7 +128,7 @@ ncclResult_t cocclBuildAllGatherFrameExchanges(
 }
 
 ncclResult_t cocclCommitFrameExchange(
-    const cocclFrameExchange*, size_t, ncclComm_t, cudaStream_t) {
+    const cocclFrameExchange*, size_t) {
   return ncclInternalError;
 }
 
@@ -172,6 +173,35 @@ int main() {
   EXPECT(reduceScatterCalls == 1);
   EXPECT(raw.logicalChunks == 2 && raw.totalElements == 32);
   EXPECT(raw.compressor == nullptr && raw.bytes == 128);
+
+  // Full-size Encoded still enters the decoder (subAdd initialization).
+  cocclPipelineStage recv = cocclPipelineSendRecv(&intra, 1, cocclPipelineRecv, kInter);
+  cocclCompressorFrameMetadata metadata = {128, cocclCompressorFrameEncoded, 0};
+  cocclPipelineEdge received = {};
+  received.logicalChunks = 1;
+  cocclPipelineApplyReceivedFrame(recv, metadata, &received, output);
+  EXPECT(received.ptr == output.ptr && received.compressor == kInter);
+  EXPECT(received.bytes == 128 && received.totalElements == 128);
+  EXPECT(received.datatype == ncclInt8 && received.logicalChunks == 1);
+  EXPECT(received.frameMetadata == nullptr && received.frameStrideBytes == 0);
+  metadata = {64, cocclCompressorFrameRaw, 0};
+  cocclPipelineApplyReceivedFrame(recv, metadata, &received, output);
+  EXPECT(received.bytes == 64 && received.totalElements == 64);
+  EXPECT(received.datatype == COCCL_COMPRESSOR_RAW_PASSTHROUGH);
+
+  recv.compressor = kFramed;
+  output.frameMetadata = &metadata;
+  output.frameStrideBytes = output.capacityBytes;
+  const uint32_t encodings[] = {cocclCompressorFrameRaw, cocclCompressorFrameEncoded};
+  for (uint32_t encoding : encodings) {
+    metadata = {64, encoding, 0};
+    cocclPipelineApplyReceivedFrame(recv, metadata, &received, output);
+    EXPECT(received.compressor == kFramed && received.datatype == ncclInt8);
+    EXPECT(received.bytes == output.capacityBytes);
+    EXPECT(received.totalElements == output.capacityBytes && received.logicalChunks == 1);
+    EXPECT(received.frameMetadata == &metadata);
+    EXPECT(received.frameStrideBytes == output.frameStrideBytes);
+  }
 
   std::printf("coccl codec flow: PASS\n");
   return 0;

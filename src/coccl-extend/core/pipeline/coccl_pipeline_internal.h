@@ -3,7 +3,7 @@
 
 #include <stdint.h>
 
-#include "core/pipeline/coccl_frame_exchange.h"
+#include "core/communication/coccl_frame_exchange.h"
 #include "core/pipeline/coccl_pipeline.h"
 
 constexpr int kCocclPipelineExplicitStages = 8;
@@ -176,5 +176,9 @@ ncclResult_t cocclCommitPipelineFrameExchange(
     const cocclPipelineStageContext* context,
     const cocclPipelineStage* stage, cocclPipelineEdge* edge,
     const cocclPipelineStageOutput* output, cudaStream_t stream);
+void cocclPipelineApplyReceivedFrame(
+    const cocclPipelineStage& stage,
+    const cocclCompressorFrameMetadata& metadata,
+    cocclPipelineEdge* edge, const cocclPipelineStageOutput& output);
 
 #endif

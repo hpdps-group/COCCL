@@ -1,4 +1,4 @@
-#include "core/pipeline/coccl_frame_exchange.h"
+#include "core/communication/coccl_frame_exchange.h"
 #include "core/compression/coccl_compressor_runtime.h"
 
 bool cocclFrameMetadataValid(
@@ -12,7 +12,7 @@ bool cocclCompressorSupports(
 }
 
 ncclResult_t cocclBuildAllToAllFrameExchanges(
-    const void*, void*, size_t, size_t, int,
+    const void*, void*, size_t, size_t, ncclComm_t, cudaStream_t,
     const cocclCompressorFrameMetadata*,
     const cocclCompressorFrameMetadata*, cocclFrameExchange*, size_t,
     size_t*) {
@@ -20,7 +20,7 @@ ncclResult_t cocclBuildAllToAllFrameExchanges(
 }
 
 ncclResult_t cocclBuildAllGatherFrameExchanges(
-    const void*, void*, size_t, size_t, int,
+    const void*, void*, size_t, size_t, ncclComm_t, cudaStream_t,
     const cocclCompressorFrameMetadata*,
     const cocclCompressorFrameMetadata*, cocclFrameExchange*, size_t,
     size_t*) {
@@ -28,7 +28,7 @@ ncclResult_t cocclBuildAllGatherFrameExchanges(
 }
 
 ncclResult_t cocclCommitFrameExchange(
-    const cocclFrameExchange*, size_t, ncclComm_t, cudaStream_t) {
+    const cocclFrameExchange*, size_t) {
   return ncclInternalError;
 }
 
