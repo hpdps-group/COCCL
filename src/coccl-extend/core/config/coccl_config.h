@@ -146,23 +146,6 @@ struct cocclConfig {
 constexpr int kCocclMinPipelineDepth = 1;
 constexpr int kCocclMaxPipelineDepth = 16;
 
-enum class cocclConfigPolicyId {
-  NormalAllGather,
-  NormalReduceScatter,
-  NormalAllReduce,
-  NormalAllToAll,
-  NormalSendRecv,
-  TrainingDpAllGather,
-  TrainingDpReduceScatter,
-  TrainingDpAllReduce,
-  TrainingTpAllGather,
-  TrainingTpReduceScatter,
-  TrainingTpAllReduce,
-  TrainingPpSendRecvForward,
-  TrainingPpSendRecvBackward,
-  Count,
-};
-
 enum class cocclPolicyScope {
   Normal,
   DataParallel,
@@ -170,11 +153,9 @@ enum class cocclPolicyScope {
   PipelineParallel,
 };
 
-constexpr size_t kCocclConfigPolicyCount =
-    static_cast<size_t>(cocclConfigPolicyId::Count);
+constexpr size_t kCocclConfigPolicyCount = 13;
 
 struct cocclConfigPolicyView {
-  cocclConfigPolicyId id;
   const char* path;
   cocclRuntimeMode mode;
   cocclPolicyScope scope;
