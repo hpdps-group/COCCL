@@ -21,7 +21,6 @@ enum cocclTrainingRole {
 
 struct cocclTrainingClassification {
   cocclTrainingRole role = cocclTrainingRoleUnknown;
-  cocclTrainingRole candidateRole = cocclTrainingRoleUnknown;
   double confidence = 0.0;
   double sizeConsistency = 0.0;
   double cycleSupport = 0.0;
@@ -45,7 +44,7 @@ void cocclTrainingAssistUnregister(ncclComm_t comm);
 // corresponding call. Ambiguous user-visible calls of at least 1 MiB are
 // observed before routing. Their role is activated at a common absolute call
 // boundary so asynchronous pipeline stages cannot switch protocol separately.
-void cocclTrainingAssistObserve(const cocclInfo* args, int groupDepth);
+void cocclTrainingAssistObserve(const cocclInfo* args);
 bool cocclTrainingAssistQuery(
     ncclComm_t comm, cocclTrainingClassification* classification);
 

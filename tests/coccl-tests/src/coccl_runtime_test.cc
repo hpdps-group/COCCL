@@ -149,7 +149,7 @@ bool cocclTrainingAssistEnabled() {
   return false;
 }
 
-void cocclTrainingAssistObserve(const cocclInfo*, int) {}
+void cocclTrainingAssistObserve(const cocclInfo*) {}
 
 bool cocclTrainingAssistQuery(
     ncclComm_t, cocclTrainingClassification*) {

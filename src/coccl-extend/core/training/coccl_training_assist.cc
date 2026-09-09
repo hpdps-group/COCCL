@@ -33,27 +33,12 @@ struct cocclTrainingAssistCommState {
 
 pthread_mutex_t cocclTrainingAssistLock = PTHREAD_MUTEX_INITIALIZER;
 uint64_t cocclTrainingNextCommId = 1;
-uint64_t cocclTrainingNextSequence = 1;
 
 // The detector owns communicator state independently of cocclComm. Events use
 // the stable numeric ID, while the pointer is only a live-registry lookup key.
 std::map<ncclComm_t, std::unique_ptr<cocclTrainingAssistCommState>>
     cocclTrainingAssistComms;
 std::vector<cocclTrainingTraceEvent> cocclTrainingEvents;
-
-static bool isCollective(ncclFunc_t operation) {
-  return operation == ncclFuncAllGather ||
-         operation == ncclFuncReduceScatter ||
-         operation == ncclFuncAllReduce;
-}
-
-static bool isP2p(ncclFunc_t operation) {
-  return operation == ncclFuncSend || operation == ncclFuncRecv;
-}
-
-static bool isObservedOperation(ncclFunc_t operation) {
-  return isCollective(operation) || isP2p(operation);
-}
 
 static const char* operationName(ncclFunc_t operation) {
   switch (operation) {
@@ -183,7 +168,7 @@ static void commitClassificationLocked(
 static void classifyCommTraceLocked(
     cocclTrainingAssistCommState* state, int targetIterations) {
   if (state->events.empty() ||
-      !isCollective(state->events.back().operation)) return;
+      !cocclTrainingIsCollective(state->events.back().operation)) return;
   std::vector<cocclTrainingIterationRange> iterations;
   if (!cocclTrainingDetectIterations(
           state->events, targetIterations, &iterations)) return;
@@ -305,10 +290,9 @@ void cocclTrainingAssistUnregister(ncclComm_t comm) {
   pthread_mutex_unlock(&cocclTrainingAssistLock);
 }
 
-void cocclTrainingAssistObserve(
-    const cocclInfo* args, int groupDepth) {
+void cocclTrainingAssistObserve(const cocclInfo* args) {
   if (!cocclTrainingAssistEnabled() || args == nullptr ||
-      args->comm == nullptr || !isObservedOperation(args->func)) {
+      args->comm == nullptr || !cocclTrainingIsObservedOperation(args->func)) {
     return;
   }
 
@@ -327,10 +311,8 @@ void cocclTrainingAssistObserve(
   cocclTrainingTraceEvent event;
   event.operation = args->func;
   event.logicalBytes = logicalBytes;
-  event.datatype = args->datatype;
   event.peer = args->peer;
   event.timestampNs = monotonicTimeNs();
-  event.groupDepth = groupDepth;
 
   pthread_mutex_lock(&cocclTrainingAssistLock);
   auto state = cocclTrainingAssistComms.find(args->comm);
@@ -358,7 +340,6 @@ void cocclTrainingAssistObserve(
 
   if (topologyRole != cocclTrainingRoleUnknown) {
     state->second->classification.role = topologyRole;
-    state->second->classification.candidateRole = topologyRole;
     state->second->classification.confidence = 1.0;
     state->second->classification.committed = true;
     INFO(COCCL_TUNING,
@@ -375,7 +356,6 @@ void cocclTrainingAssistObserve(
   }
 
   event.communicatorId = state->second->descriptor.communicatorId;
-  event.sequence = cocclTrainingNextSequence++;
   cocclTrainingEvents.push_back(event);
   state->second->events.push_back(event);
 

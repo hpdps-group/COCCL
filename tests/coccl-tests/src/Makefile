@@ -460,6 +460,7 @@ $(REMAINDER_PLAN_TEST): coccl_remainder_plan_test.cc \
 
 $(TRAINING_CLASSIFIER_TEST): coccl_training_classifier_test.cc \
 		$(COCCL_CORE)/training/coccl_training_classifier.cc \
+		$(COCCL_CORE)/training/coccl_training_iteration.cc \
 		$(COCCL_CORE)/training/coccl_training_assist.cc \
 		$(COCCL_CORE)/runtime/coccl_runtime.cc $(BACKEND_COLLECTIVES_SRC) \
 		$(COCCL_CORE)/runtime/coccl_prepared_call.cc \
