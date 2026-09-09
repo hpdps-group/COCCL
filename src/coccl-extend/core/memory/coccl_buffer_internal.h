@@ -3,9 +3,11 @@
 
 #include "core/memory/coccl_buffer_management.h"
 
+#include "checks.h"
 #include "comm.h"
 
 #include <cuda.h>
+#include <iterator>
 #include <list>
 #include <map>
 #include <memory>
@@ -36,16 +38,76 @@ inline size_t alignUp(size_t value) {
       kBufferAlignment;
 }
 
-struct LegacyBlock;
-
-struct LegacySlice {
+struct BufferSlice {
   size_t offset = 0;
   size_t bytes = 0;
   SliceState state = SliceState::Free;
   cudaEvent_t doneEvent = nullptr;
   cudaStream_t pendingStream = nullptr;
-  LegacyBlock* block = nullptr;
 };
+
+inline bool reusable(BufferSlice* slice) {
+  if (slice->state == SliceState::Free) return true;
+  if (slice->state != SliceState::Pending) return false;
+
+  const cudaError_t status = cudaEventQuery(slice->doneEvent);
+  if (status == cudaSuccess) {
+    slice->state = SliceState::Free;
+    slice->pendingStream = nullptr;
+    return true;
+  }
+  return false;
+}
+
+inline bool reusableOnStream(BufferSlice* slice, cudaStream_t stream,
+                              bool allowPendingReuse) {
+  if (allowPendingReuse && slice->state == SliceState::Pending &&
+      slice->pendingStream == stream) {
+    return true;
+  }
+  return reusable(slice);
+}
+
+inline void mergeFreeSlices(std::list<BufferSlice>& slices) {
+  for (auto current = slices.begin(); current != slices.end();) {
+    auto next = std::next(current);
+    if (next == slices.end()) break;
+    if (reusable(&*current) && reusable(&*next) &&
+        current->offset + current->bytes == next->offset) {
+      current->bytes += next->bytes;
+      if (next->doneEvent != nullptr) {
+        CUDACHECKIGNORE(cudaEventDestroy(next->doneEvent));
+      }
+      slices.erase(next);
+    } else {
+      ++current;
+    }
+  }
+}
+
+// Same-stream pending reuse keeps the full slice until its event completes.
+inline void splitFreeSlice(std::list<BufferSlice>& slices,
+                            std::list<BufferSlice>::iterator slice,
+                            size_t bytes) {
+  if (slice->bytes > bytes && slice->state != SliceState::Pending) {
+    BufferSlice remainder;
+    remainder.offset = slice->offset + bytes;
+    remainder.bytes = slice->bytes - bytes;
+    slice->bytes = bytes;
+    slices.insert(std::next(slice), remainder);
+  }
+}
+
+inline ncclResult_t releaseSlice(BufferSlice* slice, cudaStream_t stream) {
+  if (slice->doneEvent == nullptr) {
+    CUDACHECK(cudaEventCreateWithFlags(&slice->doneEvent,
+                                       cudaEventDisableTiming));
+  }
+  CUDACHECK(cudaEventRecord(slice->doneEvent, stream));
+  slice->state = SliceState::Pending;
+  slice->pendingStream = stream;
+  return ncclSuccess;
+}
 
 struct BufferRegistration {
   ncclComm_t comm = nullptr;
@@ -62,22 +124,11 @@ struct LegacyBlock : BufferBlock {
   int cudaDev = -1;
   void* ptr = nullptr;
   size_t capacity = 0;
-  std::list<LegacySlice> slices;
+  std::list<BufferSlice> slices;
   std::map<ncclComm_t, BufferRegistration> registrations;
 };
 
 #if CUDART_VERSION >= 11030
-
-struct VmmBlock;
-
-struct VmmSlice {
-  size_t offset = 0;
-  size_t bytes = 0;
-  SliceState state = SliceState::Free;
-  cudaEvent_t doneEvent = nullptr;
-  cudaStream_t pendingStream = nullptr;
-  VmmBlock* block = nullptr;
-};
 
 struct VmmBlock : BufferBlock {
   VmmBlock() : BufferBlock(BufferBackend::Vmm) {}
@@ -86,7 +137,7 @@ struct VmmBlock : BufferBlock {
   void* ptr = nullptr;
   size_t capacity = 0;
   CUmemGenericAllocationHandle handle = 0;
-  std::list<VmmSlice> slices;
+  std::list<BufferSlice> slices;
   std::vector<BufferRegistration> registrations;
 };
 

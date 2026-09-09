@@ -10,7 +10,6 @@
 struct cocclBufferHandle {
   void* ptr = nullptr;
   size_t bytes = 0;
-  ncclComm_t ownerComm = nullptr;
   void* block = nullptr;
   void* slice = nullptr;
 };

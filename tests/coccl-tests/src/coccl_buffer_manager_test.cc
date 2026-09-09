@@ -225,6 +225,7 @@ int main() {
   EXPECT(cocclGetBuffer(&firstComm, 512, firstStream, &smaller) ==
          ncclSuccess);
   EXPECT(smaller.ptr == reusablePtr);
+  EXPECT(smaller.bytes == 1024);
   completeRecordedEvents = true;
   EXPECT(cocclReleaseBuffer(&crossStream, secondStream) == ncclSuccess);
   EXPECT(cocclReleaseBuffer(&smaller, firstStream) == ncclSuccess);

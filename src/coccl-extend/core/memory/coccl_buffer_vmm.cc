@@ -7,7 +7,6 @@
 #include "cudawrap.h"
 
 #include <algorithm>
-#include <iterator>
 #include <stdint.h>
 
 namespace coccl_buffer {
@@ -26,53 +25,15 @@ void buildAllocationProp(VmmPool* pool, CUmemAllocationProp* prop) {
   if (pool->gpuDirectRdma) prop->allocFlags.gpuDirectRDMACapable = 1;
 }
 
-bool reusable(VmmSlice* slice) {
-  if (slice->state == SliceState::Free) return true;
-  if (slice->state != SliceState::Pending) return false;
-
-  const cudaError_t status = cudaEventQuery(slice->doneEvent);
-  if (status == cudaSuccess) {
-    slice->state = SliceState::Free;
-    slice->pendingStream = nullptr;
-    return true;
-  }
-  return false;
-}
-
-bool reusableOnStream(VmmSlice* slice, cudaStream_t stream,
-                      bool allowPendingReuse) {
-  return allowPendingReuse && slice->state == SliceState::Pending &&
-          slice->pendingStream == stream
-      ? true
-      : reusable(slice);
-}
-
-void mergeFreeSlices(VmmBlock* block) {
-  for (auto current = block->slices.begin(); current != block->slices.end();) {
-    auto next = std::next(current);
-    if (next == block->slices.end()) break;
-    if (reusable(&*current) && reusable(&*next) &&
-        current->offset + current->bytes == next->offset) {
-      current->bytes += next->bytes;
-      if (next->doneEvent != nullptr) {
-        CUDACHECKIGNORE(cudaEventDestroy(next->doneEvent));
-      }
-      block->slices.erase(next);
-    } else {
-      ++current;
-    }
-  }
-}
-
 bool canGrow(VmmBlock* block) {
-  for (VmmSlice& slice : block->slices) {
+  for (BufferSlice& slice : block->slices) {
     if (slice.state == SliceState::InUse) return false;
   }
   return true;
 }
 
 ncclResult_t waitForBlock(VmmBlock* block) {
-  for (VmmSlice& slice : block->slices) {
+  for (BufferSlice& slice : block->slices) {
     if (slice.state == SliceState::Pending) {
       CUDACHECK(cudaEventSynchronize(slice.doneEvent));
       slice.state = SliceState::Free;
@@ -141,15 +102,14 @@ ncclResult_t ensureRegistration(
 }
 
 void resetSlices(VmmBlock* block) {
-  for (VmmSlice& slice : block->slices) {
+  for (BufferSlice& slice : block->slices) {
     if (slice.doneEvent != nullptr) {
       CUDACHECKIGNORE(cudaEventDestroy(slice.doneEvent));
     }
   }
   block->slices.clear();
-  VmmSlice slice;
+  BufferSlice slice;
   slice.bytes = block->capacity;
-  slice.block = block;
   block->slices.push_back(slice);
 }
 
@@ -252,7 +212,7 @@ ncclResult_t acquireFromBlock(VmmBlock* block, size_t bytes,
                               cocclBufferRegistrationKind requested,
                               cudaStream_t stream,
                               cocclBufferHandle* buffer) {
-  mergeFreeSlices(block);
+  mergeFreeSlices(block->slices);
   auto existing = std::find_if(
       block->registrations.begin(), block->registrations.end(),
       [registeredComm](const BufferRegistration& registration) {
@@ -267,21 +227,12 @@ ncclResult_t acquireFromBlock(VmmBlock* block, size_t bytes,
       continue;
     }
 
-    const bool pendingReuse = slice->state == SliceState::Pending;
-    if (slice->bytes > bytes && !pendingReuse) {
-      VmmSlice remainder;
-      remainder.offset = slice->offset + bytes;
-      remainder.bytes = slice->bytes - bytes;
-      remainder.block = block;
-      slice->bytes = bytes;
-      block->slices.insert(std::next(slice), remainder);
-    }
+    splitFreeSlice(block->slices, slice, bytes);
 
     slice->state = SliceState::InUse;
     slice->pendingStream = nullptr;
     buffer->ptr = static_cast<char*>(block->ptr) + slice->offset;
     buffer->bytes = slice->bytes;
-    buffer->ownerComm = block->pool->ownerComm;
     buffer->block = block;
     buffer->slice = &*slice;
     ncclResult_t ret = ensureRegistration(block, registeredComm, requested);
@@ -296,7 +247,7 @@ ncclResult_t acquireFromBlock(VmmBlock* block, size_t bytes,
 ncclResult_t releaseBlock(VmmBlock* block) {
   VmmPool* pool = block->pool;
   NCCLCHECK(deregisterAll(block));
-  for (VmmSlice& slice : block->slices) {
+  for (BufferSlice& slice : block->slices) {
     if (slice.doneEvent != nullptr) {
       CUDACHECK(cudaEventDestroy(slice.doneEvent));
     }
@@ -410,17 +361,10 @@ ncclResult_t vmmRegister(cocclBufferHandle* buffer,
 }
 
 ncclResult_t vmmRelease(cocclBufferHandle* buffer, cudaStream_t stream) {
-  VmmSlice* slice = static_cast<VmmSlice*>(buffer->slice);
+  BufferSlice* slice = static_cast<BufferSlice*>(buffer->slice);
   VmmBlock* block = static_cast<VmmBlock*>(buffer->block);
   CUDACHECK(cudaSetDevice(block->cudaDev));
-  if (slice->doneEvent == nullptr) {
-    CUDACHECK(cudaEventCreateWithFlags(&slice->doneEvent,
-                                       cudaEventDisableTiming));
-  }
-  CUDACHECK(cudaEventRecord(slice->doneEvent, stream));
-  slice->state = SliceState::Pending;
-  slice->pendingStream = stream;
-  return ncclSuccess;
+  return releaseSlice(slice, stream);
 }
 
 ncclResult_t vmmDeregisterComm(VmmPool* pool, ncclComm_t comm) {

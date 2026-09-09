@@ -333,6 +333,7 @@ int main() {
   EXPECT(cocclGetBuffer(&firstComm, 4 * kMiB, firstStream, &smaller) ==
          ncclSuccess);
   EXPECT(smaller.ptr == firstAddress && physicalHandles.size() == 1);
+  EXPECT(smaller.bytes == vmmLogicalBytes);
 
   completeRecordedEvents = true;
   EXPECT(cocclReleaseBuffer(&smaller, firstStream) == ncclSuccess);
