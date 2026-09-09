@@ -12,6 +12,7 @@ COCCL_CORE_HOST_SRCFILES = \
 	$(wildcard $(COCCL_ROOT)/core/backend/*.cc) \
 	$(wildcard $(COCCL_ROOT)/core/runtime/*.cc) \
 	$(wildcard $(COCCL_ROOT)/core/pipeline/*.cc) \
+	$(wildcard $(COCCL_ROOT)/core/communication/*.cc) \
 	$(wildcard $(COCCL_ROOT)/core/compression/*.cc) \
 	$(wildcard $(COCCL_ROOT)/core/memory/*.cc) \
 	$(wildcard $(COCCL_ROOT)/core/config/*.cc) \

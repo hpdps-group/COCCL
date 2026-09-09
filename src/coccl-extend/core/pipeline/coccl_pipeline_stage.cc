@@ -383,6 +383,30 @@ const StageHandler handlers[kCocclPipelineStageKindCount] = {
 
 }  // namespace
 
+// Both receive executors call this after validating the wire metadata.
+void cocclPipelineApplyReceivedFrame(
+    const cocclPipelineStage& stage,
+    const cocclCompressorFrameMetadata& metadata,
+    cocclPipelineEdge* edge, const cocclPipelineStageOutput& output) {
+  edge->ptr = output.ptr;
+  edge->compressor = stage.compressor;
+  if (cocclCompressorSupports(
+          stage.compressor, cocclCompressorCapabilityFramed)) {
+    edge->bytes = output.capacityBytes;
+    edge->totalElements = output.capacityBytes;
+    edge->datatype = ncclInt8;
+    edge->frameMetadata = output.frameMetadata;
+    edge->frameStrideBytes = output.frameStrideBytes;
+  } else {
+    edge->bytes = (size_t)metadata.payloadBytes;
+    edge->totalElements = edge->bytes;
+    edge->datatype = metadata.encoding == cocclCompressorFrameRaw
+        ? COCCL_COMPRESSOR_RAW_PASSTHROUGH : ncclInt8;
+    edge->frameMetadata = nullptr;
+    edge->frameStrideBytes = 0;
+  }
+}
+
 bool cocclPipelineStageUsesFrameExchange(
     const cocclPipelineStage& stage, const cocclPipelineEdge& edge) {
   return (edge.frameMetadata != nullptr &&
@@ -411,7 +435,7 @@ ncclResult_t cocclPreparePipelineFrameExchange(
         stage->direction == cocclPipelineSend ? sizeof(*metadata) : 0,
         stage->direction == cocclPipelineRecv ? sizeof(*metadata) : 0,
         sizeof(*metadata), stage->comm, stream};
-    return cocclCommitFrameExchange(&exchange, 1, nullptr, nullptr);
+    return cocclCommitFrameExchange(&exchange, 1);
   }
   if (stage->kind == cocclPipelineStageAllToAll) {
     const size_t metadataBytes =
@@ -462,25 +486,9 @@ ncclResult_t cocclCommitPipelineFrameExchange(
         stage->direction == cocclPipelineRecv
             ? (size_t)metadata->payloadBytes : 0,
         slotBytes, stage->comm, stream};
-    NCCLCHECK(cocclCommitFrameExchange(&exchange, 1, nullptr, nullptr));
+    NCCLCHECK(cocclCommitFrameExchange(&exchange, 1));
     if (stage->direction == cocclPipelineRecv) {
-      edge->ptr = output->ptr;
-      edge->compressor = stage->compressor;
-      if (cocclCompressorSupports(
-              stage->compressor, cocclCompressorCapabilityFramed)) {
-        edge->bytes = output->capacityBytes;
-        edge->totalElements = output->capacityBytes;
-        edge->datatype = ncclInt8;
-        edge->frameMetadata = output->frameMetadata;
-        edge->frameStrideBytes = output->frameStrideBytes;
-      } else {
-        edge->bytes = (size_t)metadata->payloadBytes;
-        edge->totalElements = edge->bytes;
-        edge->datatype = metadata->encoding == cocclCompressorFrameRaw
-            ? COCCL_COMPRESSOR_RAW_PASSTHROUGH : ncclInt8;
-        edge->frameMetadata = nullptr;
-        edge->frameStrideBytes = 0;
-      }
+      cocclPipelineApplyReceivedFrame(*stage, *metadata, edge, *output);
     }
     return ncclSuccess;
   }
@@ -504,7 +512,7 @@ ncclResult_t cocclCommitPipelineFrameExchange(
   if (stage->kind == cocclPipelineStageAllToAll) {
     NCCLCHECK(cocclBuildAllToAllFrameExchanges(
         edge->ptr, output->ptr, edge->logicalChunks,
-        edge->frameStrideBytes, stage->comm->nRanks,
+        edge->frameStrideBytes, stage->comm, stream,
         context->frameResources->sendMetadata,
         context->frameResources->recvMetadata,
         context->frameResources->exchanges,
@@ -512,7 +520,7 @@ ncclResult_t cocclCommitPipelineFrameExchange(
   } else {
     NCCLCHECK(cocclBuildAllGatherFrameExchanges(
         edge->ptr, output->ptr, edge->logicalChunks,
-        edge->frameStrideBytes, stage->comm->nRanks,
+        edge->frameStrideBytes, stage->comm, stream,
         context->frameResources->sendMetadata,
         context->frameResources->recvMetadata,
         context->frameResources->exchanges,
@@ -548,8 +556,7 @@ ncclResult_t cocclCommitPipelineFrameExchange(
            edge->bytes, edge->logicalChunks);
     }
     NCCLCHECK(cocclCommitFrameExchange(
-        context->frameResources->exchanges, exchangeCount,
-        stage->comm, stream));
+        context->frameResources->exchanges, exchangeCount));
   }
 
   if (stage->kind == cocclPipelineStageAllGather) {

@@ -1,7 +1,7 @@
 #ifndef COCCL_BACKEND_FRAMED_H_
 #define COCCL_BACKEND_FRAMED_H_
 
-#include "core/pipeline/coccl_frame_exchange.h"
+#include "core/communication/coccl_frame_exchange.h"
 
 bool cocclBackendUseAllGatherV(
     ncclComm_t comm, const cocclFrameExchange* exchanges, size_t count);

@@ -330,7 +330,7 @@ $(INPLACE_PLAN_TEST): coccl_inplace_plan_test.cc \
 	$(CXX) $(TEST_CXXFLAGS) $(COCCL_INC) -I$(COCCL_SRC) -o $@ $^
 
 $(FRAME_EXCHANGE_TEST): coccl_frame_exchange_test.cc \
-		$(COCCL_CORE)/pipeline/coccl_frame_exchange.cc \
+		$(COCCL_CORE)/communication/coccl_frame_exchange.cc \
 		$(COCCL_CORE)/backend/coccl_backend_framed.cc
 	@printf "Linking  %-35s > %s\n" $< $@
 	@mkdir -p $(DST_DIR)
