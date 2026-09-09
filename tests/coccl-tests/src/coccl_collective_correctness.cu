@@ -394,9 +394,12 @@ void runCase(Operation operation, bool subAdd, ncclDataType_t datatype,
     CUDACHECK(cudaMemcpyAsync(deviceInput, initial.data(), inputBytes,
                               cudaMemcpyHostToDevice, compressedStream));
     MPICHECK(MPI_Barrier(MPI_COMM_WORLD));
-    runCompressed(operation, deviceInput, compressedOutput, datatype,
-                  compressedComm, compressedStream, worldRank, worldSize,
-                  inputCount, options.path == "auto");
+    // Prime every configured state slot, including serial pipeline execution.
+    for (int slot = 0; slot < options.depth; ++slot) {
+      runCompressed(operation, deviceInput, compressedOutput, datatype,
+                    compressedComm, compressedStream, worldRank, worldSize,
+                    inputCount, options.path == "auto");
+    }
     CUDACHECK(cudaStreamSynchronize(compressedStream));
   }
 
@@ -427,6 +430,14 @@ void runCase(Operation operation, bool subAdd, ncclDataType_t datatype,
     CUDACHECK(cudaMemsetAsync(nativeOutput, 0, outputBytes, nativeStream));
     CUDACHECK(cudaMemsetAsync(
         compressedOutput, 0, outputBytes, compressedStream));
+  }
+
+  // Native AlltoAll does not support in-place buffers; keep its oracle disjoint.
+  if (options.inPlace && operation == Operation::AllToAll) {
+    CUDACHECK(cudaMemcpyAsync(deviceInput, input.data(), inputBytes,
+                              cudaMemcpyHostToDevice, nativeStream));
+    nativeInput = deviceInput;
+    nativeResult = nativeOutput;
   }
 
   MPICHECK(MPI_Barrier(MPI_COMM_WORLD));
