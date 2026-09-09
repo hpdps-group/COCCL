@@ -5,6 +5,7 @@
 
 #include "runtime/coccl_operation.h"
 #include "nccl.h"
+#include "core/backend/coccl_backend_collectives.h"
 
 enum cocclPipelineStageKind {
   cocclPipelineStageCompress = 0,
@@ -50,7 +51,7 @@ struct cocclPipelineStage {
   ncclComm_t comm;
   size_t reduceChunks;
   void* compressor;
-  const ncclCollConfig_t* config;
+  const cocclCollectiveConfig* config;
   int peer = -1;
   cocclPipelineSendRecvDirection direction = cocclPipelineSend;
 };
@@ -60,12 +61,12 @@ static inline cocclPipelineStage cocclPipelineCompress(void* compressor) {
 }
 
 static inline cocclPipelineStage cocclPipelineAllToAll(
-    ncclComm_t comm, const ncclCollConfig_t* config = nullptr) {
+    ncclComm_t comm, const cocclCollectiveConfig* config = nullptr) {
   return {cocclPipelineStageAllToAll, comm, 0, nullptr, config};
 }
 
 static inline cocclPipelineStage cocclPipelineAllGather(
-    ncclComm_t comm, const ncclCollConfig_t* config = nullptr) {
+    ncclComm_t comm, const cocclCollectiveConfig* config = nullptr) {
   return {cocclPipelineStageAllGather, comm, 0, nullptr, config};
 }
 
@@ -86,7 +87,7 @@ static inline cocclPipelineStage cocclPipelineDecompress() {
 }
 
 static inline cocclPipelineStage cocclPipelineReduceScatter(
-    ncclComm_t comm, const ncclCollConfig_t* config = nullptr) {
+    ncclComm_t comm, const cocclCollectiveConfig* config = nullptr) {
   return {cocclPipelineStageReduceScatter, comm, 0, nullptr, config};
 }
 

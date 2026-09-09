@@ -1,4 +1,5 @@
 #include "core/runtime/coccl_comm.h"
+#include "core/backend/coccl_backend_collectives.h"
 
 #include "checks.h"
 #include "comm.h"
@@ -39,11 +40,7 @@ ncclResult_t destroyComms(cocclCommState state) {
 
 ncclResult_t splitZeroCtaComm(
     ncclComm_t parent, int color, int key, ncclComm_t* child) {
-  // Hierarchical CE provisions its internal RMA contexts from the
-  // communicator policy; the per-call policy only selects a prepared stage.
-  ncclConfig_t config = NCCL_CONFIG_INITIALIZER;
-  config.CTAPolicy = NCCL_CTA_POLICY_ZERO;
-  NCCLCHECK(ncclCommSplit(parent, color, key, child, &config));
+  NCCLCHECK(cocclBackendCommSplit(parent, color, key, child));
   cocclTrainingAssistUnregister(*child);
   return ncclSuccess;
 }

@@ -1,7 +1,6 @@
 #include "core/pipeline/coccl_pipeline.h"
 
 #include "checks.h"
-#include "config/collconfig.h"
 #include "core/memory/coccl_buffer_management.h"
 #include "core/config/coccl_config.h"
 #include "core/pipeline/coccl_pipeline_internal.h"
@@ -9,7 +8,6 @@
 #include "comm.h"
 #include "core/compression/compress.h"
 #include "debug.h"
-#include "rma/rma.h"
 
 #include <stdlib.h>
 
@@ -269,28 +267,11 @@ int collectCommunicationComms(
         (outputTemp >= 0 &&
          plan.temps[outputTemp].storage == cocclPipelineRawRing);
 
-    const int stagePolicy = cocclPipelineStageCtaPolicy(
-        spec->ownerComm, pipelineStage);
-    const int effectivePolicy = ncclCollConfigResolveCTAPolicy(
-        stagePolicy, comm->config.CTAPolicy,
-        ncclGetEnvCtaPolicy() != NCCL_CONFIG_UNDEF_INT);
-    const bool zeroCta =
-        (effectivePolicy & NCCL_CTA_POLICY_ZERO) != 0;
-    const bool framedRma = inputFramed &&
-        pipelineStage.kind == cocclPipelineStageAllToAll &&
-        comm->config.rmaEagerInit && comm->hostRmaSupport &&
-        comm->config.numRmaSig > 0 &&
-        (comm->nNodes == 1 || ncclRmaProxyEnabled(comm));
-    const bool symmetric = framedRma ||
-        (!inputFramed &&
-         (pipelineStage.kind == cocclPipelineStageAllGather ||
-          (pipelineStage.kind == cocclPipelineStageAllToAll && zeroCta) ||
-          pipelineStage.kind == cocclPipelineStageReduceScatter));
-    const cocclBufferRegistrationKind registration = framedRma
-        ? cocclBufferRegistrationKind::Rma
-        : (symmetric ? cocclBufferRegistrationKind::Symmetric
-                     : cocclBufferRegistrationKind::Ordinary);
-
+    const cocclBufferRegistrationKind registration =
+        cocclBackendStageRegistration(spec->ownerComm, pipelineStage,
+                                       inputFramed);
+    const bool symmetric =
+        registration != cocclBufferRegistrationKind::Ordinary;
     int existing = 0;
     while (existing < count && comms[existing].comm != comm) ++existing;
     if (existing == count) {

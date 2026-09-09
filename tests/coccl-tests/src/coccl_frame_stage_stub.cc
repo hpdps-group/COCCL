@@ -56,3 +56,8 @@ ncclResult_t ncclReduceScatterConfig(
     ncclComm_t, cudaStream_t, const ncclCollConfig_t*) {
   return ncclInternalError;
 }
+
+bool cocclBackendUseAllGatherV(
+    ncclComm_t, const cocclFrameExchange*, size_t) {
+  return false;
+}

@@ -105,7 +105,7 @@ int main() {
   cocclPipelineEdge edge = {
       reinterpret_cast<void*>(0x100000), 256, 64, ncclFloat32, 1,
       nullptr, nullptr, 0};
-  ncclCollConfig_t communicationConfig = NCCL_COLLCONFIG_INITIALIZER;
+  cocclCollectiveConfig communicationConfig = {};
   communicationConfig.minCTAs = 9;
   communicationConfig.maxCTAs = 9;
 

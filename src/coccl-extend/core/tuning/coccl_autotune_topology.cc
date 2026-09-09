@@ -1,10 +1,8 @@
 #include "coccl_autotune_internal.h"
+#include "core/backend/coccl_backend_topology.h"
 
 #include "comm.h"
 #include "core/config/coccl_config.h"
-#include "device.h"
-#include "sym_kernels.h"
-#include "tuning.h"
 
 #include <algorithm>
 #include <iterator>
@@ -46,168 +44,30 @@ std::vector<size_t> topologySampleSizes() {
   return sizes;
 }
 
-double allGatherEstimate(ncclComm_t comm, size_t bytes, bool symmetric) {
-  if (comm == nullptr || comm->nRanks <= 1) return 0.0;
-
-  ncclTuningInput_t input = {};
-  input.comm = comm;
-  input.tuningMask = NCCL_TUNING_MASK_GENERAL_KERNELS |
-      (symmetric ? NCCL_TUNING_MASK_SYM_KERNELS : 0);
-  input.func = ncclFuncAllGather;
-  input.redOp = ncclSum;
-  input.devRedOp = ncclDevSum;
-  input.datatype = ncclInt8;
-  input.count = bytes;
-  input.countMax = bytes;
-  input.nBytes = bytes * (size_t)comm->nRanks;
-  input.numPipeOps = 1;
-  input.nWorks = 1;
-  input.winRegType = symmetric
-      ? ncclSymSendRegRecvReg : ncclSymSendNonregRecvNonreg;
-  input.regBuff = 1;
-  input.collNetSupport = comm->config.collnetEnable;
-  input.nvlsSupport = comm->nvlsSupport;
-  input.symAligned16B = true;
-  input.minCTAs = comm->config.minCTAs;
-  input.maxCTAs = comm->config.maxCTAs;
-  input.CTAPolicy = comm->config.CTAPolicy;
-  if (comm->cudaArch == 800 && comm->nNodes == 1 &&
-      bytes >= (size_t{16} << 20)) {
-    input.minCTAs = 9;
-    input.maxCTAs = 9;
-  }
-
-  ncclTuningResult_t result = NCCL_TUNING_RESULT_INIT;
-  if (ncclTuningCompute(&input, &result) != ncclSuccess ||
-      !result.valid || !(result.timeUs > 0.0f)) {
-    return 0.0;
-  }
-  return result.timeUs;
-}
-
-double reduceScatterEstimate(ncclComm_t comm, size_t bytes) {
-  if (comm == nullptr || comm->nRanks <= 1) return 0.0;
-
-  ncclTuningInput_t input = {};
-  input.comm = comm;
-  input.tuningMask = NCCL_TUNING_MASK_GENERAL_KERNELS |
-      NCCL_TUNING_MASK_SYM_KERNELS;
-  input.func = ncclFuncReduceScatter;
-  input.redOp = ncclSum;
-  input.devRedOp = ncclDevSum;
-  input.datatype = ncclInt8;
-  input.count = bytes / (size_t)comm->nRanks;
-  input.countMax = input.count;
-  input.nBytes = bytes;
-  input.numPipeOps = 1;
-  input.nWorks = 1;
-  input.winRegType = ncclSymSendRegRecvReg;
-  input.regBuff = 1;
-  input.collNetSupport = comm->config.collnetEnable;
-  input.nvlsSupport = comm->nvlsSupport;
-  input.symAligned16B = true;
-  input.minCTAs = comm->config.minCTAs;
-  input.maxCTAs = comm->config.maxCTAs;
-  input.CTAPolicy = comm->config.CTAPolicy;
-
-  ncclTuningResult_t result = NCCL_TUNING_RESULT_INIT;
-  if (ncclTuningCompute(&input, &result) != ncclSuccess ||
-      !result.valid || !(result.timeUs > 0.0f)) {
-    return 0.0;
-  }
-  return result.timeUs;
-}
-
-double p2pEstimate(ncclComm_t comm, size_t bytes, int peers,
-                   bool interNode) {
-  // NCCL has no valid Send/Recv entry in ncclTuningCompute. Reuse its
-  // initialized P2P channel plan and Ring link model instead.
-  const ncclTopoGraph& ring = comm->graphs[NCCL_ALGO_RING];
-  const int channelsPerPeer = std::max(1, comm->p2pnChannelsPerPeer);
-  const int scheduledChannels = std::max(
-      1, std::min(comm->p2pnChannels, channelsPerPeer * peers));
-  const size_t chunks = std::max<size_t>(
-      1, (bytes + (size_t)comm->p2pChunkSize - 1) /
-             (size_t)comm->p2pChunkSize);
-  const int activeChannels = std::min<int>(scheduledChannels, (int)chunks);
-  const double channelBandwidth = interNode
-      ? ring.bwInter : ring.bwIntra;
-  const int effectiveChannels = interNode
-      ? std::max(1, activeChannels / comm->localRanks)
-      : activeChannels;
-  const double bandwidth = channelBandwidth * (double)effectiveChannels;
-  const double collectiveLatency =
-      comm->tuningContext.generalLatencies
-          [ncclFuncAllGather][NCCL_ALGO_RING][NCCL_PROTO_SIMPLE];
-  const double latency = collectiveLatency /
-      (double)std::max(1, comm->nRanks - 1);
-  return latency + (double)bytes / (1000.0 * bandwidth);
-}
-
-enum class TopologyOperation {
-  P2pIntra,
-  P2pInter,
-  AllGather,
-  AllToAll,
-  ReduceScatter,
-};
-
 cocclLinearModel fitTopologyModel(ncclComm_t comm,
-                                  TopologyOperation operation) {
+                                  cocclAutotuneTopologyOperation operation) {
   std::vector<cocclAutotuneProfilePoint> points;
   if (comm == nullptr || comm->nRanks <= 1) return {};
   for (size_t bytes : topologySampleSizes()) {
-    double timeUs = 0.0;
-    if (operation == TopologyOperation::P2pIntra ||
-        operation == TopologyOperation::P2pInter) {
-      timeUs = p2pEstimate(
-          comm, bytes, 1, operation == TopologyOperation::P2pInter);
-    } else if (operation == TopologyOperation::AllGather) {
-      timeUs = allGatherEstimate(comm, bytes, true);
-    } else if (operation == TopologyOperation::AllToAll) {
-      // Host AllToAll schedules every non-self peer over the shared P2P
-      // channels. Model its per-rank wire volume and available concurrency.
-      const int peers = std::max(1, comm->nRanks - 1);
-      const size_t wireBytes = bytes * (size_t)peers /
-          (size_t)comm->nRanks;
-      timeUs = p2pEstimate(comm, wireBytes, peers, comm->nNodes > 1);
-    } else {
-      timeUs = reduceScatterEstimate(comm, bytes);
-    }
+    const double timeUs = cocclBackendEstimateStage(comm, operation, bytes);
     if (!(timeUs > 0.0)) return {};
     points.push_back({(double)bytes, timeUs});
   }
   return cocclAutotuneFitLinearModel(points);
 }
 
-TopologyOperation topologyOperation(cocclAutotuneTopologyOperation operation) {
-  switch (operation) {
-    case cocclAutotuneTopologyOperation::P2pIntra:
-      return TopologyOperation::P2pIntra;
-    case cocclAutotuneTopologyOperation::P2pInter:
-      return TopologyOperation::P2pInter;
-    case cocclAutotuneTopologyOperation::AllGather:
-      return TopologyOperation::AllGather;
-    case cocclAutotuneTopologyOperation::AllToAll:
-      return TopologyOperation::AllToAll;
-    case cocclAutotuneTopologyOperation::ReduceScatter:
-      return TopologyOperation::ReduceScatter;
-  }
-  __builtin_unreachable();
-}
-
 cocclSelectionPerformanceModel buildTopologyModel(
     const TopologyModelKey& key) {
   cocclSelectionPerformanceModel model;
   model.intraP2p =
-      fitTopologyModel(key.intra, TopologyOperation::P2pIntra);
+      fitTopologyModel(key.intra, cocclAutotuneTopologyOperation::P2pIntra);
   model.interP2p =
-      fitTopologyModel(key.inter, TopologyOperation::P2pInter);
+      fitTopologyModel(key.inter, cocclAutotuneTopologyOperation::P2pInter);
   model.allGather =
       cocclAutotuneSnapshotTopologyStageModel(
           key.gather, cocclAutotuneTopologyOperation::AllGather);
   model.allToAll =
-      fitTopologyModel(key.owner, TopologyOperation::AllToAll);
+      fitTopologyModel(key.owner, cocclAutotuneTopologyOperation::AllToAll);
   model.allGatherIntra =
       cocclAutotuneSnapshotTopologyStageModel(
           key.intra, cocclAutotuneTopologyOperation::AllGather);
@@ -236,7 +96,7 @@ cocclLinearModel cocclAutotuneSnapshotTopologyStageModel(
   auto found = topologyStageModels.find(key);
   if (found == topologyStageModels.end()) {
     found = topologyStageModels.emplace(
-        key, fitTopologyModel(comm, topologyOperation(operation))).first;
+        key, fitTopologyModel(comm, operation)).first;
     if (comm->rank == 0) {
       INFO(COCCL_TUNING,
            "COCCL topology stage operation=%d valid=%d alpha_us=%g beta_us_per_byte=%g",

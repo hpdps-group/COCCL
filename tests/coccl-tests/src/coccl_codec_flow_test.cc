@@ -199,3 +199,8 @@ int main() {
   std::printf("coccl codec flow: PASS\n");
   return 0;
 }
+
+bool cocclBackendUseAllGatherV(
+    ncclComm_t, const cocclFrameExchange*, size_t) {
+  return false;
+}

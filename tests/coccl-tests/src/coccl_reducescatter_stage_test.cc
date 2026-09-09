@@ -124,7 +124,7 @@ int main() {
       nullptr, nullptr, 0};
   cocclPipelineStageOutput output = {
       reinterpret_cast<void*>(0x200000), 1024};
-  ncclCollConfig_t communicationConfig = NCCL_COLLCONFIG_INITIALIZER;
+  cocclCollectiveConfig communicationConfig = {};
   communicationConfig.minCTAs = 8;
   communicationConfig.maxCTAs = 8;
 
