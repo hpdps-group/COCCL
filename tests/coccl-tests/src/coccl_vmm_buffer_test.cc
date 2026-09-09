@@ -352,6 +352,7 @@ int main() {
              cocclBufferRegistrationKind::Symmetric, firstStream,
              &smaller) == ncclSuccess);
   EXPECT(smaller.ptr == firstAddress);
+  EXPECT(smaller.bytes == vmmLogicalBytes);
   EXPECT(physicalHandles.size() == 1);
   EXPECT(mappings.size() == 1);
   EXPECT(reservations.size() == 1);
