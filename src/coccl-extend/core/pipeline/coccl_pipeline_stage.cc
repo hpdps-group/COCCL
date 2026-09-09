@@ -133,7 +133,7 @@ ncclResult_t runAllToAll(const cocclPipelineStageContext* context,
         context, stage, edge, output, stream);
   }
   const size_t sendBytes = edge->bytes / (size_t)stage->comm->nRanks;
-  NCCLCHECK(ncclAllToAll(edge->ptr, output->ptr, sendBytes, ncclUint8,
+  NCCLCHECK(cocclBackendAllToAll(edge->ptr, output->ptr, sendBytes, ncclUint8,
                          stage->comm, stream));
   edge->ptr = output->ptr;
   return ncclSuccess;
@@ -150,7 +150,7 @@ ncclResult_t runAllGather(const cocclPipelineStageContext* context,
     return cocclCommitPipelineFrameExchange(
         context, stage, edge, output, stream);
   }
-  NCCLCHECK(ncclAllGather(edge->ptr, output->ptr, edge->bytes, ncclUint8,
+  NCCLCHECK(cocclBackendAllGather(edge->ptr, output->ptr, edge->bytes, ncclUint8,
                           stage->comm, stream));
   const size_t ranks = (size_t)stage->comm->nRanks;
   edge->ptr = output->ptr;
@@ -258,7 +258,7 @@ ncclResult_t runReduceScatter(
   const size_t outputChunks =
       edge->logicalChunks / (size_t)stage->comm->nRanks;
   const size_t recvcount = context->rawSliceCount * outputChunks;
-  NCCLCHECK(ncclReduceScatter(
+  NCCLCHECK(cocclBackendReduceScatter(
       edge->ptr, output->ptr, recvcount, context->rawDatatype, ncclSum,
       stage->comm, stream));
   edge->ptr = output->ptr;
@@ -364,13 +364,13 @@ ncclResult_t cocclPreparePipelineFrameExchange(
     const size_t metadataBytes =
         edge->logicalChunks / (size_t)stage->comm->nRanks *
         sizeof(cocclCompressorFrameMetadata);
-    return ncclAllToAll(
+    return cocclBackendAllToAll(
         edge->frameMetadata, output->frameMetadata, metadataBytes,
         ncclUint8, stage->comm, stream);
   }
   const size_t metadataBytes =
       edge->logicalChunks * sizeof(cocclCompressorFrameMetadata);
-  return ncclAllGather(
+  return cocclBackendAllGather(
       edge->frameMetadata, output->frameMetadata, metadataBytes,
       ncclUint8, stage->comm, stream);
 }

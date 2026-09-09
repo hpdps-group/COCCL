@@ -5,6 +5,7 @@
 
 #include "runtime/coccl_operation.h"
 #include "nccl.h"
+#include "core/backend/coccl_backend_collectives.h"
 
 enum cocclPipelineStageKind {
   cocclPipelineStageCompress = 0,
@@ -50,55 +51,59 @@ struct cocclPipelineStage {
   ncclComm_t comm;
   size_t reduceChunks;
   void* compressor;
+  const cocclCollectiveConfig* config;
   int peer = -1;
   cocclPipelineSendRecvDirection direction = cocclPipelineSend;
 };
 
 static inline cocclPipelineStage cocclPipelineCompress(void* compressor) {
-  return {cocclPipelineStageCompress, nullptr, 0, compressor};
+  return {cocclPipelineStageCompress, nullptr, 0, compressor, nullptr};
 }
 
-static inline cocclPipelineStage cocclPipelineAllToAll(ncclComm_t comm) {
-  return {cocclPipelineStageAllToAll, comm, 0, nullptr};
+static inline cocclPipelineStage cocclPipelineAllToAll(
+    ncclComm_t comm, const cocclCollectiveConfig* config = nullptr) {
+  return {cocclPipelineStageAllToAll, comm, 0, nullptr, config};
 }
 
-static inline cocclPipelineStage cocclPipelineAllGather(ncclComm_t comm) {
-  return {cocclPipelineStageAllGather, comm, 0, nullptr};
+static inline cocclPipelineStage cocclPipelineAllGather(
+    ncclComm_t comm, const cocclCollectiveConfig* config = nullptr) {
+  return {cocclPipelineStageAllGather, comm, 0, nullptr, config};
 }
 
 static inline cocclPipelineStage cocclPipelineDecompReduceComp(
     size_t reduceChunks, void* compressor) {
   return {cocclPipelineStageDecompReduceComp, nullptr, reduceChunks,
-          compressor};
+          compressor, nullptr};
 }
 
 static inline cocclPipelineStage cocclPipelineDecompressReduce(
     size_t reduceChunks) {
   return {cocclPipelineStageDecompressReduce, nullptr, reduceChunks,
-          nullptr};
+          nullptr, nullptr};
 }
 
 static inline cocclPipelineStage cocclPipelineDecompress() {
-  return {cocclPipelineStageDecompress, nullptr, 0, nullptr};
+  return {cocclPipelineStageDecompress, nullptr, 0, nullptr, nullptr};
 }
 
 static inline cocclPipelineStage cocclPipelineReduceScatter(
-    ncclComm_t comm) {
-  return {cocclPipelineStageReduceScatter, comm, 0, nullptr};
+    ncclComm_t comm, const cocclCollectiveConfig* config = nullptr) {
+  return {cocclPipelineStageReduceScatter, comm, 0, nullptr, config};
 }
 
 static inline cocclPipelineStage cocclPipelinePack() {
-  return {cocclPipelineStagePack, nullptr, 0, nullptr};
+  return {cocclPipelineStagePack, nullptr, 0, nullptr, nullptr};
 }
 
 static inline cocclPipelineStage cocclPipelineUnpack() {
-  return {cocclPipelineStageUnpack, nullptr, 0, nullptr};
+  return {cocclPipelineStageUnpack, nullptr, 0, nullptr, nullptr};
 }
 
 static inline cocclPipelineStage cocclPipelineSendRecv(
     ncclComm_t comm, int peer, cocclPipelineSendRecvDirection direction,
     void* compressor) {
-  return {cocclPipelineStageSendRecv, comm, 0, compressor, peer, direction};
+  return {cocclPipelineStageSendRecv, comm, 0, compressor, nullptr,
+          peer, direction};
 }
 
 // rawChunkCount is the unsliced element count in one rank chunk.

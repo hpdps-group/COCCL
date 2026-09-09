@@ -1,4 +1,5 @@
 #include "runtime/coccl_runtime.h"
+#include "core/backend/coccl_backend_collectives.h"
 
 #include "core/tuning/coccl_autotune.h"
 #include "core/config/coccl_config.h"
@@ -285,20 +286,20 @@ ncclResult_t cocclReplayNativeCall(const cocclInfo& info) {
   ncclResult_t result = ncclInvalidArgument;
   switch (info.operation) {
     case cocclOperation::AllGather:
-      result = ncclAllGather(info.sendbuff, info.recvbuff, info.count,
+      result = cocclBackendAllGather(info.sendbuff, info.recvbuff, info.count,
                              info.datatype, info.comm, info.stream);
       break;
     case cocclOperation::ReduceScatter:
-      result = ncclReduceScatter(info.sendbuff, info.recvbuff, info.count,
+      result = cocclBackendReduceScatter(info.sendbuff, info.recvbuff, info.count,
                                  info.datatype, info.op, info.comm,
                                  info.stream);
       break;
     case cocclOperation::AllReduce:
-      result = ncclAllReduce(info.sendbuff, info.recvbuff, info.count,
+      result = cocclBackendAllReduce(info.sendbuff, info.recvbuff, info.count,
                              info.datatype, info.op, info.comm, info.stream);
       break;
     case cocclOperation::AllToAll:
-      result = ncclAllToAll(info.sendbuff, info.recvbuff, info.count,
+      result = cocclBackendAllToAll(info.sendbuff, info.recvbuff, info.count,
                             info.datatype, info.comm, info.stream);
       break;
     case cocclOperation::SendRecv:

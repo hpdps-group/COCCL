@@ -106,10 +106,13 @@ COCCL_SRC := ../../../src
 COCCL_ROOT := $(COCCL_SRC)/coccl-extend
 COCCL_CORE := $(COCCL_ROOT)/core
 COCCL_EXTENSIONS := $(COCCL_ROOT)/extensions
+BACKEND_COLLECTIVES_SRC := $(COCCL_CORE)/backend/coccl_backend_collectives.cc
+BACKEND_TOPOLOGY_SRC := $(COCCL_CORE)/backend/coccl_backend_topology.cc
 COCCL_INC := -I$(COCCL_ROOT)/include -I$(COCCL_ROOT) \
 	-I$(COCCL_SRC)/include -I$(COCCL_SRC)/include/plugin \
 	-I$(NCCL_HOME)/include -I$(CUDA_INC)
-TEST_CXXFLAGS := $(filter-out -std=c++11,$(CXXFLAGS)) -std=c++17
+TEST_CXXFLAGS := $(filter-out -std=c++11,$(CXXFLAGS)) -std=c++17 \
+	-ffunction-sections -fdata-sections -Wl,--gc-sections
 SDK_TEST := $(DST_DIR)/coccl_compressor_sdk_test
 CONFIG_READER_TEST := $(DST_DIR)/coccl_config_reader_test
 CONFIG_POLICY_TEST := $(DST_DIR)/coccl_config_policy_test
@@ -357,11 +360,13 @@ $(AUTOTUNE_MODEL_SELECTOR): coccl_autotune_model_selector.cc \
 
 $(AUTOTUNE_TOPOLOGY_TEST): coccl_autotune_topology_test.cc \
 		$(COCCL_CORE)/tuning/coccl_autotune_topology.cc \
+		$(BACKEND_TOPOLOGY_SRC) $(BACKEND_COLLECTIVES_SRC) \
 		$(AUTOTUNE_COST_MODEL_SRC) $(AUTOTUNE_INTERNAL)
 	@printf "Linking  %-35s > %s\n" $< $@
 	@mkdir -p $(DST_DIR)
 	$(CXX) $(TEST_CXXFLAGS) $(COCCL_INC) -I$(COCCL_SRC) \
 		-o $@ $< $(COCCL_CORE)/tuning/coccl_autotune_topology.cc \
+		$(BACKEND_TOPOLOGY_SRC) $(BACKEND_COLLECTIVES_SRC) \
 		$(AUTOTUNE_COST_MODEL_SRC)
 
 $(AUTOTUNE_PIPELINE_QUERY_TEST): coccl_autotune_pipeline_query_test.cc \
@@ -389,7 +394,7 @@ $(HIERARCHICAL_GRAPH_TEST): coccl_hierarchical_graph_test.cc \
 	$(CXX) $(TEST_CXXFLAGS) $(COCCL_INC) -I$(COCCL_SRC) -o $@ $^
 
 $(CODEC_FLOW_TEST): coccl_codec_flow_test.cc \
-		$(COCCL_CORE)/pipeline/coccl_pipeline_stage.cc
+		$(COCCL_CORE)/pipeline/coccl_pipeline_stage.cc $(BACKEND_COLLECTIVES_SRC)
 	@printf "Linking  %-35s > %s\n" $< $@
 	@mkdir -p $(DST_DIR)
 	$(CXX) $(TEST_CXXFLAGS) $(COCCL_INC) -I$(COCCL_SRC) -o $@ $^ \
@@ -409,7 +414,7 @@ $(DIETGPU_INTEGER_TEST): coccl_dietgpu_integer_test.cu
 	$(NVCC) -o $@ $(NVCUFLAGS) $< $(NVLDFLAGS)
 
 $(RUNTIME_TEST): coccl_runtime_test.cc \
-		$(COCCL_CORE)/runtime/coccl_runtime.cc \
+		$(COCCL_CORE)/runtime/coccl_runtime.cc $(BACKEND_COLLECTIVES_SRC) \
 		$(COCCL_CORE)/runtime/coccl_prepared_call.cc
 	@printf "Linking  %-35s > %s\n" $< $@
 	@mkdir -p $(DST_DIR)
@@ -451,7 +456,7 @@ $(REMAINDER_PLAN_TEST): coccl_remainder_plan_test.cc \
 $(TRAINING_CLASSIFIER_TEST): coccl_training_classifier_test.cc \
 		$(COCCL_CORE)/training/coccl_training_classifier.cc \
 		$(COCCL_CORE)/training/coccl_training_assist.cc \
-		$(COCCL_CORE)/runtime/coccl_runtime.cc \
+		$(COCCL_CORE)/runtime/coccl_runtime.cc $(BACKEND_COLLECTIVES_SRC) \
 		$(COCCL_CORE)/runtime/coccl_prepared_call.cc \
 		$(COCCL_CORE)/config/coccl_config.cc \
 		$(COCCL_CORE)/runtime/coccl_operation.cc
@@ -472,7 +477,7 @@ $(TRAINING_KNOWN_ROLES_TEST): coccl_training_known_roles.cc
 		-L$(CUDA_LIB) -lcudart -lpthread
 
 $(PIPELINE_STAGE_TEST): coccl_pipeline_stage_test.cc \
-		$(COCCL_CORE)/pipeline/coccl_pipeline_stage.cc $(FRAME_STAGE_STUB)
+		$(COCCL_CORE)/pipeline/coccl_pipeline_stage.cc $(BACKEND_COLLECTIVES_SRC) $(FRAME_STAGE_STUB)
 	@printf "Linking  %-35s > %s\n" $< $@
 	@mkdir -p $(DST_DIR)
 	$(CXX) $(TEST_CXXFLAGS) $(COCCL_INC) -I$(COCCL_SRC) -o $@ $^ \
@@ -493,7 +498,7 @@ $(ALLGATHER_PLAN_TEST): coccl_allgather_plan_test.cc \
 	$(CXX) $(TEST_CXXFLAGS) $(COCCL_INC) -I$(COCCL_SRC) -o $@ $^
 
 $(ALLGATHER_STAGE_TEST): coccl_allgather_stage_test.cc \
-		$(COCCL_CORE)/pipeline/coccl_pipeline_stage.cc $(FRAME_STAGE_STUB)
+		$(COCCL_CORE)/pipeline/coccl_pipeline_stage.cc $(BACKEND_COLLECTIVES_SRC) $(FRAME_STAGE_STUB)
 	@printf "Linking  %-35s > %s\n" $< $@
 	@mkdir -p $(DST_DIR)
 	$(CXX) $(TEST_CXXFLAGS) $(COCCL_INC) -I$(COCCL_SRC) -o $@ $^ \
@@ -506,7 +511,7 @@ $(REDUCESCATTER_PLAN_TEST): coccl_reducescatter_plan_test.cc \
 	$(CXX) $(TEST_CXXFLAGS) $(COCCL_INC) -I$(COCCL_SRC) -o $@ $^
 
 $(REDUCESCATTER_STAGE_TEST): coccl_reducescatter_stage_test.cc \
-		$(COCCL_CORE)/pipeline/coccl_pipeline_stage.cc $(FRAME_STAGE_STUB)
+		$(COCCL_CORE)/pipeline/coccl_pipeline_stage.cc $(BACKEND_COLLECTIVES_SRC) $(FRAME_STAGE_STUB)
 	@printf "Linking  %-35s > %s\n" $< $@
 	@mkdir -p $(DST_DIR)
 	$(CXX) $(TEST_CXXFLAGS) $(COCCL_INC) -I$(COCCL_SRC) -o $@ $^ \

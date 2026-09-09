@@ -231,12 +231,10 @@ int collectCommunicationComms(
     ncclComm_t comm = pipelineStage.comm;
     if (comm == nullptr) continue;
 
-    const bool symmetric = !framed && comm->nNodes == 1 &&
-        (pipelineStage.kind == cocclPipelineStageAllGather ||
-         pipelineStage.kind == cocclPipelineStageReduceScatter);
-    const cocclBufferRegistrationKind registration = symmetric
-        ? cocclBufferRegistrationKind::Symmetric
-        : cocclBufferRegistrationKind::Ordinary;
+    const cocclBufferRegistrationKind registration =
+        cocclBackendStageRegistration(spec->ownerComm, pipelineStage, framed);
+    const bool symmetric =
+        registration != cocclBufferRegistrationKind::Ordinary;
 
     int existing = 0;
     while (existing < count && comms[existing].comm != comm) ++existing;

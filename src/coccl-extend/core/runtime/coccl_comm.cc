@@ -1,4 +1,5 @@
 #include "core/runtime/coccl_comm.h"
+#include "core/backend/coccl_backend_collectives.h"
 
 #include "checks.h"
 #include "comm.h"
@@ -67,13 +68,12 @@ ncclResult_t cocclCommGetHierarchicalComms(
   cocclHierarchicalCommState created;
   const int localRanks = comm->localRanks;
   CUDACHECK(cudaSetDevice(comm->cudaDev));
-  ncclResult_t result = ncclCommSplit(
-      comm, comm->rank / localRanks, comm->rank, &created.intraComm, nullptr);
+  ncclResult_t result = cocclBackendCommSplit(
+      comm, comm->rank / localRanks, comm->rank, &created.intraComm);
   if (result == ncclSuccess) {
     cocclTrainingAssistUnregister(created.intraComm);
-    result = ncclCommSplit(
-        comm, comm->rank % localRanks, comm->rank, &created.interComm,
-        nullptr);
+    result = cocclBackendCommSplit(
+        comm, comm->rank % localRanks, comm->rank, &created.interComm);
   }
   if (result != ncclSuccess) {
     (void)destroyHierarchy(created);

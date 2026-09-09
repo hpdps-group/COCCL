@@ -9,6 +9,7 @@ COCCL_INCLUDE_DIR = $(COCCL_ROOT)/include
 COCCL_INCFLAGS = -I$(COCCL_INCLUDE_DIR) -I$(COCCL_ROOT)
 
 COCCL_CORE_HOST_SRCFILES = \
+	$(wildcard $(COCCL_ROOT)/core/backend/*.cc) \
 	$(wildcard $(COCCL_ROOT)/core/runtime/*.cc) \
 	$(wildcard $(COCCL_ROOT)/core/pipeline/*.cc) \
 	$(wildcard $(COCCL_ROOT)/core/compression/*.cc) \
