@@ -1,4 +1,5 @@
 #include "core/config/coccl_config.h"
+#include "core/compression/coccl_compressor_config.h"
 #include "core/config/coccl_config_debug.h"
 #include "compressor_plugin/detail/coccl_compressor_abi.h"
 
@@ -24,23 +25,6 @@ struct LoadedPlugin {
   void* library = nullptr;
   const cocclCompressorPlugin* compressor = nullptr;
   std::string path;
-};
-
-class ConfigViewStorage {
- public:
-  explicit ConfigViewStorage(const cocclConfigValues& values) {
-    pairs_.reserve(values.size());
-    for (const auto& value : values) {
-      pairs_.push_back({value.first.c_str(), value.second.c_str()});
-    }
-  }
-
-  cocclConfigView view() const {
-    return {pairs_.empty() ? nullptr : pairs_.data(), pairs_.size()};
-  }
-
- private:
-  std::vector<cocclConfigPair> pairs_;
 };
 
 void usage(const char* program) {
@@ -82,12 +66,6 @@ bool parseOptions(int argc, char** argv, Options* options) {
   return !options->configPath.empty();
 }
 
-std::string pluginPath(const cocclConfig& config, const std::string& name) {
-  std::string path = config.plugins.libraryPath;
-  if (!path.empty() && path.back() != '/') path.push_back('/');
-  return path + "lib" + name + ".so";
-}
-
 bool validateDescriptor(const std::string& expectedName,
                         const cocclCompressorPlugin* compressor,
                         std::string* error) {
@@ -109,7 +87,7 @@ bool validateDescriptor(const std::string& expectedName,
 bool loadPlugin(const cocclConfig& config, const std::string& name,
                 LoadedPlugin* plugin, std::string* error) {
   *plugin = {};
-  plugin->path = pluginPath(config, name);
+  plugin->path = cocclCompressorPluginPath(config, name);
   plugin->library = dlopen(plugin->path.c_str(), RTLD_NOW | RTLD_LOCAL);
   if (plugin->library == nullptr) {
     const char* loaderError = dlerror();
@@ -141,7 +119,7 @@ bool validatePluginConfig(const cocclCompressorPlugin* compressor,
                           const cocclConfigValues& values,
                           cocclCompressorConfigVariant variant,
                           const Options& options, const std::string& label) {
-  ConfigViewStorage storage(values);
+  cocclCompressorConfigViewStorage storage(values);
   const cocclConfigView view = storage.view();
   const cocclCompressorConfigContext context = {
       variant, options.nodes, options.devicesPerNode};

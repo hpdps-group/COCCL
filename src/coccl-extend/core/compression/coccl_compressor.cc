@@ -1,6 +1,6 @@
 #include "core/compression/coccl_compressor_runtime.h"
+#include "core/compression/coccl_compressor_internal.h"
 
-#include "core/tuning/coccl_autotune.h"
 #include "core/config/coccl_config.h"
 #include "core/training/coccl_training_assist.h"
 #include "comm.h"
@@ -8,7 +8,6 @@
 #include "debug.h"
 
 #include <cuda_runtime.h>
-#include <dlfcn.h>
 #include <pthread.h>
 
 #include <array>
@@ -19,36 +18,9 @@
 #include <utility>
 #include <vector>
 
+using namespace cocclCompressorInternal;
+
 namespace {
-
-struct PersistentBuffer {
-  void* data = nullptr;
-  size_t bytes = 0;
-};
-
-struct StateEntry {
-  void* data = nullptr;
-  cocclCompressorDestroyStateFn destroy = nullptr;
-};
-
-struct DeviceResources {
-  std::map<size_t, PersistentBuffer> persistent;
-  std::map<const void*, StateEntry> states;
-  size_t scratchPeakBytes = 0;
-};
-
-struct CompressorPolicy {
-  const cocclCompressorPlugin* plugin = nullptr;
-  void* config = nullptr;
-  size_t thresholdBytes = 0;
-  std::mutex resourceLock;
-  std::map<int, DeviceResources> resources;
-};
-
-struct LoadedPlugin {
-  void* library = nullptr;
-  const cocclCompressorPlugin* descriptor = nullptr;
-};
 
 struct ExecutionResources {
   CompressorPolicy* policy = nullptr;
@@ -58,44 +30,15 @@ struct ExecutionResources {
   size_t scratchBytes = 0;
 };
 
-constexpr size_t kOperationCount =
-    static_cast<size_t>(cocclOperation::Count);
-constexpr size_t kPolicyVariantCount = 3;
-constexpr size_t kTrainingRoleCount =
-    static_cast<size_t>(cocclTrainingRoleCount);
-constexpr size_t kCompressionScopeCount =
-    static_cast<size_t>(cocclCompressionScope::Count);
-
 pthread_mutex_t compressorLock = PTHREAD_MUTEX_INITIALIZER;
 bool runtimeInitialized = false;
 ncclResult_t runtimeInitResult = ncclSuccess;
-bool runtimeHasPolicies = false;
 int runtimeRanks = 1;
 int runtimeNodes = 1;
 int runtimeDevicesPerNode = 1;
 std::map<int, int> rankByDevice;
 std::map<int, size_t> communicatorsByDevice;
-std::map<std::string, LoadedPlugin> loadedPlugins;
-std::vector<std::unique_ptr<CompressorPolicy>> ownedPolicies;
-CompressorPolicy* policies[kTrainingRoleCount][kPolicyVariantCount]
-                              [kOperationCount][kCompressionScopeCount] = {};
-
-class ConfigViewStorage {
- public:
-  explicit ConfigViewStorage(const cocclConfigValues& values) {
-    pairs_.reserve(values.size());
-    for (const auto& value : values) {
-      pairs_.push_back({value.first.c_str(), value.second.c_str()});
-    }
-  }
-
-  cocclConfigView view() const {
-    return {pairs_.empty() ? nullptr : pairs_.data(), pairs_.size()};
-  }
-
- private:
-  std::vector<cocclConfigPair> pairs_;
-};
+Registry registry;
 
 ncclResult_t allocateScratch(void* opaque, size_t bytes,
                              cocclCompressorBufferView* buffer) {
@@ -156,167 +99,15 @@ const cocclCompressorHostApi kHostApi = {
     getOrCreateState,
 };
 
-std::string pluginPath(const cocclConfig& config, const std::string& name) {
-  std::string path = config.plugins.libraryPath;
-  if (!path.empty() && path.back() != '/') path.push_back('/');
-  return path + "lib" + name + ".so";
-}
-
-ncclResult_t loadPlugins(const cocclConfig& config) {
-  for (const std::string& name : config.plugins.compressors) {
-    const std::string path = pluginPath(config, name);
-    void* library = dlopen(path.c_str(), RTLD_NOW | RTLD_LOCAL);
-    if (library == nullptr) {
-      WARN("COCCL failed to open compressor %s: %s", path.c_str(), dlerror());
-      return ncclSystemError;
-    }
-    auto entry = reinterpret_cast<cocclGetCompressorPluginFn>(
-        dlsym(library, COCCL_COMPRESSOR_ENTRY_SYMBOL));
-    const cocclCompressorPlugin* plugin = entry == nullptr ? nullptr : entry();
-    char error[192] = {};
-    if (!cocclValidateCompressorPlugin(name.c_str(), plugin, error,
-                                       sizeof(error))) {
-      WARN("COCCL compressor %s rejected: %s", name.c_str(), error);
-      dlclose(library);
-      return ncclInvalidArgument;
-    }
-    loadedPlugins.emplace(name, LoadedPlugin{library, plugin});
-  }
-  return ncclSuccess;
-}
-
-ncclResult_t createPolicy(const cocclCompressorScopeEntry& configured,
-                          CompressorPolicy** policy) {
-  auto plugin = loadedPlugins.find(configured.name);
-  if (plugin == loadedPlugins.end()) return ncclInvalidArgument;
-
-  ConfigViewStorage storage(configured.values);
-  const cocclConfigView view = storage.view();
-  const cocclCompressorConfigContext context = {
-      cocclCompressorConfigDefault, runtimeNodes, runtimeDevicesPerNode};
-  char error[256] = {};
-  void* parsedConfig = nullptr;
-  ncclResult_t result = plugin->second.descriptor->parseConfig(
-      &view, &context, &parsedConfig, error, sizeof(error));
-  if (result != ncclSuccess) {
-    WARN("COCCL compressor %s configuration rejected: %s",
-         configured.name.c_str(), error);
-    return result;
-  }
-
-  auto created = std::make_unique<CompressorPolicy>();
-  created->plugin = plugin->second.descriptor;
-  created->config = parsedConfig;
-  *policy = created.get();
-  ownedPolicies.push_back(std::move(created));
-  return ncclSuccess;
-}
-
-ncclResult_t installPolicy(cocclTrainingRole trainingRole,
-                           cocclOperation operation,
-                           const cocclPrimitivePolicy& configured,
-                           cocclPolicyVariant variant) {
-  const size_t index = static_cast<size_t>(operation);
-  const size_t role = static_cast<size_t>(trainingRole);
-  const size_t policyVariant = static_cast<size_t>(variant);
-  for (cocclCompressionScope scope : {
-           cocclCompressionScope::Default,
-           cocclCompressionScope::Intra,
-           cocclCompressionScope::Inter}) {
-    const size_t scopeIndex = static_cast<size_t>(scope);
-    const cocclEffectiveCompressorScope effective =
-        cocclEffectiveCompressorScopeFor(configured, scope);
-    if (!effective.enabled()) continue;
-    runtimeHasPolicies = true;
-    if (scope != cocclCompressionScope::Default &&
-        effective.source == cocclCompressionScope::Default) {
-      policies[role][policyVariant][index][scopeIndex] =
-          policies[role][policyVariant][index][static_cast<size_t>(
-              cocclCompressionScope::Default)];
-      continue;
-    }
-    NCCLCHECK(createPolicy(
-        *effective.entry,
-        &policies[role][policyVariant][index][scopeIndex]));
-    policies[role][policyVariant][index][scopeIndex]->thresholdBytes =
-        configured.thresholdBytes;
-  }
-  return ncclSuccess;
-}
-
-ncclResult_t installCollectivePolicies(
-    cocclTrainingRole role, const cocclCollectivePolicies& configured) {
-  NCCLCHECK(installPolicy(role, cocclOperation::AllGather,
-                          configured.allGather,
-                          cocclPolicyVariant::Default));
-  NCCLCHECK(installPolicy(role, cocclOperation::ReduceScatter,
-                          configured.reduceScatter,
-                          cocclPolicyVariant::Default));
-  return installPolicy(role, cocclOperation::AllReduce,
-                       configured.allReduce,
-                       cocclPolicyVariant::Default);
-}
-
 ncclResult_t initializeRuntime(const ncclComm_t comm,
                                const cocclConfig& config) {
   runtimeRanks = comm->nRanks;
   runtimeNodes = comm->nNodes;
   runtimeDevicesPerNode = comm->localRanks;
-  NCCLCHECK(loadPlugins(config));
-  if (config.runtime.mode == cocclRuntimeMode::Normal) {
-    NCCLCHECK(installCollectivePolicies(
-        cocclTrainingRoleUnknown, config.normal));
-    NCCLCHECK(installPolicy(cocclTrainingRoleUnknown,
-                            cocclOperation::AllToAll,
-                            config.normal.allToAll,
-                            cocclPolicyVariant::Default));
-    NCCLCHECK(installPolicy(cocclTrainingRoleUnknown,
-                            cocclOperation::SendRecv,
-                            config.normal.sendRecv,
-                            cocclPolicyVariant::Default));
-  } else {
-    NCCLCHECK(installCollectivePolicies(
-        cocclTrainingRoleDataParallel,
-        config.trainingPolicies.dataParallel));
-    NCCLCHECK(installCollectivePolicies(
-        cocclTrainingRoleTensorParallel,
-        config.trainingPolicies.tensorParallel));
-    NCCLCHECK(installPolicy(
-        cocclTrainingRolePipelineParallel,
-        cocclOperation::SendRecv,
-        config.trainingPolicies.pipelineSendRecvForward,
-        cocclPolicyVariant::Forward));
-    NCCLCHECK(installPolicy(
-        cocclTrainingRolePipelineParallel,
-        cocclOperation::SendRecv,
-        config.trainingPolicies.pipelineSendRecvBackward,
-        cocclPolicyVariant::Backward));
-  }
-
-  for (size_t role = 0; role < kTrainingRoleCount; ++role) {
-    for (cocclOperation operation : {
-             cocclOperation::AllGather, cocclOperation::ReduceScatter,
-             cocclOperation::AllReduce}) {
-      CompressorPolicy* previous = nullptr;
-      for (cocclCompressionScope scope : {
-               cocclCompressionScope::Default,
-               cocclCompressionScope::Intra,
-               cocclCompressionScope::Inter}) {
-        CompressorPolicy* policy =
-            policies[role][static_cast<size_t>(cocclPolicyVariant::Default)]
-                    [static_cast<size_t>(operation)]
-                    [static_cast<size_t>(scope)];
-        if (policy != nullptr && policy != previous) {
-          NCCLCHECK(cocclAutotuneRegisterEnabledCompressor(
-              policy, cocclDefaultPolicy(operation, scope)));
-        }
-        previous = policy;
-      }
-    }
-  }
-  return ncclSuccess;
+  const cocclCompressorConfigContext context = {
+      cocclCompressorConfigDefault, runtimeNodes, runtimeDevicesPerNode};
+  return initializeRegistry(&registry, config, context);
 }
-
 
 int rankForDevice(int cudaDev) {
   pthread_mutex_lock(&compressorLock);
@@ -379,7 +170,7 @@ ncclResult_t validateEncodedOutput(const cocclCompressorView& output,
 
 bool cocclCompressionEnabled() {
   return runtimeInitialized && runtimeInitResult == ncclSuccess &&
-      runtimeHasPolicies;
+      registry.hasPolicies;
 }
 
 ncclResult_t cocclResolveCompressorPolicy(
@@ -395,7 +186,7 @@ ncclResult_t cocclResolveCompressorPolicy(
     return ncclInvalidUsage;
   }
 
-  CompressorPolicy* policy = policies[role][variant][index][scope];
+  CompressorPolicy* policy = registry.policies[role][variant][index][scope];
   if (policy == nullptr) return ncclInvalidUsage;
   resolved->compressor = policy;
   resolved->thresholdBytes = policy->thresholdBytes;
@@ -494,7 +285,7 @@ ncclResult_t cocclCompressorRuntimeDestroy(const ncclComm_t comm) {
   communicatorsByDevice.erase(count);
   rankByDevice.erase(comm->cudaDev);
   ncclResult_t result = ncclSuccess;
-  for (const std::unique_ptr<CompressorPolicy>& policy : ownedPolicies) {
+  for (const std::unique_ptr<CompressorPolicy>& policy : registry.ownedPolicies) {
     std::lock_guard<std::mutex> guard(policy->resourceLock);
     auto resources = policy->resources.find(comm->cudaDev);
     if (resources == policy->resources.end()) continue;

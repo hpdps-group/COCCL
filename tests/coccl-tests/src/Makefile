@@ -172,7 +172,7 @@ config-tests: $(SDK_TEST) $(CONFIG_READER_TEST) $(CONFIG_POLICY_TEST) \
 	@mkdir -p $(CONFIG_TEST_TMP)
 	$(SDK_TEST)
 	$(CONFIG_READER_TEST)
-	$(CONFIG_POLICY_TEST) $(SDP_CONFIG) $(ZFP_CONFIG)
+	$(CONFIG_POLICY_TEST) $(SDP_CONFIG) $(ZFP_CONFIG) $(PLUGIN_DIR)
 	$(SCOPE_CONFIG_TEST) $(CONFIG_TEST_TMP) $(SDP_CONFIG) $(ZFP_CONFIG) \
 		../../../examples/benchmarks_scripts/configs/dietgpu.toml \
 		../../../src/coccl-extend/extensions/configs/normal-mixed.toml \
@@ -261,12 +261,13 @@ $(CONFIG_READER_TEST): coccl_config_reader_test.cc
 	$(CXX) $(TEST_CXXFLAGS) $(COCCL_INC) -o $@ $<
 
 $(CONFIG_POLICY_TEST): coccl_config_policy_test.cc \
+		$(COCCL_CORE)/compression/coccl_compressor_registry.cc \
 		$(COCCL_CORE)/config/coccl_config.cc \
 		$(COCCL_CORE)/runtime/coccl_operation.cc
 	@printf "Linking  %-35s > %s\n" $< $@
 	@mkdir -p $(DST_DIR)
 	$(CXX) $(TEST_CXXFLAGS) -DCOCCL_CONFIG_PARSER_ONLY $(COCCL_INC) \
-		-o $@ $^
+		-o $@ $^ -ldl
 
 $(PLUGIN_LOAD_TEST): coccl_plugin_load_test.cc
 	@printf "Linking  %-35s > %s\n" $< $@
