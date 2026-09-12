@@ -40,14 +40,19 @@ struct Sdp4BitState {
 };
 
 Sdp4BitSlotState& nextSlot(Sdp4BitState* state, int pipelineSize,
-                           bool compress, size_t* slotIndex) {
+                           bool compress, const coccl::Context& context,
+                           size_t* slotIndex) {
+  if (context.pipelineSlices() != 0) {
+    pipelineSize = (int)context.pipelineSlices();
+  }
   if (state->slots.size() != (size_t)pipelineSize) {
     state->slots.assign((size_t)pipelineSize, Sdp4BitSlotState{});
     state->nextCompress = 0;
     state->nextDecompress = 0;
   }
   size_t& next = compress ? state->nextCompress : state->nextDecompress;
-  *slotIndex = next++ % state->slots.size();
+  *slotIndex = context.pipelineSlices() != 0
+      ? context.pipelineSlice() : next++ % state->slots.size();
   return state->slots[*slotIndex];
 }
 
@@ -226,6 +231,7 @@ void launchDequant(T* output, const coccl::Input& input,
 
 struct Sdp4BitCompressor {
   using Config = Sdp4BitConfig;
+  static constexpr bool kPipelineState = true;
 
   static coccl::Status configure(coccl::ConfigReader& reader, Config& config,
                                  const coccl::ConfigContext&) {
@@ -291,7 +297,7 @@ struct Sdp4BitCompressor {
       coccl::Status result = context.instance(&state);
       if (result != ncclSuccess) return result;
       size_t slotIndex = 0;
-      slot = &nextSlot(state, config.pipelineSize, true, &slotIndex);
+      slot = &nextSlot(state, config.pipelineSize, true, context, &slotIndex);
       if (slot->datatype != input.datatype() ||
           slot->elementsPerChunk != input.elementsPerChunk()) {
         slot->datatype = input.datatype();
@@ -322,7 +328,7 @@ struct Sdp4BitCompressor {
         launch_fused_sub_quant_cuda(
             output.dataAs<int8_t>(),
             static_cast<const T*>(slot->shardParams) +
-                context.rank() * input.elementsPerChunk(),
+                context.localChunkIndex() * input.elementsPerChunk(),
             typedInput, config.quantBits, config.quantType,
             config.kernelGroupCount(),
             (int64_t)input.elementsPerChunk(), 1, 0,
@@ -367,7 +373,7 @@ struct Sdp4BitCompressor {
       if (result != ncclSuccess) return result;
       size_t slotIndex = 0;
       Sdp4BitSlotState& slot =
-          nextSlot(state, config.pipelineSize, false, &slotIndex);
+          nextSlot(state, config.pipelineSize, false, context, &slotIndex);
       size_t requiredBytes = 0;
       const size_t datatypeBytes = coccl::dataTypeSize(output.datatype());
       if (datatypeBytes == 0 ||

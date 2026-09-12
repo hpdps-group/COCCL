@@ -29,7 +29,8 @@ void ncclDebugLog(ncclDebugLogLevel, unsigned long, const char*, int,
 
 ncclResult_t ncclCompress(
     void* compressor, const cocclCompressorView& input,
-    cocclCompressorView* output, int, cudaStream_t) {
+    cocclCompressorView* output, int, cudaStream_t,
+    const cocclCompressorScope*) {
   ++compressCalls;
   EXPECT(compressor == reinterpret_cast<void*>(0x1));
   EXPECT(input.elements == 256 && input.chunks == 4 &&
@@ -88,7 +89,8 @@ ncclResult_t ncclAllGather(const void*, void*, size_t, ncclDataType_t,
 }
 
 ncclResult_t ncclDecompress(
-    void*, const cocclCompressorView&, cocclCompressorView*, cudaStream_t) {
+    void*, const cocclCompressorView&, cocclCompressorView*, cudaStream_t,
+    const cocclCompressorScope*) {
   return ncclInternalError;
 }
 

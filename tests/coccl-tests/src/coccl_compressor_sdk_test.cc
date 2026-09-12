@@ -332,6 +332,30 @@ int testPassthroughMetadata() {
   return 0;
 }
 
+struct PipelineStateCompressor : MinimalCompressor {
+  static constexpr bool kPipelineState = true;
+};
+
+int testPipelineContext() {
+  const auto* plugin = coccl::detail::PluginAdapter<PipelineStateCompressor>
+      ::descriptor("pipeline-state");
+  cocclCompressorExecutionContext execution = {
+      sizeof(execution), &kHostApi, nullptr, nullptr, 0, 3, 8, 2, 4,
+      2, 4, 6};
+  cocclCompressorCall call = {};
+  call.structSize = sizeof(call);
+  call.execution = &execution;
+  coccl::Context context(&call);
+  if (!(plugin->capabilities & cocclCompressorCapabilityPipelineState) ||
+      context.pipelineSlice() != 2 || context.pipelineSlices() != 4 ||
+      context.localChunkIndex() != 6 || context.rank() != 3) return 1;
+  execution.structSize = COCCL_COMPRESSOR_EXECUTION_BASE_SIZE;
+  if (context.pipelineSlices() != 0 || context.pipelineSlice() != 0 ||
+      context.localChunkIndex() != 3 ||
+      plugin->execute(&call) != ncclInvalidArgument) return 1;
+  return 0;
+}
+
 int testOptionalResources() {
   const cocclCompressorPlugin* plugin =
       coccl::detail::PluginAdapter<ResourceCompressor>::descriptor("resource");
@@ -454,7 +478,7 @@ COCCL_REGISTER_COMPRESSOR("minimal", MinimalCompressor);
 
 int main() {
   if (testMinimalPlugin() || testPassthroughMetadata() ||
-      testOptionalResources() || testFramedPlugin()) {
+      testOptionalResources() || testFramedPlugin() || testPipelineContext()) {
     return 1;
   }
   printf("COCCL compressor SDK tests passed\n");

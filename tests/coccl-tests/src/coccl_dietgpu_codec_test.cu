@@ -186,7 +186,7 @@ int runRoundTrip(const cocclCompressorPlugin* plugin, int probBits,
         COCCL_COMPRESSOR_HOST_API_VERSION, sizeof(cocclCompressorHostApi),
         allocateScratch, unusedPersistent, unusedState};
     cocclCompressorExecutionContext execution = {
-        sizeof(cocclCompressorExecutionContext), &hostApi, &scratch,
+        COCCL_COMPRESSOR_EXECUTION_BASE_SIZE, &hostApi, &scratch,
         stream, 0, 0, 1, 1, 1};
     cocclCompressorFrameMetadata* deviceMetadata =
         deviceMetadataStorage + 1;

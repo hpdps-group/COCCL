@@ -28,6 +28,11 @@ struct ExecutionResources {
   cudaStream_t stream = nullptr;
   std::vector<void*> scratch;
   size_t scratchBytes = 0;
+  StateScopeKey stateScope = {};
+  StatefulResources* history = nullptr;
+  size_t historySlot = 0;
+  size_t historySlots = 0;
+  cocclCompressorOperation operation = cocclCompressorOperationCompress;
 };
 
 pthread_mutex_t compressorLock = PTHREAD_MUTEX_INITIALIZER;
@@ -58,7 +63,8 @@ ncclResult_t acquirePersistent(void* opaque, size_t slot, size_t bytes,
   CompressorPolicy* policy = execution->policy;
   std::lock_guard<std::mutex> guard(policy->resourceLock);
   PersistentBuffer& persistent =
-      policy->resources[execution->cudaDev].persistent[slot];
+      policy->resources[execution->cudaDev].scopes[execution->stateScope]
+          .persistent[slot];
   if (bytes > persistent.bytes) {
     if (persistent.data != nullptr) {
       cudaError_t result = cudaFree(persistent.data);
@@ -82,7 +88,31 @@ ncclResult_t getOrCreateState(void* opaque, const void* typeKey,
   ExecutionResources* execution = static_cast<ExecutionResources*>(opaque);
   CompressorPolicy* policy = execution->policy;
   std::lock_guard<std::mutex> guard(policy->resourceLock);
-  StateEntry& entry = policy->resources[execution->cudaDev].states[typeKey];
+  StatefulResources& scope = policy->resources[execution->cudaDev]
+      .scopes[execution->stateScope];
+  if (execution->historySlots != 0) {
+    execution->history = &scope;
+    // Different ranks need not use the same sequence of user streams.
+    // Only serialize a history slot against its preceding decoder write.
+    if (scope.activeSlices != execution->historySlots) {
+      // Repartitioning reuses the same history allocations after old writes.
+      for (cudaEvent_t ready : scope.historyReady) {
+        if (ready != nullptr) {
+          CUDACHECK(cudaStreamWaitEvent(execution->stream, ready, 0));
+        }
+      }
+      scope.activeSlices = execution->historySlots;
+      if (scope.historyReady.size() < scope.activeSlices) {
+        scope.historyReady.resize(scope.activeSlices, nullptr);
+      }
+    } else {
+      cudaEvent_t ready = scope.historyReady[execution->historySlot];
+      if (execution->operation == cocclCompressorOperationCompress && ready) {
+        CUDACHECK(cudaStreamWaitEvent(execution->stream, ready, 0));
+      }
+    }
+  }
+  StateEntry& entry = scope.states[typeKey];
   if (entry.data == nullptr) {
     NCCLCHECK(createState(&entry.data));
     entry.destroy = destroyState;
@@ -120,18 +150,40 @@ int rankForDevice(int cudaDev) {
 ncclResult_t execute(CompressorPolicy* policy,
                      const CompressorPolicy* inputPolicy,
                      cocclCompressorCall* call, int rank,
-                     cudaStream_t stream) {
+                     cudaStream_t stream, const cocclCompressorScope* scope) {
   int cudaDev = 0;
   CUDACHECK(cudaGetDevice(&cudaDev));
   ExecutionResources resources = {policy, cudaDev, stream};
   cocclCompressorExecutionContext execution = {
-      sizeof(cocclCompressorExecutionContext), &kHostApi, &resources,
+      COCCL_COMPRESSOR_EXECUTION_BASE_SIZE, &kHostApi, &resources,
       stream, cudaDev, rank, runtimeRanks, runtimeNodes,
       runtimeDevicesPerNode};
+  if (policy->plugin->capabilities & cocclCompressorCapabilityPipelineState) {
+    execution.structSize = sizeof(execution);
+    if (scope != nullptr && scope->slices != 0) {
+      resources.stateScope = {scope->comm, scope->layout};
+      resources.historySlot = scope->slice;
+      resources.historySlots = scope->slices;
+      resources.operation = call->operation;
+      execution.pipelineSlice = scope->slice;
+      execution.pipelineSlices = scope->slices;
+      execution.localChunkIndex = scope->localChunkIndex;
+    }
+  }
   call->config = policy->config;
   call->execution = &execution;
   call->inputConfig = inputPolicy->config;
   ncclResult_t result = policy->plugin->execute(call);
+  if (result == ncclSuccess && resources.history != nullptr &&
+      call->operation == cocclCompressorOperationDecompress) {
+    cudaEvent_t& ready = resources.history->historyReady[resources.historySlot];
+    cudaError_t status = cudaSuccess;
+    if (ready == nullptr) {
+      status = cudaEventCreateWithFlags(&ready, cudaEventDisableTiming);
+    }
+    if (status == cudaSuccess) status = cudaEventRecord(ready, stream);
+    if (status != cudaSuccess) result = ncclUnhandledCudaError;
+  }
   if (resources.scratchBytes != 0) {
     std::lock_guard<std::mutex> guard(policy->resourceLock);
     DeviceResources& device = policy->resources[cudaDev];
@@ -222,7 +274,8 @@ ncclResult_t cocclExecuteCompressor(
     cocclCompressorOperation operation,
     const cocclCompressorView& input, cocclCompressorView* output, int rank,
     size_t reduceChunks, ncclDataType_t originalDatatype,
-    size_t originalElements, cudaStream_t stream) {
+    size_t originalElements, cudaStream_t stream,
+    const cocclCompressorScope* scope) {
   CompressorPolicy* policy = static_cast<CompressorPolicy*>(compressor);
   CompressorPolicy* inputPolicy =
       static_cast<CompressorPolicy*>(inputCompressor);
@@ -238,7 +291,7 @@ ncclResult_t cocclExecuteCompressor(
       sizeof(cocclCompressorCall), operation, input, output, rank,
       reduceChunks, originalDatatype, originalElements, nullptr, nullptr,
       nullptr};
-  NCCLCHECK(execute(policy, inputPolicy, &call, rank, stream));
+  NCCLCHECK(execute(policy, inputPolicy, &call, rank, stream, scope));
   if (operation == cocclCompressorOperationCompress) {
     return validateEncodedOutput(*output, input.chunks);
   }
@@ -277,34 +330,48 @@ ncclResult_t cocclCompressorRuntimeDestroy(const ncclComm_t comm) {
     pthread_mutex_unlock(&compressorLock);
     return ncclSuccess;
   }
-  if (--count->second != 0) {
-    pthread_mutex_unlock(&compressorLock);
-    return ncclSuccess;
+  const bool lastDeviceComm = --count->second == 0;
+  if (lastDeviceComm) {
+    communicatorsByDevice.erase(count);
+    rankByDevice.erase(comm->cudaDev);
   }
-
-  communicatorsByDevice.erase(count);
-  rankByDevice.erase(comm->cudaDev);
   ncclResult_t result = ncclSuccess;
   for (const std::unique_ptr<CompressorPolicy>& policy : registry.ownedPolicies) {
     std::lock_guard<std::mutex> guard(policy->resourceLock);
     auto resources = policy->resources.find(comm->cudaDev);
     if (resources == policy->resources.end()) continue;
     size_t persistentBytes = 0;
-    for (const auto& state : resources->second.states) {
-      state.second.destroy(state.second.data);
-    }
-    for (const auto& persistent : resources->second.persistent) {
-      persistentBytes += persistent.second.bytes;
-      if (cudaFree(persistent.second.data) != cudaSuccess &&
-          result == ncclSuccess) {
-        result = ncclUnhandledCudaError;
+    size_t stateCount = 0;
+    auto& scopes = resources->second.scopes;
+    for (auto scope = scopes.begin(); scope != scopes.end();) {
+      if (!lastDeviceComm && std::get<0>(scope->first) != comm) {
+        ++scope;
+        continue;
       }
+      stateCount += scope->second.states.size();
+      for (cudaEvent_t ready : scope->second.historyReady) {
+        if (ready != nullptr && cudaEventDestroy(ready) != cudaSuccess &&
+            result == ncclSuccess) {
+          result = ncclUnhandledCudaError;
+        }
+      }
+      for (const auto& state : scope->second.states) {
+        state.second.destroy(state.second.data);
+      }
+      for (const auto& persistent : scope->second.persistent) {
+        persistentBytes += persistent.second.bytes;
+        if (cudaFree(persistent.second.data) != cudaSuccess &&
+            result == ncclSuccess) {
+          result = ncclUnhandledCudaError;
+        }
+      }
+      scope = scopes.erase(scope);
     }
     INFO(COCCL_COMPRESS,
          "COCCL compressor %s release device %d persistent %zu scratch_peak %zu states %zu",
          policy->plugin->name, comm->cudaDev, persistentBytes,
-         resources->second.scratchPeakBytes, resources->second.states.size());
-    policy->resources.erase(resources);
+         resources->second.scratchPeakBytes, stateCount);
+    if (lastDeviceComm) policy->resources.erase(resources);
   }
   pthread_mutex_unlock(&compressorLock);
   return result;

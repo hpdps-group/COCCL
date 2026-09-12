@@ -162,6 +162,19 @@ still carries the smaller runtime payload length.
 Call these inside the algorithm branch that needs them. A normal stateless
 compressor must not create a `State` merely to satisfy an interface.
 
+For history-based Compress/Decompress stages, declare `kPipelineState = true`.
+The runtime then supplies `pipelineSlice()`, `pipelineSlices()`, and
+`localChunkIndex()`. Use the actual slice index for history and the local
+chunk position for rank-indexed prediction; hierarchical decoder order may
+differ from user rank order. Scoped history belongs to the communicator and
+output layout, with each slot ordered after its preceding decoder write.
+Do not split history by local CUDA stream identity or require users to match
+a configured slot count to an automatically selected depth.
+
+This optional execution-context extension keeps ABI v9/Host API v3 prefixes.
+Plugins without PipelineState still receive the original execution structSize;
+PipelineState plugins require a runtime supplying the extended context.
+
 ## Error Contract
 
 - Reject unsupported datatypes and shapes before launching a kernel.

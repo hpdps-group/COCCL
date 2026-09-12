@@ -41,6 +41,7 @@ struct Options {
   std::string path = "explicit";
   int depth = 1;
   bool inPlace = false;
+  bool alternateStream = false;
   size_t rawChunkElements = kRawChunkElements;
   size_t prewarmRawChunkElements = 0;
 };
@@ -93,6 +94,9 @@ Options parseOptions(int argc, char** argv, int worldRank) {
     else if (key == "--path") options.path = value;
     else if (key == "--depth") options.depth = std::atoi(value.c_str());
     else if (key == "--inplace") options.inPlace = std::atoi(value.c_str());
+    else if (key == "--alternate-stream") {
+      options.alternateStream = std::atoi(value.c_str());
+    }
     else if (key == "--raw-chunk-elements") {
       options.rawChunkElements = std::strtoull(value.c_str(), nullptr, 10);
     }
@@ -403,6 +407,11 @@ void runCase(Operation operation, bool subAdd, ncclDataType_t datatype,
     CUDACHECK(cudaStreamSynchronize(compressedStream));
   }
 
+  cudaStream_t alternateStream = nullptr;
+  if (options.alternateStream && worldRank % 2 == 0) {
+    CUDACHECK(cudaStreamCreateWithFlags(&alternateStream, cudaStreamNonBlocking));
+    compressedStream = alternateStream;
+  }
   const std::vector<T> input = makeInput<T>(
       worldRank, subAdd ? 1 : 0, inputCount);
   const T* nativeInput = deviceInput;
@@ -489,7 +498,7 @@ void runCase(Operation operation, bool subAdd, ncclDataType_t datatype,
     std::printf(
         "COCCL_CORRECTNESS topology=%s rank_count=%d operation=%s "
         "algorithm=%s compressor=%s path=%s dtype=%s depth=%d "
-        "inplace=%d "
+        "inplace=%d alternate_stream=%d "
         "raw_chunk_elements=%zu output_elements=%zu "
         "mean_relative_error=%.12e mean_absolute_error=%.12e "
         "relative_l1_error=%.12e max_absolute_error=%.12e\n",
@@ -497,6 +506,7 @@ void runCase(Operation operation, bool subAdd, ncclDataType_t datatype,
         algorithmName(operation, subAdd), options.compressor.c_str(),
         options.path.c_str(), options.datatype.c_str(), options.depth,
         options.inPlace ? 1 : 0,
+        options.alternateStream ? 1 : 0,
         operation == Operation::AllGather ||
             operation == Operation::AllGatherTwoShot ||
             operation == Operation::SendRecv
@@ -511,6 +521,7 @@ void runCase(Operation operation, bool subAdd, ncclDataType_t datatype,
   CUDACHECK(cudaFree(compressedInPlace));
   CUDACHECK(cudaFree(nativeInPlace));
   CUDACHECK(cudaFree(deviceInput));
+  if (alternateStream != nullptr) CUDACHECK(cudaStreamDestroy(alternateStream));
 }
 
 template <typename T>

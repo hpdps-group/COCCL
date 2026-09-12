@@ -452,6 +452,16 @@ class Context {
   int ranks() const { return call_->execution->nRanks; }
   int nodes() const { return call_->execution->nodes; }
   int devicesPerNode() const { return call_->execution->devicesPerNode; }
+  size_t pipelineSlices() const {
+    return call_->execution->structSize >= sizeof(*call_->execution)
+        ? call_->execution->pipelineSlices : 0;
+  }
+  size_t pipelineSlice() const {
+    return pipelineSlices() ? call_->execution->pipelineSlice : 0;
+  }
+  int localChunkIndex() const {
+    return pipelineSlices() ? call_->execution->localChunkIndex : rank();
+  }
   size_t reduceChunks() const { return call_->reduceChunks; }
   ncclDataType_t originalDatatype() const {
     return call_->originalDatatype;
@@ -627,6 +637,13 @@ struct BytewiseLosslessTraits<
   static constexpr bool value = Compressor::kBytewiseLossless;
 };
 
+template <typename Compressor, typename = void>
+struct PipelineStateTraits : std::false_type {};
+
+template <typename Compressor>
+struct PipelineStateTraits<Compressor, VoidT<decltype(Compressor::kPipelineState)>>
+    : std::integral_constant<bool, Compressor::kPipelineState> {};
+
 template <typename Compressor>
 struct PluginAdapter {
   using Config = typename ConfigTraits<Compressor>::Type;
@@ -650,13 +667,18 @@ struct PluginAdapter {
         (FusedHierarchicalSwizzleTraits<Compressor>::value
              ? cocclCompressorCapabilityFusedHierarchicalSwizzle : 0) |
         (BytewiseLosslessTraits<Compressor>::value
-             ? cocclCompressorCapabilityBytewiseLossless : 0);
+             ? cocclCompressorCapabilityBytewiseLossless : 0) |
+        (PipelineStateTraits<Compressor>::value
+             ? cocclCompressorCapabilityPipelineState : 0);
   }
 
   static Status execute(cocclCompressorCall* call) {
+    constexpr size_t contextSize = PipelineStateTraits<Compressor>::value
+        ? sizeof(cocclCompressorExecutionContext)
+        : COCCL_COMPRESSOR_EXECUTION_BASE_SIZE;
     if (call == nullptr || call->structSize != sizeof(*call) ||
         call->execution == nullptr ||
-        call->execution->structSize != sizeof(*call->execution)) {
+        call->execution->structSize < contextSize) {
       return ncclInvalidArgument;
     }
     const cocclCompressorHostApi* hostApi = call->execution->hostApi;

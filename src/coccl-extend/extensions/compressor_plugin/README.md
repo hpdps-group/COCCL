@@ -204,7 +204,9 @@ fused reductions and persistent state.
 
 - **SDP4Bit:** `groupCount`, `quantBits = 4|8`,
   `quantType = "Symmetric"|"Asymmetric"`, `hadamard`, and `subAdd`.
-  `pipelineSize` controls subAdd state slots, not COCCL pipeline depth.
+  Pipeline execution assigns subAdd history slots from the actual slices,
+  including automatic depth. `pipelineSize` only controls standalone codec
+  calls outside the pipeline; it does not select COCCL depth.
 - **TACO:** `fp8Format = "E4M3"|"E5M2"`, `saturate`,
   `groupSize = 32|64|128|256|512`, `targetRange`, `lambda`, and optional
   `fp8MaxValue`.

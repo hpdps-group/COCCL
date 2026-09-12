@@ -6,15 +6,17 @@
 
 ncclResult_t ncclCompress(
     void* compressor, const cocclCompressorView& input,
-    cocclCompressorView* output, int rank, cudaStream_t stream) {
+    cocclCompressorView* output, int rank, cudaStream_t stream,
+    const cocclCompressorScope* scope) {
   return cocclExecuteCompressor(
       compressor, compressor, cocclCompressorOperationCompress, input,
-      output, rank, 0, input.datatype, input.elements, stream);
+      output, rank, 0, input.datatype, input.elements, stream, scope);
 }
 
 ncclResult_t ncclDecompress(
     void* compressor, const cocclCompressorView& input,
-    cocclCompressorView* output, cudaStream_t stream) {
+    cocclCompressorView* output, cudaStream_t stream,
+    const cocclCompressorScope* scope) {
   if (input.datatype == COCCL_COMPRESSOR_RAW_PASSTHROUGH) {
     if (input.bytes > output->capacityBytes) return ncclInvalidUsage;
     CUDACHECK(cudaMemcpyAsync(output->data, input.data, input.bytes,
@@ -24,7 +26,7 @@ ncclResult_t ncclDecompress(
   }
   return cocclExecuteCompressor(
       compressor, compressor, cocclCompressorOperationDecompress, input,
-      output, -1, 0, output->datatype, output->elements, stream);
+      output, -1, 0, output->datatype, output->elements, stream, scope);
 }
 
 ncclResult_t ncclDecompressReduce(

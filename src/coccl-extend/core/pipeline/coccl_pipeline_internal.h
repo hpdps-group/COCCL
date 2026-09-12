@@ -4,6 +4,7 @@
 #include <stdint.h>
 
 #include "core/communication/coccl_frame_exchange.h"
+#include "core/compression/coccl_compressor_runtime.h"
 #include "core/pipeline/coccl_pipeline.h"
 
 constexpr int kCocclPipelineExplicitStages = 8;
@@ -52,6 +53,7 @@ struct cocclPipelineStageContext {
   cocclPipelineOutputLayout outputLayout;
   int nNodes;
   int ranksPerNode;
+  cocclCompressorScope compressorScope;
 };
 
 enum cocclPipelineTempRole {

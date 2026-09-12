@@ -34,6 +34,7 @@ enum cocclCompressorCapability : uint64_t {
   cocclCompressorCapabilityFramed = 1ULL << 4,
   cocclCompressorCapabilityFusedHierarchicalSwizzle = 1ULL << 5,
   cocclCompressorCapabilityBytewiseLossless = 1ULL << 6,
+  cocclCompressorCapabilityPipelineState = 1ULL << 7,
 };
 
 constexpr uint64_t COCCL_COMPRESSOR_REQUIRED_CAPABILITIES =
@@ -122,7 +123,14 @@ struct cocclCompressorExecutionContext {
   int nRanks;
   int nodes;
   int devicesPerNode;
+  // Optional tail, sent only to plugins advertising PipelineState.
+  size_t pipelineSlice;
+  size_t pipelineSlices;
+  int localChunkIndex;
 };
+
+constexpr size_t COCCL_COMPRESSOR_EXECUTION_BASE_SIZE =
+    offsetof(cocclCompressorExecutionContext, pipelineSlice);
 
 struct cocclCompressorCall {
   uint32_t structSize;
