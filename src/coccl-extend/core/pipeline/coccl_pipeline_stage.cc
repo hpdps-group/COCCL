@@ -138,7 +138,7 @@ ncclResult_t runCompress(const cocclPipelineStageContext* context,
       ncclInt8, output->frameMetadata, output->frameStrideBytes};
   NCCLCHECK(ncclCompress(
       stage->compressor, input, &encoded, context->ownerComm->rank,
-      stream));
+      stream, &context->compressorScope));
   if (output->frameMetadata != nullptr &&
       !cocclCompressorSupports(
           stage->compressor, cocclCompressorCapabilityFramed)) {
@@ -226,7 +226,7 @@ ncclResult_t runDecompress(const cocclPipelineStageContext* context,
       context->rawSliceCount * edge->logicalChunks,
       edge->logicalChunks, context->rawDatatype, nullptr, 0};
   NCCLCHECK(ncclDecompress(
-      edge->compressor, input, &decoded, stream));
+      edge->compressor, input, &decoded, stream, &context->compressorScope));
   edge->ptr = decoded.data;
   edge->bytes = decoded.bytes;
   edge->totalElements = decoded.elements;

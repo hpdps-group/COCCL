@@ -8,10 +8,12 @@
 
 ncclResult_t ncclCompress(
     void* compressor, const cocclCompressorView& input,
-    cocclCompressorView* output, int rank, cudaStream_t stream);
+    cocclCompressorView* output, int rank, cudaStream_t stream,
+    const cocclCompressorScope* scope = nullptr);
 ncclResult_t ncclDecompress(
     void* compressor, const cocclCompressorView& input,
-    cocclCompressorView* output, cudaStream_t stream);
+    cocclCompressorView* output, cudaStream_t stream,
+    const cocclCompressorScope* scope = nullptr);
 ncclResult_t ncclDecompressReduce(
     void* compressor, ncclComm_t ownerComm,
     const cocclCompressorView& input, cocclCompressorView* output,

@@ -4,6 +4,7 @@
 #include "core/pipeline/coccl_pipeline_internal.h"
 #include "core/memory/coccl_buffer_management.h"
 #include "checks.h"
+#include "comm.h"
 
 namespace cocclPipelineInternal {
 
@@ -66,6 +67,15 @@ inline cocclPipelineStageContext stageContextForSlice(
   cocclPipelineStageContext stageContext = context.stageContext;
   stageContext.rawSliceCount = context.slices[slice].elementCount;
   stageContext.rawSliceBytes = context.slices[slice].bytes;
+  int localChunkIndex = context.spec->ownerComm->rank;
+  if (stageContext.outputLayout == cocclPipelineOutputHierarchicalAllGather) {
+    localChunkIndex = (localChunkIndex % stageContext.ranksPerNode) *
+        stageContext.nNodes + localChunkIndex / stageContext.ranksPerNode;
+  }
+  stageContext.compressorScope = {
+      context.spec->ownerComm,
+      (int)stageContext.outputLayout, (size_t)slice, (size_t)context.depth,
+      localChunkIndex};
   return stageContext;
 }
 

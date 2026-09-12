@@ -4,6 +4,7 @@
 #include <stdint.h>
 
 #include "core/communication/coccl_frame_exchange.h"
+#include "core/compression/coccl_compressor_runtime.h"
 #include "core/pipeline/coccl_pipeline.h"
 
 constexpr int kCocclPipelineExplicitStages = 8;
@@ -65,6 +66,7 @@ struct cocclPipelineStageContext {
   void* registeredBase;
   cocclPipelineRmaWindow rmaWindows[kCocclPipelineExplicitStages];
   int rmaWindowCount;
+  cocclCompressorScope compressorScope;
 };
 
 enum cocclPipelineTempRole {

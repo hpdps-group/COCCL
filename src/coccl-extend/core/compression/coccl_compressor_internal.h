@@ -8,6 +8,7 @@
 #include <memory>
 #include <mutex>
 #include <string>
+#include <tuple>
 #include <vector>
 
 namespace cocclCompressorInternal {
@@ -22,9 +23,17 @@ struct StateEntry {
   cocclCompressorDestroyStateFn destroy = nullptr;
 };
 
-struct DeviceResources {
+struct StatefulResources {
   std::map<size_t, PersistentBuffer> persistent;
   std::map<const void*, StateEntry> states;
+  std::vector<cudaEvent_t> historyReady;
+  size_t activeSlices = 0;
+};
+
+using StateScopeKey = std::tuple<ncclComm_t, int>;
+
+struct DeviceResources {
+  std::map<StateScopeKey, StatefulResources> scopes;
   size_t scratchPeakBytes = 0;
 };
 

@@ -174,7 +174,7 @@ nm -D build/obj/coccl-extend/compressor_plugin/libcompress/libmycodec.so \
 
 ## 内置插件参数
 
-- **SDP4Bit：** `groupCount`、`quantBits = 4|8`、`quantType = "Symmetric"|"Asymmetric"`、`hadamard` 和 `subAdd`。`pipelineSize` 控制 subAdd 状态槽位，而不是 COCCL pipeline depth。
+- **SDP4Bit：** `groupCount`、`quantBits = 4|8`、`quantType = "Symmetric"|"Asymmetric"`、`hadamard` 和 `subAdd`。Pipeline 根据实际 slice 自动分配 subAdd 历史槽，也支持自动 depth。`pipelineSize` 仅用于 pipeline 之外的独立 codec 调用，不控制 COCCL depth。
 - **TACO：** `fp8Format = "E4M3"|"E5M2"`、`saturate`、`groupSize = 32|64|128|256|512`、`targetRange`、`lambda` 和可选的 `fp8MaxValue`。
 - **ZFP：** `rate = 1..64` bits/value。
 - **dietGPU：** `probBits = 9|10|11`。FP16、BF16 和 FP32 使用 dietGPU 浮点编码，Int8、Int32 和 Int64 使用逐字节 ANS；两条路径均采用分帧无损编码。

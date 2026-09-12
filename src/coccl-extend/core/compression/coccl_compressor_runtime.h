@@ -11,6 +11,16 @@ struct cocclResolvedCompressorPolicy {
   size_t thresholdBytes = 0;
 };
 
+// History belongs to the communicator and decoded layout.
+// The slice identity is supplied by the planner, not inferred by the plugin.
+struct cocclCompressorScope {
+  ncclComm_t comm = nullptr;
+  int layout = 0;
+  size_t slice = 0;
+  size_t slices = 0;
+  int localChunkIndex = 0;
+};
+
 bool cocclCompressionEnabled();
 ncclResult_t cocclResolveCompressorPolicy(
     cocclTrainingRole role, cocclPolicyKey key,
@@ -34,7 +44,8 @@ ncclResult_t cocclExecuteCompressor(
     cocclCompressorOperation operation,
     const cocclCompressorView& input, cocclCompressorView* output, int rank,
     size_t reduceChunks, ncclDataType_t originalDatatype,
-    size_t originalElements, cudaStream_t stream);
+    size_t originalElements, cudaStream_t stream,
+    const cocclCompressorScope* scope = nullptr);
 
 ncclResult_t cocclCompressorRuntimeInit(ncclComm_t comm);
 ncclResult_t cocclCompressorRuntimeDestroy(ncclComm_t comm);

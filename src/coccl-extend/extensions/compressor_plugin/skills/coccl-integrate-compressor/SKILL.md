@@ -47,6 +47,14 @@ the plugin's build system; add only the adapter and build bridge COCCL needs.
 - Use `Context::scratch()` only for callback-local workspace,
   `Context::persistent()` only for device memory retained across calls, and
   `Context::instance()` only when the selected algorithm path needs Host state.
+- Stateful pipeline codecs may declare `kPipelineState = true`. Use
+  `Context::pipelineSlice()` / `pipelineSlices()` for history slots and
+  `localChunkIndex()` for the sender's position in decoded rank order.
+  COCCL isolates this state by communicator and output layout,
+  and orders each history slot's reads after its preceding decoder write.
+  Do not infer the slice count from configured depth or assume hierarchical
+  decoder output is already in user rank order. The optional execution tail
+  preserves the v9 prefix supplied to existing plugins without this capability.
 - Request lazy resources inside the branch that consumes them, never during
   plugin loading or configuration.
 - Preserve logical chunk count and equal per-chunk layout. A plugin receives

@@ -73,12 +73,13 @@ ncclResult_t ncclReduceScatterConfig(
 
 ncclResult_t ncclCompress(
     void*, const cocclCompressorView&, cocclCompressorView*, int,
-    cudaStream_t) {
+    cudaStream_t, const cocclCompressorScope*) {
   return ncclInternalError;
 }
 
 ncclResult_t ncclDecompress(
-    void*, const cocclCompressorView&, cocclCompressorView*, cudaStream_t) {
+    void*, const cocclCompressorView&, cocclCompressorView*, cudaStream_t,
+    const cocclCompressorScope*) {
   return ncclInternalError;
 }
 
