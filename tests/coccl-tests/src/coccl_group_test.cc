@@ -61,10 +61,10 @@ int main() {
   EXPECT(cocclGroupEnqueue(&first) == ncclSuccess);
   EXPECT(cocclGroupEnqueue(&second) == ncclSuccess);
   EXPECT(cocclGroupPrepareEnd(true) == ncclSuccess);
-  EXPECT(!cocclGroupHasPending() && replayed.size() == 2);
-  EXPECT(replayed[0] == cocclOperation::AllReduce);
-  EXPECT(replayed[1] == cocclOperation::AllToAll);
-  EXPECT(cocclGroupDrain() == ncclSuccess && executed.empty());
+  EXPECT(cocclGroupHasPending() && replayed.empty());
+  EXPECT(cocclGroupDrain() == ncclSuccess && executed.size() == 2);
+  EXPECT(executed[0] == cocclOperation::AllReduce);
+  EXPECT(executed[1] == cocclOperation::AllToAll);
 
   EXPECT(cocclGroupEnqueue(&first) == ncclSuccess);
   cocclGroupAbort();

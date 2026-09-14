@@ -53,10 +53,16 @@ void* sendRecvCompressor(const cocclPreparedCall& prepared) {
 ncclResult_t cocclExecuteSendRecvBatch(
     const cocclPreparedCall* calls, size_t count) {
   std::vector<std::array<cocclPipelineStage, 2>> stages(count);
-  std::vector<cocclPipelineSpec> specs(count);
+  std::vector<cocclPipelineSpec> specs;
+  std::vector<cocclInfo> nativeCalls;
+  specs.reserve(count);
   for (size_t i = 0; i < count; ++i) {
     const cocclInfo& info = calls[i].info;
     void* compressor = sendRecvCompressor(calls[i]);
+    if (compressor == nullptr) {
+      nativeCalls.push_back(info);
+      continue;
+    }
     const cocclPipelineStage exchange = cocclPipelineSendRecv(
         info.comm, info.peer,
         info.func == ncclFuncSend ? cocclPipelineSend : cocclPipelineRecv,
@@ -68,14 +74,15 @@ ncclResult_t cocclExecuteSendRecvBatch(
     }
     const void* buffer = info.func == ncclFuncSend
         ? info.sendbuff : info.recvbuff;
-    specs[i] = {
+    specs.push_back({
         info.func == ncclFuncSend ? "send" : "recv",
         buffer, const_cast<void*>(buffer), info.count, 1, info.datatype,
         info.comm, info.stream, stages[i].data(), 2,
         cocclPipelineInPlaceSameBuffer,
-        cocclPipelineInputContiguous, 0};
+        cocclPipelineInputContiguous, 0});
   }
-  return cocclRunPipelineBatch(specs.data(), specs.size());
+  return cocclRunPipelineBatch(specs.data(), specs.size(),
+                               nativeCalls.data(), nativeCalls.size());
 }
 
 NCCL_API(ncclResult_t, cocclSendComp, const void* sendbuff, size_t count,

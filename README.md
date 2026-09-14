@@ -210,9 +210,14 @@ compressed-path invocation, or manual algorithm selection:
   `cocclAllReduceCompTripleShot`;
 - `cocclSendComp` and `cocclRecvDecomp`.
 
-Compressed Send/Recv processes one complete message serially. Grouped calls
-batch their metadata and payload exchanges so pipeline-parallel traffic can
-use the same fixed or framed protocol without creating per-direction streams.
+Compressed Send/Recv uses the shared slice pipeline with fixed or framed codecs.
+Grouped calls may mix compressed and native messages; a native call does not
+force the other calls onto native NCCL. Standard NCCL calls at or below the
+compression threshold use native NCCL without compression metadata.
+
+Keep matching messages in the corresponding group batch at both endpoints.
+Splitting one endpoint's batch across multiple groups at the other endpoint is
+not supported.
 
 ### NCCL Backend Policy
 

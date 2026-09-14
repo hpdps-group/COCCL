@@ -213,6 +213,10 @@ ncclResult_t cocclGroupEnqueue(const cocclPreparedCall* prepared) {
   return ncclSuccess;
 }
 
+bool cocclGroupHasPending() {
+  return !grouped.empty();
+}
+
 ncclResult_t cocclGroupEnqueueNative(const cocclInfo* info) {
   cocclPreparedCall pending;
   pending.info = *info;
@@ -345,6 +349,19 @@ int main() {
   EXPECT(cocclEnqueueExplicitCall(&info, cocclAlgorithmNone) == ncclSuccess);
   EXPECT(policyQueries == 3 && nativeCalls == 1 && compressedCalls == 0);
 
+  // Explicit unsupported calls must not overtake earlier grouped messages.
+  for (bool p2p : {false, true}) {
+    reset();
+    info = p2p ? sendInfo(&comm, 1) : allToAllInfo(&comm);
+    info.datatype = ncclInt32;
+    ncclGroupDepth = 1;
+    EXPECT(cocclEnqueueExplicitCall(&info, cocclAlgorithmNone) == ncclSuccess);
+    ncclGroupDepth = 0;
+    EXPECT(nativeCalls == 0 && compressedCalls == 0 && grouped.size() == 1);
+    EXPECT(!grouped[0].compressors.anyEnabled());
+    EXPECT(grouped[0].info.operation == info.operation);
+  }
+
   reset();
   bytewiseLossless = true;
   info = allToAllInfo(&comm);
@@ -412,6 +429,66 @@ int main() {
   ncclGroupDepth = 0;
   EXPECT(enqueued && grouped.size() == 1 &&
          !grouped[0].compressors.anyEnabled());
+
+  // Native collectives only queue when prior COCCL work requires ordering.
+  for (cocclOperation operation : {cocclOperation::AllGather,
+       cocclOperation::ReduceScatter, cocclOperation::AllReduce,
+       cocclOperation::AllToAll}) {
+    reset();
+    info = allToAllInfo(&comm);
+    info.operation = operation;
+    thresholdBytes = std::numeric_limits<size_t>::max();
+    ncclGroupDepth = 1;
+    EXPECT(cocclEnqueueCheck(&info, &enqueued) == ncclSuccess);
+    EXPECT(!enqueued && grouped.empty());
+    thresholdBytes = 0;
+    EXPECT(cocclEnqueueCheck(&info, &enqueued) == ncclSuccess && enqueued);
+    EXPECT(grouped.size() == 1 && grouped[0].compressors.anyEnabled());
+    thresholdBytes = std::numeric_limits<size_t>::max();
+    EXPECT(cocclEnqueueCheck(&info, &enqueued) == ncclSuccess && enqueued);
+    EXPECT(grouped.size() == 2 && !grouped[1].compressors.anyEnabled());
+    ncclGroupDepth = 0;
+  }
+
+  // Matching endpoints must not depend on the other calls in either group.
+  for (ncclDataType_t dtype : {ncclFloat32, ncclFloat16, ncclBfloat16}) {
+    for (int delta : {-16, 0, 16}) {
+      reset();
+      thresholdBytes = 4096;
+      send = sendInfo(&comm, 1);
+      send.datatype = dtype;
+      send.count = (4096 + delta) / ncclTypeSize(dtype);
+      cocclInfo recv = send;
+      recv.func = ncclFuncRecv;
+      recv.peer = 0;
+      recv.sendbuff = nullptr;
+      recv.recvbuff = reinterpret_cast<void*>(0x4000);
+      ncclGroupDepth = 1;
+      comm.rank = 0;
+      EXPECT(cocclEnqueueCheck(&send, &enqueued) == ncclSuccess && enqueued);
+      comm.rank = 1;
+      EXPECT(cocclEnqueueCheck(&recv, &enqueued) == ncclSuccess && enqueued);
+      ncclGroupDepth = 0;
+      comm.rank = 0;
+      EXPECT(grouped.size() == 2);
+      EXPECT(grouped[0].compressors.anyEnabled() == (delta > 0));
+      EXPECT(grouped[1].compressors.anyEnabled() == (delta > 0));
+      EXPECT(delta > 0 || autotuneModelQueries == 0);
+      EXPECT(compressedCalls == 0 && nativeCalls == 0);
+    }
+  }
+
+  reset();
+  thresholdBytes = 0;
+  send = sendInfo(&comm, 1);
+  send.count = 0;
+  ncclGroupDepth = 1;
+  EXPECT(cocclEnqueueCheck(&send, &enqueued) == ncclSuccess && enqueued);
+  send.count = 16;
+  EXPECT(cocclEnqueueCheck(&send, &enqueued) == ncclSuccess && enqueued);
+  ncclGroupDepth = 0;
+  EXPECT(grouped.size() == 2 && !grouped[0].compressors.anyEnabled() &&
+         grouped[1].compressors.anyEnabled());
 
   rankToNode[2] = 1;
   comm.nNodes = 2;

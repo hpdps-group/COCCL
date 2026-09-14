@@ -11,6 +11,7 @@ namespace {
 std::vector<int> replayed;
 std::vector<int> executed;
 std::vector<int> batched;
+std::vector<bool> batchCompressed;
 bool detached = false;
 
 void fail(const char* message) {
@@ -39,6 +40,7 @@ void reset() {
   replayed.clear();
   executed.clear();
   batched.clear();
+  batchCompressed.clear();
   detached = false;
 }
 
@@ -67,8 +69,10 @@ void testIneligibleFallback() {
   cocclGroupEnqueue(&send);
   cocclGroupEnqueueNative(&recv);
   if (cocclGroupPrepareEnd(false) != ncclSuccess ||
-      !equal(replayed, {3, 4}) || cocclGroupHasPending()) {
-    fail("ineligible Send/Recv did not replay the complete group");
+      !replayed.empty() || !cocclGroupHasPending() ||
+      cocclGroupDrain() != ncclSuccess || !equal(batched, {3, 4}) ||
+      batchCompressed != std::vector<bool>({true, false})) {
+    fail("ineligible Send/Recv changed another message's protocol");
   }
 }
 
@@ -79,16 +83,32 @@ void testMixedAndNativeFallback() {
   cocclGroupEnqueue(&send);
   cocclGroupEnqueue(&collective);
   if (cocclGroupPrepareEnd(false) != ncclSuccess ||
-      !equal(replayed, {5, 6})) {
-    fail("mixed P2P/collective group was not replayed natively");
+      !replayed.empty() || cocclGroupDrain() != ncclSuccess ||
+      !equal(batched, {5}) || !equal(executed, {6})) {
+    fail("mixed P2P/collective group changed per-call routing");
   }
 
   reset();
   collective = compressed(cocclOperation::AllGather, 7);
   cocclGroupEnqueue(&collective);
   if (cocclGroupPrepareEnd(true) != ncclSuccess ||
-      !equal(replayed, {7})) {
-    fail("native pending work did not force replay");
+      !replayed.empty() || cocclGroupDrain() != ncclSuccess ||
+      !equal(executed, {7})) {
+    fail("native pending work changed collective routing");
+  }
+}
+
+void testEntirelyNative() {
+  reset();
+  cocclInfo first = native(cocclOperation::SendRecv, 9);
+  cocclInfo second = native(cocclOperation::AllReduce, 10);
+  cocclGroupEnqueueNative(&first);
+  cocclGroupEnqueueNative(&second);
+  if (cocclGroupPrepareEnd(false) != ncclSuccess ||
+      cocclGroupHasPending() || !equal(replayed, {9, 10}) ||
+      cocclGroupDrain() != ncclSuccess || !batched.empty() ||
+      !executed.empty()) {
+    fail("entirely native group entered a COCCL executor");
   }
 }
 
@@ -99,6 +119,26 @@ void testCollectiveDrain() {
   if (cocclGroupPrepareEnd(false) != ncclSuccess ||
       cocclGroupDrain() != ncclSuccess || !equal(executed, {8})) {
     fail("collective-only group did not retain deferred execution");
+  }
+}
+
+void testInterleavedDrain() {
+  reset();
+  auto gather = compressed(cocclOperation::AllGather, 11);
+  auto send = compressed(cocclOperation::SendRecv, 12);
+  auto reduce = compressed(cocclOperation::AllReduce, 13);
+  auto recv = native(cocclOperation::SendRecv, 14);
+  auto secondSend = compressed(cocclOperation::SendRecv, 15);
+  cocclGroupEnqueue(&gather);
+  cocclGroupEnqueue(&send);
+  cocclGroupEnqueue(&reduce);
+  cocclGroupEnqueueNative(&recv);
+  cocclGroupEnqueue(&secondSend);
+  if (cocclGroupPrepareEnd(false) != ncclSuccess ||
+      cocclGroupDrain() != ncclSuccess || !equal(executed, {11, 13}) ||
+      !equal(batched, {12, 14, 15}) || !replayed.empty() || !detached ||
+      batchCompressed != std::vector<bool>({true, false, true})) {
+    fail("interleaved group compaction changed operation order or routing");
   }
 }
 
@@ -117,7 +157,10 @@ ncclResult_t cocclExecutePreparedCall(const cocclPreparedCall* call) {
 ncclResult_t cocclExecuteSendRecvBatch(
     const cocclPreparedCall* calls, size_t count) {
   detached = !cocclGroupHasPending();
-  for (size_t i = 0; i < count; ++i) batched.push_back(calls[i].info.peer);
+  for (size_t i = 0; i < count; ++i) {
+    batched.push_back(calls[i].info.peer);
+    batchCompressed.push_back(calls[i].compressors.anyEnabled());
+  }
   return ncclSuccess;
 }
 
@@ -126,6 +169,8 @@ int main() {
   testIneligibleFallback();
   testMixedAndNativeFallback();
   testCollectiveDrain();
+  testEntirelyNative();
+  testInterleavedDrain();
   std::printf("COCCL group batch tests passed\n");
   return 0;
 }

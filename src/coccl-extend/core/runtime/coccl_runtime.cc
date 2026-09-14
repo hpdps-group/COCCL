@@ -1,4 +1,5 @@
 #include "runtime/coccl_runtime.h"
+#include "runtime/coccl_group.h"
 #include "core/backend/coccl_backend_collectives.h"
 
 #include "core/tuning/coccl_autotune.h"
@@ -176,9 +177,10 @@ bool callSupported(const cocclInfo& info,
   return shapeSupported(info, descriptor);
 }
 
-ncclResult_t routeNativeGroupedSendRecv(
+ncclResult_t routeNativeGroupedCall(
     const cocclInfo& info, bool* isEnqueued) {
-  if (ncclGroupDepth == 0 || info.operation != cocclOperation::SendRecv) {
+  if (ncclGroupDepth == 0 ||
+      (info.operation != cocclOperation::SendRecv && !cocclGroupHasPending())) {
     return ncclSuccess;
   }
   NCCLCHECK(cocclGroupEnqueueNative(&info));
@@ -202,31 +204,31 @@ ncclResult_t cocclEnqueueCheck(const cocclInfo* info, bool* isEnqueued) {
   const cocclOperationDescriptor* descriptor =
       cocclGetOperationDescriptor(info->operation);
   if (descriptor == nullptr || !callSupported(*info, *descriptor)) {
-    return routeNativeGroupedSendRecv(*info, isEnqueued);
+    return routeNativeGroupedCall(*info, isEnqueued);
   }
 
   size_t bytes = 0;
   if (!totalBytes(*info, *descriptor, &bytes)) {
-    return routeNativeGroupedSendRecv(*info, isEnqueued);
+    return routeNativeGroupedCall(*info, isEnqueued);
   }
 
   cocclPreparedCall prepared;
   size_t thresholdBytes = 0;
   if (prepareCall(*info, descriptor, &prepared, &thresholdBytes) != ncclSuccess) {
-    return routeNativeGroupedSendRecv(*info, isEnqueued);
+    return routeNativeGroupedCall(*info, isEnqueued);
   }
   if (bytes <= thresholdBytes) {
-    return routeNativeGroupedSendRecv(*info, isEnqueued);
+    return routeNativeGroupedCall(*info, isEnqueued);
   }
   ensureAutotuneModels(info->comm);
   if (tunableCollective(info->operation)) {
     if (ncclGroupDepth == 0 &&
         cocclSelectAlgorithm(&prepared) != ncclSuccess) {
-      return routeNativeGroupedSendRecv(*info, isEnqueued);
+      return routeNativeGroupedCall(*info, isEnqueued);
     }
   } else if (!cocclPreparedAlgorithmSupported(
                  &prepared, cocclAlgorithmNone)) {
-    return routeNativeGroupedSendRecv(*info, isEnqueued);
+    return routeNativeGroupedCall(*info, isEnqueued);
   }
 
   NCCLCHECK(cocclEnqueuePreparedCall(&prepared));
@@ -263,7 +265,9 @@ ncclResult_t cocclEnqueueExplicitCall(
   }
   if (!deferSelection && !cocclPreparedAlgorithmSupported(
           &prepared, prepared.algorithm)) {
-    return cocclReplayNativeCall(*info);
+    return ncclGroupDepth > 0
+        ? cocclGroupEnqueueNative(info)
+        : cocclReplayNativeCall(*info);
   }
   return cocclEnqueuePreparedCall(&prepared);
 }
