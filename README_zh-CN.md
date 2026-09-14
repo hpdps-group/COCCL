@@ -156,7 +156,12 @@ build/bin/coccl-config-check path/to/config.toml
   `cocclAllReduceCompTripleShot`；
 - `cocclSendComp` 和 `cocclRecvDecomp`。
 
-压缩 Send/Recv 以完整消息为单位串行执行。Grouped 调用会批量提交 metadata 和 payload 交换，使流水线并行流量可以共用固定布局或 framed 协议，而不创建按方向区分的额外 stream。
+压缩 Send/Recv 使用共享的 slice pipeline，支持固定布局和 framed 压缩器。
+同一 group 可以混合压缩和原生消息，单个原生调用不会让其他调用一并回退。
+普通 NCCL 接口中，不超过压缩阈值的消息直接走原生 NCCL，不发送压缩 metadata。
+
+两端应把匹配消息放在对应的同一批 group 中。
+不支持将一端的整批消息在另一端拆成多个 group。
 
 ### Normal 模式
 

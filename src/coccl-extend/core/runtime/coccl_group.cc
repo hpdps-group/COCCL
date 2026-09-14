@@ -29,18 +29,12 @@ ncclResult_t cocclGroupEnqueueNative(const cocclInfo* info) {
   return ncclSuccess;
 }
 
-ncclResult_t cocclGroupPrepareEnd(bool nativePending) {
-  bool hasSendRecv = false;
-  bool hasCollective = false;
-  bool replayNative = nativePending;
+ncclResult_t cocclGroupPrepareEnd(bool /*nativePending*/) {
   for (const cocclPreparedCall& pending : pendingCalls) {
-    hasSendRecv |= pending.info.operation == cocclOperation::SendRecv;
-    hasCollective |= pending.info.operation != cocclOperation::SendRecv;
-    replayNative |= !pending.compressors.anyEnabled();
+    if (pending.compressors.anyEnabled()) return ncclSuccess;
   }
-  replayNative |= hasSendRecv && hasCollective;
-  if (!replayNative) return ncclSuccess;
 
+  // An entirely native queue needs neither control messages nor GPU staging.
   std::vector<cocclPreparedCall> batch;
   batch.swap(pendingCalls);
   for (const cocclPreparedCall& pending : batch) {
@@ -56,14 +50,22 @@ ncclResult_t cocclGroupDrain() {
   // Internal NCCL groups opened by an executor must not see this batch.
   std::vector<cocclPreparedCall> batch;
   batch.swap(pendingCalls);
-  if (batch.front().info.operation == cocclOperation::SendRecv) {
-    return cocclExecuteSendRecvBatch(batch.data(), batch.size());
-  }
-  for (const cocclPreparedCall& pending : batch) {
-    const ncclResult_t result = cocclExecutePreparedCall(&pending);
+  size_t p2pCount = 0;
+  for (size_t i = 0; i < batch.size(); ++i) {
+    const cocclPreparedCall& pending = batch[i];
+    if (pending.info.operation == cocclOperation::SendRecv) {
+      // Keep P2P order in the detached batch, without a second allocation.
+      if (p2pCount != i) batch[p2pCount] = pending;
+      ++p2pCount;
+      continue;
+    }
+    const ncclResult_t result = pending.compressors.anyEnabled()
+        ? cocclExecutePreparedCall(&pending)
+        : cocclReplayNativeCall(pending.info);
     if (result != ncclSuccess) return result;
   }
-  return ncclSuccess;
+  return p2pCount == 0 ? ncclSuccess
+      : cocclExecuteSendRecvBatch(batch.data(), p2pCount);
 }
 
 void cocclGroupAbort() {

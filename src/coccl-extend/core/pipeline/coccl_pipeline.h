@@ -126,8 +126,10 @@ struct cocclPipelineSpec {
 };
 
 ncclResult_t cocclRunPipeline(const cocclPipelineSpec* spec);
+struct cocclInfo;
 ncclResult_t cocclRunPipelineBatch(
-    const cocclPipelineSpec* specs, size_t count);
+    const cocclPipelineSpec* specs, size_t count,
+    const cocclInfo* nativeCalls, size_t nativeCount);
 ncclResult_t cocclRunPipelineSerial(const cocclPipelineSpec* spec);
 ncclResult_t cocclPipelineCommDestroy(ncclComm_t comm);
 

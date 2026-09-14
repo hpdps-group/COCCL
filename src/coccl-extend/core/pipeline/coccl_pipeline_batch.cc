@@ -3,6 +3,7 @@
 #include "core/config/coccl_config.h"
 #include "core/tuning/coccl_autotune_pipeline.h"
 #include "core/compression/compress.h"
+#include "runtime/coccl_runtime.h"
 #include "comm.h"
 #include "debug.h"
 
@@ -39,7 +40,8 @@ int sendRecvStage(const cocclPipelineSpec* spec) {
 
 ncclResult_t exchangeBatchPlans(
     const cocclPipelineSpec* specs, size_t count,
-    std::vector<cocclPipelineBatchPlan>* plans) {
+    std::vector<cocclPipelineBatchPlan>* plans,
+    const cocclInfo* nativeCalls, size_t nativeCount) {
   ncclResult_t result = ncclSuccess;
   std::vector<cocclBufferHandle> buffers(count);
   std::vector<cocclFrameExchange> exchanges(count);
@@ -71,9 +73,22 @@ ncclResult_t exchangeBatchPlans(
         stage.direction == cocclPipelineRecv ? sizeof((*plans)[i]) : 0,
         sizeof((*plans)[i]), stage.comm, specs[i].stream};
   }
-  NCCLCHECKGOTO(cocclCommitFrameExchange(
-      exchanges.data(), exchanges.size()), result,
-      cleanup);
+  if (nativeCount == 0) {
+    NCCLCHECKGOTO(cocclCommitFrameExchange(
+        exchanges.data(), exchanges.size()), result, cleanup);
+  } else {
+    NCCLCHECKGOTO(ncclGroupStart(), result, cleanup);
+    for (size_t i = 0; i < nativeCount; ++i) {
+      result = cocclReplayNativeCall(nativeCalls[i]);
+      if (result != ncclSuccess) break;
+    }
+    if (result == ncclSuccess && !exchanges.empty()) {
+      result = cocclCommitFrameExchange(exchanges.data(), exchanges.size());
+    }
+    const ncclResult_t endResult = ncclGroupEnd();
+    if (result == ncclSuccess) result = endResult;
+    if (result != ncclSuccess) goto cleanup;
+  }
   for (size_t i = 0; i < count; ++i) {
     const cocclPipelineStage& stage =
         specs[i].stages[sendRecvStage(specs + i)];
@@ -304,13 +319,16 @@ ncclResult_t runPipelineBatch(
 }  // namespace
 
 ncclResult_t cocclRunPipelineBatch(
-    const cocclPipelineSpec* specs, size_t count) {
-  if (specs == nullptr || count == 0) return ncclInvalidArgument;
-  CUDACHECK(cudaSetDevice(specs[0].ownerComm->cudaDev));
+    const cocclPipelineSpec* specs, size_t count,
+    const cocclInfo* nativeCalls, size_t nativeCount) {
+  if (count == 0 && nativeCount == 0) return ncclInvalidArgument;
+  CUDACHECK(cudaSetDevice(count != 0 ? specs[0].ownerComm->cudaDev
+                                   : nativeCalls[0].comm->cudaDev));
   std::vector<cocclPipelineBatchState> states(count);
   std::vector<cocclPipelineBatchPlan> plans(count);
   ncclResult_t result = ncclSuccess;
-  NCCLCHECK(exchangeBatchPlans(specs, count, &plans));
+  NCCLCHECK(exchangeBatchPlans(specs, count, &plans, nativeCalls, nativeCount));
+  if (count == 0) return ncclSuccess;
   size_t prepared = 0;
   for (; prepared < count; ++prepared) {
     cocclPipelineBatchState& state = states[prepared];
