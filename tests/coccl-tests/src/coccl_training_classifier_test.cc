@@ -137,6 +137,7 @@ ncclResult_t cocclSelectAlgorithm(cocclPreparedCall* prepared) {
 ncclResult_t cocclGroupEnqueue(const cocclPreparedCall*) {
   return ncclInternalError;
 }
+bool cocclGroupHasPending() { return false; }
 ncclResult_t cocclGroupEnqueueNative(const cocclInfo*) {
   return ncclInternalError;
 }
@@ -342,6 +343,27 @@ static int testIterationDetection() {
           flatTpSequenceParallel, 5, &detected)) {
     fprintf(stderr, "iteration detector accepted flat TP RS/AG traffic\n");
     return 1;
+  }
+  // Local RS/AG activation must not depend on a rank's timing or on whether
+  // every second versus every fourth operation has a long gap.
+  for (int timing : {0, 1, 2}) {
+    std::vector<cocclTrainingTraceEvent> local;
+    uint64_t timestamp = 0;
+    for (size_t i = 0; i < 40; ++i) {
+      auto event = flatTpSequenceParallel[i % flatTpSequenceParallel.size()];
+      const bool gap = timing == 1 ? i % 2 == 0 :
+                       timing == 2 ? i % 4 == 0 : false;
+      timestamp += gap ? 1000 : 10;
+      event.timestampNs = timestamp;
+      local.push_back(event);
+      if (local.size() < 10) continue;
+      detected.clear();
+      if (!cocclTrainingDetectIterations(local, 5, &detected, false) ||
+          detected.size() != 5 || detected[0].end-detected[0].begin != 2) {
+        fprintf(stderr, "local RS/AG activation cycle depends on rank timing\n");
+        return 1;
+      }
+    }
   }
   if (!cocclTrainingDetectIterations(flatSdp, 5, &detected) ||
       detected.size() != 5 || detected[0].end - detected[0].begin != 2) {

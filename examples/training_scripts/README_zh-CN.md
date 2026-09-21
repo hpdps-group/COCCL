@@ -72,6 +72,31 @@ TP_SIZE=2 PP_SIZE=2 TRAIN_ITERS=200 DP_OVERLAP=on \
 
 脚本不保存 checkpoint；`QWEN3_LOAD_DIR` 仅用于加载初始 Megatron Core 模型。
 
+## TACO TP 和 PP
+
+[`configs/training-taco.toml`](configs/training-taco.toml) 为 TP 的 AllGather/ReduceScatter
+和 PP 的前后向通信启用 TACO E4M3/groupSize=128，DP 不压缩。
+算法自动调优和 `depth = "auto"` 均开启。
+
+配置好上述路径后，在两个节点分别执行，只修改节点编号：
+
+```bash
+COCCL_CONFIG_FILE="$PWD/configs/training-taco.toml" \
+TP_SIZE=2 PP_SIZE=2 MICRO_BATCH_SIZE=32 GLOBAL_BATCH_SIZE=128 \
+GRAD_REDUCE_DTYPE=bf16 TRAIN_ITERS=1000 EVAL_INTERVAL=100 EVAL_ITERS=1 \
+DP_OVERLAP=off TRAIN_RUN_NAME=taco-tp-pp-mbs32 \
+bash train_qwen3_coccl.sh 2 4 0 10.0.0.1
+```
+
+- TP=4/DP=1/PP=2 时，设置 `TP_SIZE=4`，并同步修改 TOML 中的分类器并行度。
+- 仅压缩 TP 或 PP 时，复制一份 TOML，删除另一角色的策略段。
+- 原生 NCCL 对照保持训练参数一致，设置 `COCCL_ENABLE=0` 和不同的
+  `TRAIN_RUN_NAME`，在同一库中绕过压缩。
+- `GRAD_REDUCE_DTYPE=fp32|bf16` 默认 FP32，模型权重保持 BF16。
+  `TRAIN_RUN_NAME` 用于分开保存不同实验的输出与日志。
+
+这些参数对应已完成的 1000 轮 TACO 测试。压缩不保证训练加速，需要同时比较 loss 和迭代时间。
+
 ## 检查自动路由
 
 训练代码继续调用标准 NCCL API。COCCL 会分类每个 communicator，并应用匹配的 DP、TP 或 PP 策略。可以通过以下命令查看判断：

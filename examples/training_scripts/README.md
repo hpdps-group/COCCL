@@ -88,6 +88,33 @@ TP_SIZE=2 PP_SIZE=2 TRAIN_ITERS=200 DP_OVERLAP=on \
 Checkpoint saving is intentionally disabled; `QWEN3_LOAD_DIR` is used only
 to load the initial Megatron Core model checkpoint.
 
+## TACO TP And PP
+
+[`configs/training-taco.toml`](configs/training-taco.toml) enables TACO
+E4M3/groupSize=128 for TP AllGather/ReduceScatter and both PP directions.
+DP remains uncompressed. Algorithm autotuning and `depth = "auto"` are enabled.
+
+After setting the paths above, run this on both nodes, changing node rank:
+
+```bash
+COCCL_CONFIG_FILE="$PWD/configs/training-taco.toml" \
+TP_SIZE=2 PP_SIZE=2 MICRO_BATCH_SIZE=32 GLOBAL_BATCH_SIZE=128 \
+GRAD_REDUCE_DTYPE=bf16 TRAIN_ITERS=1000 EVAL_INTERVAL=100 EVAL_ITERS=1 \
+DP_OVERLAP=off TRAIN_RUN_NAME=taco-tp-pp-mbs32 \
+bash train_qwen3_coccl.sh 2 4 0 10.0.0.1
+```
+
+- For TP=4/DP=1/PP=2, set `TP_SIZE=4` and update the classifier sizes in TOML.
+- For only TP or only PP compression, remove the other role's policy sections
+  from a copy of the TOML.
+- For native NCCL, use identical training parameters with `COCCL_ENABLE=0`
+  and a different `TRAIN_RUN_NAME`. This bypasses compression in the same library.
+- `GRAD_REDUCE_DTYPE=fp32|bf16` defaults to FP32; model weights remain BF16.
+  `TRAIN_RUN_NAME` separates output and log directories for comparisons.
+
+These settings match the 1000-iteration TACO tests. Compression does not
+guarantee faster training; compare loss and iteration time against native NCCL.
+
 ## Check Automatic Routing
 
 The training code continues to call standard NCCL APIs. COCCL classifies each

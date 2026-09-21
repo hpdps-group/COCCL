@@ -56,9 +56,22 @@ bash communication_benchmarks.sh single
 Multi-node mode forwards `NCCL_SOCKET_IFNAME`, `NCCL_IB_DISABLE`,
 `NCCL_IB_HCA`, and `NCCL_LOCAL_REGISTER` when set.
 
+## TACO
+
+[`configs/taco.toml`](configs/taco.toml) uses E4M3 FP8 with groups of 128.
+TACO supports FP32 and BF16; the benchmark defaults to FP32.
+
+```bash
+COCCL_BENCH_COMPRESSORS=taco COCCL_BENCH_DATATYPE=bfloat16 \
+bash communication_benchmarks.sh single
+```
+
+Use `multi` with the host settings above for multi-node tests. The same
+datatype is used for native NCCL and compressed runs.
+
 ## Files
 
-- `configs/`: release TOML examples for SDP4Bit, ZFP, and dietGPU.
+- `configs/`: release TOML examples for SDP4Bit, ZFP, dietGPU, and TACO.
 - `build/examples/benchmark-configs/`: generated configs with the requested
   pipeline depth.
 

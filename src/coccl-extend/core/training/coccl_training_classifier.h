@@ -78,11 +78,14 @@ cocclTrainingRole cocclTrainingTopologyRole(
     ncclFunc_t operation,
     const cocclTrainingConfig& config);
 
-// Finds the longest repeated suffix with at least 90 percent token agreement.
+// Time boundaries identify training iterations in the combined trace. A
+// communicator-local trace instead uses its shortest repeated operation cycle,
+// so rank-local timing cannot change the call at which compression activates.
 bool cocclTrainingDetectIterations(
     const std::vector<cocclTrainingTraceEvent>& events,
     int targetIterations,
-    std::vector<cocclTrainingIterationRange>* iterations);
+    std::vector<cocclTrainingIterationRange>* iterations,
+    bool useTimeBoundaries = true);
 
 // Pure CPU classifier shared by runtime observation and host-only tests.
 void cocclTrainingClassifyTrace(

@@ -1,0 +1,70 @@
+[runtime]
+mode = "training"
+compression_threshold_bytes = 0
+
+[compressor_plugins]
+compressors = ["taco"]
+library_path = "../../../build/obj/coccl-extend/compressor_plugin/libcompress"
+
+[training]
+observation_iterations = 5
+
+[training.classifier]
+data_parallel_size = 2
+tensor_parallel_size = 2
+pipeline_parallel_size = 2
+dp_strategy = "sdp"
+sequence_parallel = true
+
+[pipeline]
+depth = "auto"
+
+[autotune]
+enabled = true
+profile_min_bytes = 3145728
+profile_max_bytes = 201326592
+warmup = 3
+iterations = 10
+all_gather_algorithm = "auto"
+reduce_scatter_algorithm = "auto"
+all_reduce_algorithm = "auto"
+
+[training.tp.all_gather.default]
+compressor = "taco"
+
+[training.tp.all_gather.default.config]
+fp8Format = "E4M3"
+groupSize = 128
+saturate = true
+targetRange = 448.0
+lambda = 1e-6
+
+[training.tp.reduce_scatter.default]
+compressor = "taco"
+
+[training.tp.reduce_scatter.default.config]
+fp8Format = "E4M3"
+groupSize = 128
+saturate = true
+targetRange = 448.0
+lambda = 1e-6
+
+[training.pp.sendrecv.forward.default]
+compressor = "taco"
+
+[training.pp.sendrecv.forward.default.config]
+fp8Format = "E4M3"
+groupSize = 128
+saturate = true
+targetRange = 448.0
+lambda = 1e-6
+
+[training.pp.sendrecv.backward.default]
+compressor = "taco"
+
+[training.pp.sendrecv.backward.default.config]
+fp8Format = "E4M3"
+groupSize = 128
+saturate = true
+targetRange = 448.0
+lambda = 1e-6

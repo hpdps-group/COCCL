@@ -83,7 +83,11 @@ bool tunableCollective(cocclOperation operation) {
       operation == cocclOperation::AllReduce;
 }
 
-void ensureAutotuneModels(ncclComm_t comm) {
+void ensureAutotuneModels(const cocclInfo& info) {
+  // Collective profiling uses communicator-wide bootstrap exchanges. P2P
+  // only involves matching peers and selects its slice layout locally.
+  if (info.operation == cocclOperation::SendRecv) return;
+  ncclComm_t comm = info.comm;
   const ncclResult_t result = cocclAutotuneEnsureGlobalModels(comm);
   if (result != ncclSuccess && comm->rank == 0) {
     WARN("COCCL autotune profiling failed with %d; using heuristics", result);
@@ -220,7 +224,7 @@ ncclResult_t cocclEnqueueCheck(const cocclInfo* info, bool* isEnqueued) {
   if (bytes <= thresholdBytes) {
     return routeNativeGroupedCall(*info, isEnqueued);
   }
-  ensureAutotuneModels(info->comm);
+  ensureAutotuneModels(*info);
   if (tunableCollective(info->operation)) {
     if (ncclGroupDepth == 0 &&
         cocclSelectAlgorithm(&prepared) != ncclSuccess) {
@@ -251,7 +255,7 @@ ncclResult_t cocclEnqueueExplicitCall(
   cocclPreparedCall prepared;
   size_t thresholdBytes = 0;
   NCCLCHECK(prepareCall(*info, descriptor, &prepared, &thresholdBytes));
-  ensureAutotuneModels(info->comm);
+  ensureAutotuneModels(*info);
   prepared.algorithm = algorithm;
   const bool deferSelection = ncclGroupDepth > 0 &&
       algorithm == cocclAlgorithmNone && tunableCollective(info->operation);

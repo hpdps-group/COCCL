@@ -131,7 +131,8 @@ static bool candidateHasStableAgRsRatio(
 bool cocclTrainingDetectIterations(
     const std::vector<cocclTrainingTraceEvent>& events,
     int targetIterations,
-    std::vector<cocclTrainingIterationRange>* iterations) {
+    std::vector<cocclTrainingIterationRange>* iterations,
+    bool useTimeBoundaries) {
   if (iterations == nullptr) return false;
   iterations->clear();
   if (targetIterations < 2 ||
@@ -170,6 +171,11 @@ bool cocclTrainingDetectIterations(
       }
     }
     if (!exact) continue;
+    if (!useTimeBoundaries) {
+      bestPeriod = period;
+      bestStart = start;
+      break;
+    }
     double gapScore = boundaryGapScore(events, start, period, targetIterations);
     if (gapScore > bestGapScore + 1e-9 ||
         (std::fabs(gapScore - bestGapScore) <= 1e-9 && period > bestPeriod)) {
@@ -216,6 +222,11 @@ bool cocclTrainingDetectIterations(
       double similarity = candidateSimilarity(events, start, period,
                                                targetIterations);
       if (similarity < kCycleMatchThreshold) continue;
+      if (!useTimeBoundaries) {
+        bestPeriod = period;
+        bestStart = start;
+        break;
+      }
       double gapScore = boundaryGapScore(events, start, period, targetIterations);
       if (gapScore > bestGapScore + 1e-9 ||
           (std::fabs(gapScore - bestGapScore) <= 1e-9 && period > bestPeriod)) {
@@ -227,7 +238,7 @@ bool cocclTrainingDetectIterations(
   }
 
   if (bestPeriod == 0 ||
-      (bestGapScore < kMinimumBoundaryGapScore &&
+      (useTimeBoundaries && bestGapScore < kMinimumBoundaryGapScore &&
        !candidateHasStableAgRsRatio(
            events, bestStart, bestPeriod, targetIterations))) {
     return false;
@@ -239,4 +250,3 @@ bool cocclTrainingDetectIterations(
   }
   return true;
 }
-

@@ -52,9 +52,21 @@ bash communication_benchmarks.sh single
 
 多节点模式会在已设置时转发 `NCCL_SOCKET_IFNAME`、`NCCL_IB_DISABLE`、`NCCL_IB_HCA` 和 `NCCL_LOCAL_REGISTER`。
 
+## TACO
+
+[`configs/taco.toml`](configs/taco.toml) 使用 E4M3 FP8，groupSize 为 128。
+TACO 支持 FP32 和 BF16；测试脚本默认使用 FP32。
+
+```bash
+COCCL_BENCH_COMPRESSORS=taco COCCL_BENCH_DATATYPE=bfloat16 \
+bash communication_benchmarks.sh single
+```
+
+多节点测试改用 `multi` 并设置上面的主机参数。原生 NCCL 与压缩测试使用相同的数据类型。
+
 ## 文件
 
-- `configs/`：SDP4Bit、ZFP 和 dietGPU 的发布版 TOML 示例。
+- `configs/`：SDP4Bit、ZFP、dietGPU 和 TACO 的发布版 TOML 示例。
 - `build/examples/benchmark-configs/`：按照指定 pipeline depth 生成的配置。
 
 `COCCL_ROOT` 默认指向脚本所在的仓库。生成的文件不会修改仓库中已有的示例。

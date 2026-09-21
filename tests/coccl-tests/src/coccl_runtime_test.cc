@@ -389,6 +389,32 @@ int main() {
   EXPECT(enqueued && policyQueries == 3 && compressedCalls == 1 &&
          autotuneModelQueries == 1);
 
+  // A PP endpoint must not join collective profiling, even if another role's
+  // models are not ready in this process. Both API paths use local P2P tuning.
+  for (bool explicitCall : {false, true}) {
+    for (bool groupedCall : {false, true}) {
+      for (ncclFunc_t func : {ncclFuncSend, ncclFuncRecv}) {
+        reset();
+        info = sendInfo(&comm, 1);
+        info.func = func;
+        if (func == ncclFuncRecv) {
+          info.recvbuff = const_cast<void*>(info.sendbuff);
+          info.sendbuff = nullptr;
+        }
+        ncclGroupDepth = groupedCall ? 1 : 0;
+        if (explicitCall) {
+          EXPECT(cocclEnqueueExplicitCall(&info, cocclAlgorithmNone) ==
+                 ncclSuccess);
+        } else {
+          EXPECT(cocclEnqueueCheck(&info, &enqueued) == ncclSuccess && enqueued);
+        }
+        ncclGroupDepth = 0;
+        EXPECT(autotuneModelQueries == 0);
+        EXPECT(groupedCall ? grouped.size() == 1 : compressedCalls == 1);
+      }
+    }
+  }
+
   reset();
   enableOnly(cocclCompressionScope::Inter);
   info = allToAllInfo(&comm);

@@ -171,7 +171,7 @@ static void classifyCommTraceLocked(
       !cocclTrainingIsCollective(state->events.back().operation)) return;
   std::vector<cocclTrainingIterationRange> iterations;
   if (!cocclTrainingDetectIterations(
-          state->events, targetIterations, &iterations)) return;
+          state->events, targetIterations, &iterations, false)) return;
   std::vector<cocclTrainingTraceResult> results;
   cocclTrainingClassifyTrace({state->descriptor}, state->events, iterations,
                              targetIterations, cocclGetConfig().training,

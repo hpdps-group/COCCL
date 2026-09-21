@@ -1,0 +1,57 @@
+[runtime]
+mode = "normal"
+compression_threshold_bytes = 0
+
+[compressor_plugins]
+compressors = ["taco"]
+library_path = "../../../build/obj/coccl-extend/compressor_plugin/libcompress"
+
+[normal.all_to_all.default]
+compressor = "taco"
+
+[normal.all_to_all.default.config]
+fp8Format = "E4M3"
+groupSize = 128
+saturate = true
+targetRange = 448.0
+lambda = 1e-6
+
+[normal.all_gather.default]
+compressor = "taco"
+
+[normal.all_gather.default.config]
+fp8Format = "E4M3"
+groupSize = 128
+saturate = true
+targetRange = 448.0
+lambda = 1e-6
+
+[normal.all_reduce.default]
+compressor = "taco"
+
+[normal.all_reduce.default.config]
+fp8Format = "E4M3"
+groupSize = 128
+saturate = true
+targetRange = 448.0
+lambda = 1e-6
+
+[normal.reduce_scatter.default]
+compressor = "taco"
+
+[normal.reduce_scatter.default.config]
+fp8Format = "E4M3"
+groupSize = 128
+saturate = true
+targetRange = 448.0
+lambda = 1e-6
+
+[normal.sendrecv.default]
+compressor = "taco"
+
+[normal.sendrecv.default.config]
+fp8Format = "E4M3"
+groupSize = 128
+saturate = true
+targetRange = 448.0
+lambda = 1e-6

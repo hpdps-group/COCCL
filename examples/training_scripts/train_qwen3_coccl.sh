@@ -61,12 +61,19 @@ warmup_iters=${WARMUP_ITERS:-2}
 eval_interval=${EVAL_INTERVAL:-$train_iters}
 eval_iters=${EVAL_ITERS:-10}
 dp_overlap=${DP_OVERLAP:-off}
+grad_reduce_dtype=${GRAD_REDUCE_DTYPE:-fp32}
 transformer_impl=${TRANSFORMER_IMPL:-auto}
 
 case "$dp_overlap" in
   on) overlap_args=(--overlap-grad-reduce --overlap-param-gather) ;;
   off) overlap_args=() ;;
   *) echo "DP_OVERLAP must be on or off" >&2; exit 2 ;;
+esac
+
+case "$grad_reduce_dtype" in
+  bf16) grad_reduce_args=(--grad-reduce-in-bf16) ;;
+  fp32) grad_reduce_args=() ;;
+  *) echo "GRAD_REDUCE_DTYPE must be fp32 or bf16" >&2; exit 2 ;;
 esac
 
 if [[ "$transformer_impl" == auto ]]; then
@@ -77,8 +84,9 @@ if [[ "$transformer_impl" == auto ]]; then
   fi
 fi
 
-output_dir="$TRAIN_OUTPUT_ROOT/qwen3-tp${tp_size}-pp${pp_size}-dp${dp_size}-${dp_overlap}"
-log_dir="$TRAIN_LOG_ROOT/qwen3-tp${tp_size}-pp${pp_size}-dp${dp_size}-${dp_overlap}"
+run_name=${TRAIN_RUN_NAME:-qwen3-tp${tp_size}-pp${pp_size}-dp${dp_size}-${dp_overlap}}
+output_dir="$TRAIN_OUTPUT_ROOT/$run_name"
+log_dir="$TRAIN_LOG_ROOT/$run_name"
 data_cache_dir=${QWEN3_DATA_CACHE_DIR:-$TRAIN_OUTPUT_ROOT/data-cache}
 mkdir -p "$output_dir" "$log_dir" "$data_cache_dir"
 
@@ -86,7 +94,7 @@ export NCCL_HOME="$coccl_root/build"
 export PATH="$CUDA_HOME/bin:$PATH"
 export LD_LIBRARY_PATH="$NCCL_HOME/lib:$CUDA_HOME/lib64:${LD_LIBRARY_PATH:-}"
 export LD_PRELOAD="$NCCL_HOME/lib/libnccl.so.2${LD_PRELOAD:+:$LD_PRELOAD}"
-export COCCL_ENABLE=1
+export COCCL_ENABLE=${COCCL_ENABLE:-1}
 export COCCL_CONFIG_FILE="$coccl_config"
 export NCCL_DEBUG=${NCCL_DEBUG:-WARN}
 export CUDA_DEVICE_MAX_CONNECTIONS=${CUDA_DEVICE_MAX_CONNECTIONS:-1}
@@ -134,6 +142,7 @@ train_args=(
   --bf16
   --calculate-per-token-loss
   --use-distributed-optimizer
+  "${grad_reduce_args[@]}"
   "${overlap_args[@]}"
 )
 

@@ -16,6 +16,7 @@ nodes=${NNODES:-2}
 hostfile=${HOSTFILE:-}
 warmup=${COCCL_BENCH_WARMUP:-20}
 iterations=${COCCL_BENCH_ITERATIONS:-30}
+datatype=${COCCL_BENCH_DATATYPE:-float}
 pause_seconds=${COCCL_BENCH_PAUSE_SECONDS:-2}
 collective_begin=${COCCL_BENCH_BEGIN:-1MB}
 collective_end=${COCCL_BENCH_END:-8G}
@@ -57,7 +58,7 @@ config_for() {
 run_case() {
   local title=$1 executable=$2 begin=$3 end=$4 enabled=$5 config=${6:-}
   local arguments=(
-    -b "$begin" -e "$end" -f 2 -g 1
+    -b "$begin" -e "$end" -f 2 -g 1 -d "$datatype"
     -w "$warmup" -n "$iterations" -c 0
   )
 
